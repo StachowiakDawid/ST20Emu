@@ -2,7 +2,7 @@
 #include "defines.h"
 #include "st20.h"
 #include "memory.h"
-#include "commands.h"
+#include "COMMANDS.H"
 //my includes
 #include "OMR.h"
 
@@ -340,7 +340,7 @@ int u_view (FILE *inFp, FILE *outFp) {
 	 return (BAD_PARAMETER);
   }
 
-  result = readBytes (address, 4, &value);
+  result = readBytes (address, 4, (unsigned long *) &value);
   fprintf (outFp, "Value at 0x%08x is 0x%08x\n", address, value);
 
   return (result);

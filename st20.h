@@ -51,6 +51,8 @@
 #define INVALID_CPU_WRITE		-2012
 #define INVALID_CPU_READ		-2013
 
+#ifndef CPUSTATE_STRUCT
+#define CPUSTATE_STRUCT
 typedef struct cpuState_struct {
 	long areg;
 	long breg;
@@ -61,7 +63,10 @@ typedef struct cpuState_struct {
 	/*  long wptr[MAX_WPTR];*/
 	char wptrUsed[MAX_WPTR];
 } CPUSTATE;
+#endif
 
+#ifndef WATCH_STRUCT
+#define WATCH_STRUCT
 typedef struct watch_struct {
 	char watchAreg;
 	long areg;
@@ -74,12 +79,16 @@ typedef struct watch_struct {
 	char watchNWptr;
 	int nWptr;
 } WATCH;
+#endif
 
+#ifndef INSTRENTRY_STRUCT
+#define INSTRENTRY_STRUCT
 typedef struct instrEntry_struct {
 	char  *mnemonic;
 	int   (*function)(FILE *, long);
 	char  cpucycles;		// instruction cpu cycles 
 } INSTRENTRY;
+#endif
 
 int st20Init (PARMS *, FILE *);
 int initCPUState (void);

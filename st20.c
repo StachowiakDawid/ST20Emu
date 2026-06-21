@@ -32,12 +32,15 @@
 #include "stdafx.h"
 
 #include "defines.h"
-#include "memory.h"
-#include "commands.h"
+#include "MEMORY.H"
+#include "MEMORY.C"
+#include "COMMANDS.H"
+#include "COMMANDS.H"
 #include "st20.h"
 //my new includes
 #include "STi5518_SearchDB.h"	//Internal DB facility
 #include "OMR.h"				//Other Machine Registers include file
+#include <unistd.h>
 static OMRSTATE omrState;		//The OMR register itself
 
 static CPUSTATE cpuState;
@@ -590,27 +593,27 @@ int st20Init (PARMS *userParms, FILE *outFp) {
   long value;
 
   for (i=0; i < userParms->nParms; i++) {
-	 if (!stricmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
+	 if (!strcasecmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
 		if (sscanf (userParms->value[i], "%x", &value) == 1) {
 		  st20ProductId = value;
 		}
 	 }
-	 else if (!stricmp(userParms->parameter[i], MEM_START_VAL_CH)) {
+	 else if (!strcasecmp(userParms->parameter[i], MEM_START_VAL_CH)) {
 		if (sscanf (userParms->value[i], "%x", &value) == 1) {
 		  memStartVal = value;
 		}
 	 }
-	 else if (!stricmp(userParms->parameter[i], TIMER_GUESS_CH)) {
+	 else if (!strcasecmp(userParms->parameter[i], TIMER_GUESS_CH)) {
 		if (sscanf (userParms->value[i], "%x", &value) == 1) {
 		  timerGuess = value;
 		}
 	 }
-	 else if (!stricmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
+	 else if (!strcasecmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
 		if (sscanf (userParms->value[i], "%x", &value) == 1) {
 		  wptrEndAddr = value;
 		}
 	 }
-	 else if (!stricmp(userParms->parameter[i], START_ADDR_CH)) {
+	 else if (!strcasecmp(userParms->parameter[i], START_ADDR_CH)) {
 		if (sscanf (userParms->value[i], "%x", &value) == 1) {
 		  startAddr = value;
 		}
@@ -683,7 +686,7 @@ int saveCPUState (char *dirName, FILE *outFp) {
 	 return (INVALID_CPU_FILENAME);
   }
   if ((cpuFileFd = open(cpuFileName,
-								O_BINARY|O_WRONLY|O_CREAT|O_TRUNC,
+								O_WRONLY|O_CREAT|O_TRUNC,
 								S_IREAD|S_IWRITE)) < 0)  {
 	 perror ("CPU state save file cannot be opened");
 	 return (INVALID_CPU_FILE);
@@ -718,7 +721,7 @@ int loadCPUState (char *dirName, FILE *outFp) {
 	 return (INVALID_CPU_FILENAME);
   }
   if ((cpuFileFd = open(cpuFileName,
-								O_BINARY|O_RDONLY,
+								O_RDONLY,
 								S_IREAD|S_IWRITE)) < 0)  {
 	 perror ("CPU state save file cannot be opened");
 	 return (INVALID_CPU_FILE);
@@ -745,7 +748,7 @@ int setWatch (char *reg, char *parm) {
   int  enable;
   long value;
 
-  if (strcmpi (parm, "clear")) {
+  if (strcasecmp (parm, "clear")) {
 	 enable = TRUE;
   }
   else {
@@ -822,7 +825,7 @@ int printCPUState (FILE *outFp) {
 	 }
 
 	 addrWptrWord (i, &address);
-	 result = readBytes (address, 4, &value);
+	 result = readBytes (address, 4, (unsigned long *)&value);
 	 fprintf (outFp, " %2x=0x%08x", i, value);
 
 	 if (i%WPTR_PRINT_COLS == WPTR_PRINT_COLS-1) {
@@ -1077,7 +1080,7 @@ int readWptrWord(long index, long *value) {
   *value = cpuState.wptr[cpuState.nWptr - index - 1];
 */
   addrWptrWord (index, &address);
-  result = readBytes (address, 4, value);
+  result = readBytes (address, 4, (unsigned long *)value);
 
   return (result);
 }
@@ -1363,7 +1366,7 @@ int devlb_ (FILE *outFp, long unused) {
   addr= get_iptr();
 
   oldAreg = pop();
-  result = readBytes (oldAreg, 1, &newAreg);
+  result = readBytes (oldAreg, 1, (unsigned long *)&newAreg);
   push (newAreg);
 
   if (needPrompt()||showRegs()) {
@@ -1399,7 +1402,7 @@ int devls_ (FILE *outFp, long unused) {
   addr= get_iptr();
 
   oldAreg = pop();
-  result = readBytes (oldAreg, 2, &newAreg);
+  result = readBytes (oldAreg, 2, (unsigned long *)&newAreg);
   push (newAreg);
 
   if (needPrompt()||showRegs()) {
@@ -1434,7 +1437,7 @@ int devlw_ (FILE *outFp, long unused) {
   addr= get_iptr();
 
   oldAreg = pop();
-  result = readBytes (oldAreg, 4, &newAreg);
+  result = readBytes (oldAreg, 4, (unsigned long *)&newAreg);
   push (newAreg);
 
   if (needPrompt()||showRegs()) {
@@ -1729,7 +1732,7 @@ int lb_ (FILE *outFp, long unused) {
   long oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes (oldAreg, 1, &newAreg);
+  result = readBytes (oldAreg, 1, (unsigned long *)&newAreg);
   push (newAreg);
 
   if (needPrompt()) {
@@ -1754,7 +1757,7 @@ int lbx_ (FILE *outFp, long unused) {
   long oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes (oldAreg, 1, &newAreg);
+  result = readBytes (oldAreg, 1, (unsigned long *)&newAreg);
   if((newAreg & 0x80)==0x80) {newAreg=newAreg|0xffffff00;}
   push (newAreg);
 
@@ -1894,7 +1897,7 @@ int ldnl_ (FILE *outFp, long offset) {
 	 fprintf (outFp, "WARNING: Attempt to access a word that is not on a word boundary\n");
   }
 
-  result = readBytes (oldAreg + offset * 4, 4, &cWord);
+  result = readBytes (oldAreg + offset * 4, 4, (unsigned long *)&cWord);
   push (cWord);
 
   if (needPrompt()) {
@@ -2036,7 +2039,7 @@ int ls_ (FILE *outFp, long unused) {
   long oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes (oldAreg, 2, &newAreg);
+  result = readBytes (oldAreg, 2, (unsigned long *)&newAreg);
   push (newAreg);
 
   if (needPrompt()) {
@@ -2205,7 +2208,7 @@ int resetch_ (FILE *outFp, long unused) {
 	 fprintf (outFp, "WARNING: Attempt to access a word that is not on a word boundary\n");
   }
 
-  result = readBytes (oldAreg, 4, &newAreg);
+  result = readBytes (oldAreg, 4, (unsigned long *)&newAreg);
   push (newAreg);
 
   if (needPrompt()) {

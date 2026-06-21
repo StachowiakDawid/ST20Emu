@@ -4,21 +4,18 @@
 //
 #pragma once
 
-#include "targetver.h"
-
 #pragma warning(disable : 4996)
 
 #include <fcntl.h>
-#include <io.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
 
-#include <conio.h>		//this for kbhit() & getch()
-#include <time.h>		//this for clock()
-#include <process.h>	//This for _beginthreadex(), _exitthread()
+#include <ncurses.h>
+#include <time.h>
 
 
 

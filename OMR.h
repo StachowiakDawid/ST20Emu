@@ -12,20 +12,25 @@
 #define ST20SIM_CPU_CLOCK	40000000	//The default CPU Clock used by st20sim.exe by SGSThomson
 #define SDRAM_CLOCK			121500000	//Programmable between 100 and 125 Mhz
 #define LPM_CLOCK			212000		//212 Khz
-#define LP_TIMER_TICK		(CPU_CLOCK/15625)		//15625 ticks per sec (15,625Khz), complete a cycle in 76hour
+#ifndef HP_TIMER_TICK
 #define HP_TIMER_TICK		(CPU_CLOCK/(15625*64))  //1000000 ticks per sec (1Mhz=15625*64), complete a cycle in 60'
-
 static long hp_timertick=HP_TIMER_TICK; //(~61 cpu cycles = 1 tick)
+#endif
+#ifndef LP_TIMER_TICK
+#define LP_TIMER_TICK		(CPU_CLOCK/15625)		//15625 ticks per sec (15,625Khz), complete a cycle in 76hour
 static long lp_timertick=LP_TIMER_TICK; //(3888 cpu cycles = 1 tick)
+#endif
 //static long lpm_timertick=CPU_CLOCK/LPM_CLOCK; //Low Power Module Clock (64bit!!)
 
+#ifndef OMRSTATE_STRUCT
+#define OMRSTATE_STRUCT
 typedef struct omrState{
 	//unsigned long ProcQueueFPtr[0]; //high priority front pointer register
 	//unsigned long ProcQueueFPtr[1]; //low priority front pointer register
 	//unsigned long ProcQueueBPtr[0]; //high priority back pointer register
 	//unsigned long ProcQueueBPtr[1]; //low priority back pointer register
-	unsigned long ClockRegHP;		//high priority clock register (32bit 1Mhz 1hour)
-	unsigned long ClockRegLP;		//low priority clock register (32bit 15,625Khz 76hours)
+	long ClockRegHP;		//high priority clock register (32bit 1Mhz 1hour)
+	long ClockRegLP;		//low priority clock register (32bit 15,625Khz 76hours)
 	//unsigned long TptrReg[0];		//high priority timer list pointer register
 	//unsigned long TptrReg[1];		//low priority timer list pointer register
 	//unsigned long TnextReg[0];	//high priority alarm register
@@ -43,6 +48,7 @@ typedef struct omrState{
 	unsigned char HaltOnErrorFlag;	//Halt the processor if the ErrorFlag is set
 									//(sethalterr/clrhalterr/testhalterr)
 } OMRSTATE;
+#endif
 
 //Function Prototypes
 int ldtimer_ (FILE *, long);
@@ -54,8 +60,8 @@ int initTimer(FILE *);
 /*
  - ENABLES REGISTER -
 The Enables register contains:
-• TrapEnables bits (0..15) which can be used to control the taking of traps;
-• GlobalInterruptEnables bits (16..31) which are used to control timeslicing and
+ï¿½ TrapEnables bits (0..15) which can be used to control the taking of traps;
+ï¿½ GlobalInterruptEnables bits (16..31) which are used to control timeslicing and
 interruptibility. These are normally set to 1. (0xffffc000)
 The timer will tick if the ClockEnables bit is set to1. ClockEnables can be 
 set using the *clockenb* instruction and cleared using *clockdis*.
@@ -89,7 +95,7 @@ bit number full name / description
 * PRIORITY * (The Processor State)
 The Wptr register is used for the address of the workspace of the current process.
 This address is word aligned and therefore has the two least significant bits set to
-zero. Wdesc is used for the ‘process descriptor’— the value that is held in memory as
+zero. Wdesc is used for the ï¿½process descriptorï¿½ï¿½ the value that is held in memory as
 an identifier of the process when the process is not being executed. This value is
 composed of the top 31 bits of the Wptr plus the process priority stored in bit 0 of the
 word. Bit 0 is set to 0 for high priority processes and 1 for low priority processes. Bit 1

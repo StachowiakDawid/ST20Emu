@@ -7,6 +7,7 @@
 #include "defines.h"
 #include "st20.h"
 #include "OMR.h"
+#include <sys/time.h>
 
 CPUSTATE cpuState;
 extern "C" long pop (void);
@@ -14,9 +15,10 @@ extern "C" int push (long value);
 OMRSTATE omrState;
 
 int initTimer(void){
+	
 	//init the fields with the current system time:
-	_ftime(&omrState.ClockRegHP);
-	_ftime(&omrState.ClockRegLP);
+	time(&omrState.ClockRegHP);
+	time(&omrState.ClockRegLP);
 	return (0);
 }
 
@@ -36,12 +38,12 @@ int ldtimer_ (FILE *outFp, long unused) {
 //see #include OMR.h
 
   if(cpuState.nWptr && 0x01){ //HighPriority
-	push(omrState.ClockRegHP.time);
-	fprintf (outFp, "Read of HIGH_PRIORITY timer. Value is 0x%08x\n",omrState.ClockRegHP.time);
+	push(omrState.ClockRegHP);
+	fprintf (outFp, "Read of HIGH_PRIORITY timer. Value is 0x%08x\n",omrState.ClockRegHP);
   }
   else{						 //LowPriority
-	push(omrState.ClockRegLP.time);
-	fprintf (outFp, "Read of LOW_PRIORITY timer. Value is 0x%08x\n",omrState.ClockRegLP.time);
+	push(omrState.ClockRegLP);
+	fprintf (outFp, "Read of LOW_PRIORITY timer. Value is 0x%08x\n",omrState.ClockRegLP);
   }
   
   return (0);
@@ -65,9 +67,9 @@ Error signals: none
 
 int sttimer_ (FILE *outFp, long unused) {
 	
-	omrState.ClockRegHP.time = omrState.ClockRegLP.time = pop();
+	omrState.ClockRegHP = omrState.ClockRegLP = pop();
 	fprintf (outFp, "Low and high priority clock registers were set to 0x%08x\n",
-						omrState.ClockRegHP.time);
+						omrState.ClockRegHP);
 
   return (0);
 }

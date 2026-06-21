@@ -2,18 +2,16 @@
 #pragma warning(disable : 4996)
 
 #include <fcntl.h>
-#include <io.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
-#include <io.h>
-//#include <mem.h>
-#include <direct.h>
+#include <unistd.h>
 #include "defines.h"
-#include "memory.h"
 #include "st20.h"
+#include "MEMORY.H"
+#include <dirent.h>
 
 /* this structure hold the state of the memory */
 typedef struct memblk_struct {
@@ -98,7 +96,7 @@ int byteUsedBit (MEMBLK *block, int offset, int usedOperation) {
  * Returns TRUE if the bytes were read properly.
  */
 
-int readBytes (long address, int nBytes, long *value) {
+int readBytes (long address, int nBytes, unsigned long *value) {
   int i;
   MEMBLK *cBlk;
   unsigned char cByte;
@@ -285,7 +283,7 @@ MEMBLK *getMemBlk (long address, int create_flag) {
   }
 
   /* allocate memory for a new memory block */
-  blk = malloc(sizeof(MEMBLK));
+  blk = (MEMBLK *) malloc(sizeof(MEMBLK));
   memset (blk, 0, sizeof(MEMBLK));
   if (blk == NULL) {
 	 return (NULL);
@@ -325,7 +323,7 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
   }
 
   /* check if the byte file can be opened properly */
-  if ((byteFd = open(byteFile, O_BINARY|O_RDONLY)) < 0)  {
+  if ((byteFd = open(byteFile, O_RDONLY)) < 0)  {
 	 perror ("Memory file cannot be opened");
 	 return (INVALID_BYTE_FILE);
   }
@@ -335,7 +333,7 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
 	 usedFd = -1;
   }
   /* check if the used file can be opened properly */
-  else if ((usedFd = open(usedFile, O_BINARY|O_RDONLY)) < 0)  {
+  else if ((usedFd = open(usedFile, O_RDONLY)) < 0)  {
 	 perror ("Used memory file cannot be opened");
 	 return (INVALID_BYTE_FILE);
   }
@@ -413,7 +411,7 @@ int saveMemory (char *dirName, FILE *outFp) {
   }
 
   /* create the directory */
-  if (mkdir (dirName)) {
+  if (mkdir (dirName, S_IRWXU) < 0) {
 	 return (INVALID_DIR);
   }
 
@@ -454,13 +452,13 @@ int saveMemory (char *dirName, FILE *outFp) {
 
 		/* check if the files can be opened properly */
 		if ((dataFileFd = open(dataFileName,
-								O_BINARY|O_WRONLY|O_CREAT|O_TRUNC,
+								O_WRONLY|O_CREAT|O_TRUNC,
 								S_IREAD|S_IWRITE)) < 0)  {
 		  perror ("Output memory file cannot be opened");
 		  return (INVALID_OUT_FILE);
 		}
 		if ((usedFileFd = open(usedFileName,
-								O_BINARY|O_WRONLY|O_CREAT|O_TRUNC,
+								O_WRONLY|O_CREAT|O_TRUNC,
 								S_IREAD|S_IWRITE)) < 0)  {
 		  perror ("Output used memory file cannot be opened");
 		  return (INVALID_OUT_FILE);
@@ -489,7 +487,8 @@ int saveMemory (char *dirName, FILE *outFp) {
 }
 
 int loadMemory (char *dirName, FILE *outFp) {
-  struct _finddata_t dirBlk;
+  DIR  *dirBlk;
+  struct dirent *entry;
   int    doneDir;
   char  fileMask[NAME_SIZE];
   char  byteFileName[NAME_SIZE];
@@ -504,14 +503,14 @@ int loadMemory (char *dirName, FILE *outFp) {
 	 return (INVALID_OUT_FILE);
   }
 
-  doneDir = _findfirst(fileMask, &dirBlk);
-  if (doneDir==-1) {
+  dirBlk = opendir(fileMask);
+  if (dirBlk==NULL) {
 	 return (INVALID_OUT_FILE);
   }
   do { /* for each file */
 
 	 /* the name contains the address to load the file at */
-	 strcpy (addressCh, dirBlk.name);
+	 strcpy (addressCh, entry->d_name);
 	 if (sscanf (addressCh, "%8x.bin", &address) != 1) {
 		return (INVALID_OUT_FILE);
 	 }
@@ -519,7 +518,7 @@ int loadMemory (char *dirName, FILE *outFp) {
 	 /* add the directory name to the file name */
 	 strcpy (byteFileName, dirName);
 	 strcat (byteFileName, "/");
-	 strcat (byteFileName, dirBlk.name);
+	 strcat (byteFileName, entry->d_name);
 
 	 /* build the used byte filename from the data file name */
 	 strcpy (usedFileName, byteFileName);
@@ -532,17 +531,17 @@ int loadMemory (char *dirName, FILE *outFp) {
 
 	 /* add the suffix for the used filename */
 	 strcat (usedFileName, ".use");
-fprintf (stderr, "%s   %s\n",byteFileName, usedFileName);
+	fprintf (stderr, "%s   %s\n",byteFileName, usedFileName);
 	 result = bulkLoadBytes (address, byteFileName, usedFileName, &dataLength);
 	 if (result) {
-		 _findclose(doneDir);
+		 closedir(dirBlk);
 		return (result);
 	 }
 
 
 
-  }  while(_findnext (doneDir,&dirBlk)==0);             /* end of for each data file */
-_findclose(doneDir);
+  }  while(readdir(dirBlk) != NULL);             /* end of for each data file */
+  closedir(dirBlk);
   return (0);
 }
 

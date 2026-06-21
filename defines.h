@@ -17,11 +17,14 @@
 #define PARM_SIZE						30
 #define MAX_PARMS						50
 
+#ifndef PARMS_H
+#define PARMS_H
 typedef struct parm_struct {
   int  nParms;
   char parameter[PARM_SIZE][MAX_PARMS];
   char value[PARM_SIZE][MAX_PARMS];
 } PARMS;
+#endif
 
 int readParms (PARMS *);
 int st20emuInit (PARMS *, FILE *);

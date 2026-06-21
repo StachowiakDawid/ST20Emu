@@ -22,7 +22,7 @@
 
 /* routines used to update the state of the memory */
 int memoryInit(PARMS *, FILE *);
-int readBytes(long, int, long *);
+int readBytes(long, int, unsigned long *);
 int readInvBytes(long, int, long *);
 int storeBytes(long, int, long);
 int allocBytes(long, int);
