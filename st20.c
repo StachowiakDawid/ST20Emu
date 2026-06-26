@@ -32,14 +32,14 @@
 #include "stdafx.h"
 
 #include "defines.h"
-#include "MEMORY.H"
-#include "MEMORY.C"
-#include "COMMANDS.H"
-#include "COMMANDS.H"
+#include "memory.h"
+// #include "MEMORY.C"
+#include "commands.h"
+// #include "COMMANDS.H"
 #include "st20.h"
 //my new includes
 #include "STi5518_SearchDB.h"	//Internal DB facility
-#include "OMR.h"				//Other Machine Registers include file
+#include "omr.h"				//Other Machine Registers include file
 #include <unistd.h>
 static OMRSTATE omrState;		//The OMR register itself
 

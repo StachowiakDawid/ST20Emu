@@ -6,7 +6,7 @@
 #include "stdafx.h"
 #include "defines.h"
 #include "st20.h"
-#include "OMR.h"
+#include "omr.h"
 #include <sys/time.h>
 
 CPUSTATE cpuState;
@@ -33,6 +33,7 @@ Definition:
 Error signals: none
 */
 
+#if 0
 int ldtimer_ (FILE *outFp, long unused) {
 //Current Priority is obtained reading WDesc flag in the process descriptor
 //see #include OMR.h
@@ -110,3 +111,4 @@ int clockenb_ (FILE *outFp, long unused) {
 
 	return (0);
 }
+#endif

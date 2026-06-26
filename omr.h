@@ -1,3 +1,5 @@
+#pragma once
+
 /* OMR include file, contains #defines and structs */
 #define HIGH_PRIORITY	0
 #define LOW_PRIORITY	1

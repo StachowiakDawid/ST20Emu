@@ -2,9 +2,9 @@
 #include "defines.h"
 #include "st20.h"
 #include "memory.h"
-#include "COMMANDS.H"
+#include "commands.h"
 //my includes
-#include "OMR.h"
+#include "omr.h"
 
 extern int SearchForReg(FILE*, unsigned long); //defined in STi5518_SearchDB.h
 

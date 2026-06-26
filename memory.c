@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include "defines.h"
 #include "st20.h"
-#include "MEMORY.H"
+#include "memory.h"
 #include <dirent.h>
 
 /* this structure hold the state of the memory */

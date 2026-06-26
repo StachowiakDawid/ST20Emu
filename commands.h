@@ -1,3 +1,5 @@
+#pragma once
+
 /* Error codes from commands.c */
 #define COMMAND_ERROR_START		-3000
 #define COMMAND_ERROR_END		-3999
