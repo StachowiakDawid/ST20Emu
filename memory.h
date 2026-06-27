@@ -1,4 +1,10 @@
-#pragma once
+#ifndef MEMORY_H
+#define MEMORY_H
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
 #define BLKSIZE 8 * 1024
 #define ADDR_IN_BLK_MASK ((long)(BLKSIZE - 1))
@@ -22,15 +28,21 @@
 #define CLEAR_BIT 2
 #define DONT_ALTER_BIT 3
 
-/* routines used to update the state of the memory */
-int memoryInit(PARMS *, FILE *);
-int readBytes(long, int, unsigned long *);
-int readInvBytes(long, int, long *);
-int storeBytes(long, int, long);
-int allocBytes(long, int);
-int storeByteRange(long, long, int);
-int bulkLoadBytes(long, char *, char *, long *);
-/*int readBlockByte (MEMBLK *, int, unsigned char *);  NOT NEEDED */
-int saveMemory(char *, FILE *);
-int loadMemory(char *, FILE *);
-char *memoryError(int);
+    /* routines used to update the state of the memory */
+    int memoryInit(PARMS *, FILE *);
+    int readBytes(long, int, unsigned long *);
+    int readInvBytes(long, int, long *);
+    int storeBytes(long, int, long);
+    int allocBytes(long, int);
+    int storeByteRange(long, long, int);
+    int bulkLoadBytes(long, char *, char *, long *);
+    /*int readBlockByte (MEMBLK *, int, unsigned char *);  NOT NEEDED */
+    int saveMemory(char *, FILE *);
+    int loadMemory(char *, FILE *);
+    char *memoryError(int);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

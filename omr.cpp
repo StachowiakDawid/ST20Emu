@@ -5,9 +5,7 @@
 
 #include "stdafx.h"
 #include "defines.h"
-extern "C" {
 #include "st20.h"
-}
 #include "omr.h"
 #include <sys/time.h>
 
