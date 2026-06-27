@@ -1,125 +1,127 @@
 #pragma once
 
 /* this is the starting address for CPU execution */
-#define START_ADDR				0x7FFFFFFE
-#define START_ADDR_CH			"START_ADDR"
+#define START_ADDR 0x7FFFFFFE
+#define START_ADDR_CH "START_ADDR"
 
-#define ST20_PRODUCT_ID			0x2D4C9041
-#define ST20_PRODUCT_ID_CH		"ST20_PRODUCT_ID"
+#define ST20_PRODUCT_ID 0x2D4C9041
+#define ST20_PRODUCT_ID_CH "ST20_PRODUCT_ID"
 
-#define MEM_START_VAL 			0x80000140
-#define MEM_START_VAL_CH		"MEM_START_VAL"
+#define MEM_START_VAL 0x80000140
+#define MEM_START_VAL_CH "MEM_START_VAL"
 
-#define MINIMUM_INTEGER 		0x80000000
-#define MAXIMUM_INTEGER 		0x7FFFFFFF
+#define MINIMUM_INTEGER 0x80000000
+#define MAXIMUM_INTEGER 0x7FFFFFFF
 
-#define TIMER_GUESS				0x00000000
-#define TIMER_GUESS_CH			"TIMER_GUESS"
+#define TIMER_GUESS 0x00000000
+#define TIMER_GUESS_CH "TIMER_GUESS"
 
-#define LOW_PRIORITY			1
-#define HIGH_PRIORITY			0
-#define NOT_PROCESS				MINIMUM_INTEGER
+#define LOW_PRIORITY 1
+#define HIGH_PRIORITY 0
+#define NOT_PROCESS MINIMUM_INTEGER
 
 /* defines for 16 bit calculations */
-#define NBITS						16
-#define MAX_INT						((1<<NBITS) - 1)
+#define NBITS 16
+#define MAX_INT ((1 << NBITS) - 1)
 
 /*
  * I have no idea where they store the Wptr words.
  * I'll pretend that they're at WPTR_END_ADDR
  * and that they work downwards in memory
  */
-#define WPTR_END_ADDR			0x1FFFFFFF
-#define WPTR_END_ADDR_CH		"WPTR_END_ADDR"
-#define MAX_WPTR				0x2000
-#define WPTR_PRINT_COLS			4
+#define WPTR_END_ADDR 0x1FFFFFFF
+#define WPTR_END_ADDR_CH "WPTR_END_ADDR"
+#define MAX_WPTR 0x2000
+#define WPTR_PRINT_COLS 4
 
 /* we map the lddevid opcode to a special code
  * to avoid conflicts with the ldprodid code
  */
-#define LDDEVID					0x200
+#define LDDEVID 0x200
 
 /* Error codes from st20.c */
-#define ST20_ERROR_START		-2000
-#define ST20_ERROR_END			-2999
+#define ST20_ERROR_START -2000
+#define ST20_ERROR_END -2999
 
-#define BAD_WPTR				-2000
-#define WPTR_UNUSED				-2001
-#define WPTR_UNDERFLOW			-2002
-#define WPTR_OVERFLOW			-2003
-#define BAD_WATCH_CONDITION 	-2004
-#define INVALID_CPU_FILENAME	-2010
-#define INVALID_CPU_FILE		-2011
-#define INVALID_CPU_WRITE		-2012
-#define INVALID_CPU_READ		-2013
+#define BAD_WPTR -2000
+#define WPTR_UNUSED -2001
+#define WPTR_UNDERFLOW -2002
+#define WPTR_OVERFLOW -2003
+#define BAD_WATCH_CONDITION -2004
+#define INVALID_CPU_FILENAME -2010
+#define INVALID_CPU_FILE -2011
+#define INVALID_CPU_WRITE -2012
+#define INVALID_CPU_READ -2013
 
 #ifndef CPUSTATE_STRUCT
 #define CPUSTATE_STRUCT
-typedef struct cpuState_struct {
-	long areg;
-	long breg;
-	long creg;
-	long iptr;
-	long status;
-	int	 nWptr;
-	/*  long wptr[MAX_WPTR];*/
-	char wptrUsed[MAX_WPTR];
+typedef struct cpuState_struct
+{
+  long areg;
+  long breg;
+  long creg;
+  long iptr;
+  long status;
+  int nWptr;
+  /*  long wptr[MAX_WPTR];*/
+  char wptrUsed[MAX_WPTR];
 } CPUSTATE;
 #endif
 
 #ifndef WATCH_STRUCT
 #define WATCH_STRUCT
-typedef struct watch_struct {
-	char watchAreg;
-	long areg;
-	char watchBreg;
-	long breg;
-	char watchCreg;
-	long creg;
-	char watchIptr;
-	long iptr;
-	char watchNWptr;
-	int nWptr;
+typedef struct watch_struct
+{
+  char watchAreg;
+  long areg;
+  char watchBreg;
+  long breg;
+  char watchCreg;
+  long creg;
+  char watchIptr;
+  long iptr;
+  char watchNWptr;
+  int nWptr;
 } WATCH;
 #endif
 
 #ifndef INSTRENTRY_STRUCT
 #define INSTRENTRY_STRUCT
-typedef struct instrEntry_struct {
-	char  *mnemonic;
-	int   (*function)(FILE *, long);
-	char  cpucycles;		// instruction cpu cycles 
+typedef struct instrEntry_struct
+{
+  char *mnemonic;
+  int (*function)(FILE *, long);
+  char cpucycles; // instruction cpu cycles
 } INSTRENTRY;
 #endif
 
-int st20Init (PARMS *, FILE *);
-int initCPUState (void);
-int loadCPUState (char *, FILE *);
-int saveCPUState (char *, FILE *);
-int printCPUState (FILE *);
-int printEnablesRegState (FILE *);
-int printOMRState (FILE *);
+int st20Init(PARMS *, FILE *);
+int initCPUState(void);
+int loadCPUState(char *, FILE *);
+int saveCPUState(char *, FILE *);
+int printCPUState(FILE *);
+int printEnablesRegState(FILE *);
+int printOMRState(FILE *);
 int decodeNextInstr(FILE *);
-int printNextInstr (FILE *);
-int execInstr (FILE *, int *);
-int setAreg (long);
-int setBreg (long);
-int setCreg (long);
-int setIptr (long);
-int storeWptrWord (long, long);
-int initWatch (void);
-int setWatch (char *, char *);
+int printNextInstr(FILE *);
+int execInstr(FILE *, int *);
+int setAreg(long);
+int setBreg(long);
+int setCreg(long);
+int setIptr(long);
+int storeWptrWord(long, long);
+int initWatch(void);
+int setWatch(char *, char *);
 int anyWatch(void);
-int checkWatch (void);
-char *st20Error (int);
+int checkWatch(void);
+char *st20Error(int);
 
-
-int addrWptrWord (long, long *);
-int wptrPopState (void);
-int wptrPushState (void);
+int addrWptrWord(long, long *);
+int wptrPopState(void);
+int wptrPushState(void);
 int allocWptr(long);
 unsigned long N_Add(unsigned long A, unsigned long B, unsigned long *C);
-long get_iptr (void);
+long get_iptr(void);
 
 int adc_(FILE *, long);
 int add_(FILE *, long);
