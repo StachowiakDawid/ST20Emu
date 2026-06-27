@@ -218,17 +218,15 @@ int u_loadData (FILE *inFp, FILE *outFp) {
   long startAddr;
   long dataLength;
   int result=0;
-
   /* convert the first parameter into the address to load the file to */
-  if (sscanf (cmdState.parm1, "%x", &startAddr) == 1) {
+  if (cmdState.parm2[0] != '\0' && sscanf (cmdState.parm1, "%x", &startAddr) == 1) {
 	 startAddr &= 0xFFFFFFFF;
 	 result = bulkLoadBytes (startAddr, cmdState.parm2, (char *) NULL, &dataLength);
-	 fprintf (outFp, "Read %d bytes from %s\n", dataLength, cmdState.parm2);
   }
   else {
-	 return (BAD_PARAMETER);
+   result = bulkLoadBytes ((long) NULL, cmdState.parm1, (char *) NULL, &dataLength);
+	 fprintf (outFp, "Read %d bytes from %s\n", dataLength, cmdState.parm1);
   }
-
   return (result);
 }
 

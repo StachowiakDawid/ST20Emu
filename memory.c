@@ -12,6 +12,7 @@
 #include "st20.h"
 #include "memory.h"
 #include <dirent.h>
+#include <sys/stat.h>
 
 /* this structure hold the state of the memory */
 typedef struct memblk_struct {
@@ -310,6 +311,13 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
   int	  nBytesRead=0;
   int   byteFd=-1;
   int   usedFd=-1;
+  struct stat st;
+  stat(byteFile, &st);
+  long size = st.st_size;
+  if (address == NULL) {
+	address = 2147483647 - size + 1;
+  }
+  fprintf (stderr, "Loading %ld bytes from %s to 0x%08x\n", size, byteFile, address);
   long  nextAddress=address;
   char  data[BLKSIZE];
   MEMBLK	*cBlk;
