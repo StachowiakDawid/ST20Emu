@@ -3,7 +3,7 @@
 #define TRUE 1
 #define FALSE 0
 
-#define INI_FILE "ST20EMU.INI"
+#define INI_FILE "st20emu.ini"
 #define COMMENT '#'
 
 #define MAX_UNPROMPTED_INSTR 1000000
