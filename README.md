@@ -26,18 +26,11 @@ To start, type `st20emu` in a terminal window. At the `>`
 prompt, type
 
 ```plaintext
-l 7fe00000 firmware/6300.bin
+l firmware/6300.bin
 ```
 
 where `firmware/6300.bin` is the name of a file with ST20 instructions in
-it (e.g. a TSOP dump). It can be replaced with different file, but you need to adjust the firmware address:
-
-```plaintext
-2147483647-(firmware size in bytes)+1
-```
-
-and convert it to hexadecimal.
-If you forget to do this, you'll get lots
+it (e.g. a TSOP dump). It can be replaced with different file. If you forget to do this, you'll get lots
 of errors since the emulator won't have any ST20 instructions to
 emulate.
 Some settings are read from `st20emu.ini` file, that must be in the
