@@ -3,7 +3,6 @@
 #include "st20.h"
 #include "memory.h"
 #include "commands.h"
-// my includes
 #include "omr.h"
 
 extern int SearchForReg(FILE *, unsigned long); // defined in STi5518_SearchDB.h
@@ -42,7 +41,7 @@ int u_view(FILE *, FILE *);
 int u_view_a(FILE *, FILE *);
 int u_view_w(FILE *, FILE *);
 int u_view_aa(FILE *, FILE *);
-//////////////////////////////////////////////////////////////////////////
+/************************************************************************/
 int u_query_db(FILE *, FILE *);   // query for register name by value
 int u_showregs(FILE *, FILE *);   // show registers access when in "GO" mode
 int u_showenbreg(FILE *, FILE *); // show detailed info on 'Enables' register

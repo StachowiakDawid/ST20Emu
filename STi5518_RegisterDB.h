@@ -491,7 +491,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"DEN_REG_71", 0x00000647, 8, "R/W", "Saturation"},
     //{"DEN_YCOUT",0x000001F9,1,"R/W","Make YC data bus accessible on PIO4"},
     /************************/
-    /* MPEG_CONTROL REGISTER*
+    /* MPEG_CONTROL REGISTER*/
     /************************/
     {"MPEG_CONTROL_7_0", 0x00000E00, 8, "R/W", "MPEG Audio/Video buffer control register"},
     {"MPEG_CONTROL_14_8", 0x00000E01, 8, "R/W", "MPEG Audio/Video buffer control register"},
@@ -656,7 +656,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"ASC_0_RXRESET", 0x20003024, 0, "W", "ASC 0 Reset input FIFO"},
     {"ASC_0_RETRIES", 0x20003028, 8, "R/W", "ASC 0 number of retries on transmission"},
     /************************************/
-    /* ASYNCRONOUS SERIAL CONTROLLER 1	*
+    /* ASYNCRONOUS SERIAL CONTROLLER 1	*/
     /************************************/
     {"ASC_1_BAUDRATE", 0x20004000, 16, "R/W", "ASC 1 Baud rate generator/reload"},
     {"ASC_1_TXBUFFER", 0x20004004, 9, "W", "ASC 1 Output buffer"},
@@ -670,7 +670,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"ASC_1_RXRESET", 0x20004024, 0, "W", "ASC 1 Reset input FIFO"},
     {"ASC_1_RETRIES", 0x20004028, 8, "R/W", "ASC 1 number of retries on transmission"},
     /************************************/
-    /* ASYNCRONOUS SERIAL CONTROLLER 2	*
+    /* ASYNCRONOUS SERIAL CONTROLLER 2	*/
     /************************************/
     {"ASC_2_BAUDRATE", 0x20005000, 16, "R/W", "ASC 2 Baud rate generator/reload"},
     {"ASC_2_TXBUFFER", 0x20005004, 9, "W", "ASC 2 Output buffer"},
@@ -699,17 +699,17 @@ static REGDESCR DBREGS_Entry[] = {
     {"ASC_3_RXRESET", 0x20006024, 0, "W", "ASC 3 Reset input FIFO"},
     {"ASC_3_RETRIES", 0x20006028, 8, "R/W", "ASC 3 number of retries on transmission"},
     /*************************/
-    /* SMARTCARD INTERFACE 0 *
+    /* SMARTCARD INTERFACE 0 */
     /*************************/
     {"SCI_SC0CLKVAL", 0x20007000, 5, "W", "SmartCard 0 clock"},
     {"SCI_SC0CLKCON", 0x20007004, 2, "W", "SmartCard 0 clock control"},
     /*************************/
-    /* SMARTCARD INTERFACE 1 *
+    /* SMARTCARD INTERFACE 1 */
     /*************************/
     {"SCI_SC1CLKVAL", 0x20008000, 5, "W", "SmartCard 1 clock"},
     {"SCI_SC1CLKCON", 0x20008004, 2, "W", "SmartCard 1 clock control"},
     /*****************************************/
-    /* Synchronous serial controller 0 (SSC) *
+    /* Synchronous serial controller 0 (SSC) */
     /*****************************************/
     {"SSC_0_BRG", 0x20009000, 10, "R/W", "SSC 0 baud rate generation"},
     {"SSC_0_TBuf", 0x20009004, 16, "W", "SSC 0 transmit buffer"},
@@ -720,7 +720,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"SSC_0_I2C", 0x20009018, 5, "R/W", "SSC 0 I2C control"},
     {"SSC_0_SlAd", 0x2000901C, 16, "W", "SSC 0 slave address"},
     /*****************************************/
-    /* Synchronous serial controller 1 (SSC) *
+    /* Synchronous serial controller 1 (SSC) */
     /*****************************************/
     {"SSC_1_BRG", 0x2000A000, 10, "R/W", "SSC 1 baud rate generation"},
     {"SSC_1_TBuf", 0x2000A004, 16, "W", "SSC 1 transmit buffer"},
@@ -731,7 +731,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"SSC_1_I2C", 0x2000A018, 5, "R/W", "SSC 1 I2C control"},
     {"SSC_1_SlAd", 0x2000A01C, 16, "W", "SSC 1 slave address"},
     /****************************/
-    /* PARALLEL I/O CONTROLLER 5*
+    /* PARALLEL I/O CONTROLLER 5*/
     /****************************/
     {"PIO_P5OUT", 0x2000A100, 8, "R/W", "PIO 5 output"},
     {"PIO_SET_P5OUT", 0x2000A104, 8, "W", "Set bits of P5Out"},
@@ -784,7 +784,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"IRB_RX_CLR_OVERRUN_UHF", IRBBaseAddress + 0x98, 1, "W", "Clears the overrun status"},
     {"IRB_RX_NOISE_SUPPRESS_WIDTH_UHF", IRBBaseAddress + 0x9C, 8, "W/R", "Noise suppression width"},
     /******************/
-    /* Teletext (TTXT)*
+    /* Teletext (TTXT)*/
     /******************/
     {"TTXT_DMAADDRESS", 0x2000A300, 32, "R/W", "Teletext DMA address"},
     {"TTXT_DMACOUNT", 0x2000A304, 11, "R/W", "Teletext DMA count"},
@@ -794,7 +794,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"TTXT_ACKODDEVEN", 0x2000A320, 1, "W", "Teletext acknowledge odd or even"},
     {"TTXT_ABORT", 0x2000A324, 1, "W", "Teletext abort"},
     /*******************************/
-    /* PWM and counter module (PWM)*
+    /* PWM and counter module (PWM)*/
     /*******************************/
     {"PWM_0VAL", 0x2000B000, 9, "R/W", "PWM 0 pulse width"},
     {"PWM_1VAL", 0x2000B004, 9, "R/W", "PWM 1 pulse width"},
@@ -819,7 +819,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"PWM_INTACK", 0x2000B05C, 9, "W", "PWM interrupt acknowledge"},
     {"PWM_COUNT", 0x2000B060, 8, "R/W", "PWM output counter"},
     /****************************/
-    /* PARALLEL I/O CONTROLLER 0*
+    /* PARALLEL I/O CONTROLLER 0*/
     /****************************/
     {"PIO_P0OUT", 0x2000C000, 8, "R/W", "PIO 0 output"},
     {"PIO_SET_P0OUT", 0x2000C004, 8, "W", "Set bits of P0Out"},
@@ -841,7 +841,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"PIO_SET_P0MASK", 0x2000C064, 8, "W", "Set bits of P0Mask"},
     {"PIO_CLEAR_P0MASK", 0x2000C068, 8, "W", "Clear bits of P0Mask"},
     /****************************/
-    /* PARALLEL I/O CONTROLLER 1*
+    /* PARALLEL I/O CONTROLLER 1*/
     /****************************/
     {"PIO_P1OUT", 0x2000D000, 8, "R/W", "PIO 1 output"},
     {"PIO_SET_P1OUT", 0x2000D004, 8, "W", "Set bits of P1Out"},
@@ -863,7 +863,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"PIO_SET_P1MASK", 0x2000D064, 8, "W", "Set bits of P1Mask"},
     {"PIO_CLEAR_P1MASK", 0x2000D068, 8, "W", "Clear bits of P1Mask"},
     /****************************/
-    /* PARALLEL I/O CONTROLLER 2*
+    /* PARALLEL I/O CONTROLLER 2*/
     /****************************/
     {"PIO_P2OUT", 0x2000E000, 8, "R/W", "PIO 2 output"},
     {"PIO_SET_P2OUT", 0x2000E004, 8, "W", "Set bits of P2Out"},
@@ -885,7 +885,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"PIO_SET_P2MASK", 0x2000E064, 8, "W", "Set bits of P2Mask"},
     {"PIO_CLEAR_P2MASK", 0x2000E068, 8, "W", "Clear bits of P2Mask"},
     /****************************/
-    /* PARALLEL I/O CONTROLLER 3*
+    /* PARALLEL I/O CONTROLLER 3*/
     /****************************/
     {"PIO_P3OUT", 0x2000F000, 8, "R/W", "PIO 3 output"},
     {"PIO_SET_P3OUT", 0x2000F004, 8, "W", "Set bits of P3Out"},
@@ -907,7 +907,7 @@ static REGDESCR DBREGS_Entry[] = {
     {"PIO_SET_P3MASK", 0x2000F064, 8, "W", "Set bits of P3Mask"},
     {"PIO_CLEAR_P3MASK", 0x2000F068, 8, "W", "Clear bits of P3Mask"},
     /****************************/
-    /* PARALLEL I/O CONTROLLER 4*
+    /* PARALLEL I/O CONTROLLER 4*/
     /****************************/
     {"PIO_P4OUT", 0x20010000, 8, "R/W", "PIO 4 output"},
     {"PIO_SET_P4OUT", 0x20010004, 8, "W", "Set bits of P4Out"},

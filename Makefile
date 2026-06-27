@@ -6,7 +6,8 @@ CC = clang
 CXX = clang++
 
 # -w is there temporarily because of around 3 thousand warnings xD
-CFLAGS = -O2 -std=c89 -w
+# -Wno-comment unless code is C99-compatible
+CFLAGS = -O2 -std=c89 -w -Wno-comment
 CXXFLAGS = -O2 -std=c++11
 LDFLAGS = -lncurses
 
