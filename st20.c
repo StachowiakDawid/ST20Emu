@@ -33,11 +33,8 @@
 
 #include "defines.h"
 #include "memory.h"
-// #include "MEMORY.C"
 #include "commands.h"
-// #include "COMMANDS.H"
 #include "st20.h"
-// my new includes
 #include "STi5518_SearchDB.h" //Internal DB facility
 #include "omr.h"              //Other Machine Registers include file
 #include <unistd.h>
