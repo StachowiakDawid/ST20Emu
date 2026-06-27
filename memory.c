@@ -451,6 +451,7 @@ int saveMemory (char *dirName, FILE *outFp) {
 		}
 
 		/* check if the files can be opened properly */
+		#if defined(S_IREAD) && defined(S_IWRITE)
 		if ((dataFileFd = open(dataFileName,
 								O_WRONLY|O_CREAT|O_TRUNC,
 								S_IREAD|S_IWRITE)) < 0)  {
@@ -463,6 +464,18 @@ int saveMemory (char *dirName, FILE *outFp) {
 		  perror ("Output used memory file cannot be opened");
 		  return (INVALID_OUT_FILE);
 		}
+		#else
+		if ((dataFileFd = open(dataFileName,
+								O_WRONLY|O_CREAT|O_TRUNC)) < 0)  {
+		  perror ("Output memory file cannot be opened");
+		  return (INVALID_OUT_FILE);
+		}
+		if ((usedFileFd = open(usedFileName,
+								O_WRONLY|O_CREAT|O_TRUNC)) < 0)  {
+		  perror ("Output used memory file cannot be opened");
+		  return (INVALID_OUT_FILE);
+		}
+		#endif
 
 		nextAddress = cBlk->startAddr;
 	 }
@@ -576,4 +589,3 @@ char *memoryError (int error) {
 
   return (NULL);
 }
-

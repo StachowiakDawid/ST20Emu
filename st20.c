@@ -685,12 +685,20 @@ int saveCPUState (char *dirName, FILE *outFp) {
   if (sprintf (cpuFileName, "%s/cpu.bin", dirName) == EOF) {
 	 return (INVALID_CPU_FILENAME);
   }
+  #if defined(S_IREAD) && defined(S_IWRITE)
   if ((cpuFileFd = open(cpuFileName,
 								O_WRONLY|O_CREAT|O_TRUNC,
 								S_IREAD|S_IWRITE)) < 0)  {
 	 perror ("CPU state save file cannot be opened");
 	 return (INVALID_CPU_FILE);
   }
+  #else
+  if ((cpuFileFd = open(cpuFileName,
+								O_WRONLY|O_CREAT|O_TRUNC)) < 0)  {
+	 perror ("CPU state save file cannot be opened");
+	 return (INVALID_CPU_FILE);
+  }
+  #endif
 
   if (write (cpuFileFd, (void *) &cpuState, sizeof (CPUSTATE)) < 0) {
 	 return (INVALID_CPU_WRITE);
@@ -720,12 +728,20 @@ int loadCPUState (char *dirName, FILE *outFp) {
   if (sprintf (cpuFileName, "%s/cpu.bin", dirName) == EOF) {
 	 return (INVALID_CPU_FILENAME);
   }
+  #if defined(S_IREAD) && defined(S_IWRITE)
   if ((cpuFileFd = open(cpuFileName,
 								O_RDONLY,
 								S_IREAD|S_IWRITE)) < 0)  {
 	 perror ("CPU state save file cannot be opened");
 	 return (INVALID_CPU_FILE);
   }
+  #else
+  if ((cpuFileFd = open(cpuFileName,
+								O_RDONLY)) < 0)  {
+	 perror ("CPU state save file cannot be opened");
+	 return (INVALID_CPU_FILE);
+  }
+  #endif
 
   if (read (cpuFileFd, &cpuState, sizeof (CPUSTATE)) <= 0) {
 	 return (INVALID_CPU_READ);
