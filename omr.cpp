@@ -1,7 +1,7 @@
 /* OMR stand for 'Other Machine Registers' */
-//There are several other registers which the programmer should know about,
-//but which are not part of the process state. See #include file
-// -------------------------------------------
+// There are several other registers which the programmer should know about,
+// but which are not part of the process state. See #include file
+//  -------------------------------------------
 
 #include "stdafx.h"
 #include "defines.h"
@@ -10,16 +10,16 @@
 #include <sys/time.h>
 
 CPUSTATE cpuState;
-extern "C" long pop (void);
-extern "C" int push (long value);
+extern "C" long pop(void);
+extern "C" int push(long value);
 OMRSTATE omrState;
 
-int initTimer(void){
-	
-	//init the fields with the current system time:
-	time(&omrState.ClockRegHP);
-	time(&omrState.ClockRegLP);
-	return (0);
+int initTimer(void) {
+
+  // init the fields with the current system time:
+  time(&omrState.ClockRegHP);
+  time(&omrState.ClockRegLP);
+  return (0);
 }
 
 /*
@@ -27,9 +27,9 @@ LDTIMER (load timer)
 Code: 22 F2
 Description: Load the value of the current priority timer into Areg.
 Definition:
-	Areg' <- ClockReg[Priority]
-	Breg' <- Areg
-	Creg' <- Breg
+  Areg' <- ClockReg[Priority]
+  Breg' <- Areg
+  Creg' <- Breg
 Error signals: none
 */
 

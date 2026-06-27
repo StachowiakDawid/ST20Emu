@@ -2,8 +2,7 @@
 #define COMMANDS_H
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 /* Error codes from commands.c */
@@ -20,18 +19,18 @@ extern "C"
 /*#define NUM_COMMANDS				100  */
 #define COMMAND_LEN 256
 
-    int commandsInit(PARMS *, FILE *);
-    int quitRequested(void);
-    int setQuit(int);
-    int needCmd(void);
-    int setNeedCmd(int);
-    int needPrompt(void);
-    int showRegs(void);
-    int setNeedPrompt(int);
-    int initCmdState(void);
-    int getCommand(FILE *, FILE *);
-    int execCommand(FILE *, FILE *);
-    char *commandError(int);
+int commandsInit(PARMS *, FILE *);
+int quitRequested(void);
+int setQuit(int);
+int needCmd(void);
+int setNeedCmd(int);
+int needPrompt(void);
+int showRegs(void);
+int setNeedPrompt(int);
+int initCmdState(void);
+int getCommand(FILE *, FILE *);
+int execCommand(FILE *, FILE *);
+char *commandError(int);
 
 #ifdef __cplusplus
 }
