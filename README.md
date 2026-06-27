@@ -1,5 +1,6 @@
 # ST20Emu
-ST20 Emulator, an arm-based mcu used in some 90's Set Top Box, this is an old project and now i think it's completely useless, but i've decided to put here the code that maybe can be useful to someone who wanna write a simple emulator.
+
+ST20 Emulator, an ARM-based MCU used in some 90's Set Top Box, this is an old project and now i think it's completely useless, but i've decided to put here the code that maybe can be useful to someone who wanna write a simple emulator.
 The code can be useful in writing virtual machines too. Feel free to grab, use and misuse anything you want from this source code. The Project was compiled under Win (Visual Studio Professional 2013) and Linux, and run without efforts.
 In the repo there is also a file called '6300.bin', the firmware of a very very very old STB i bought so many years ago that i don't exactly remember when. This emu came back directly from the dust of my archive, as you can see i wrote the last version in january 2012, after that the project was abandoned due to lack of time to dedicate to it.
 The instructions set manual is present too.
@@ -19,19 +20,22 @@ It was tested with clang version 18.1.3 (1ubuntu1).
 make clean && make
 ```
 
-How to use
-----------
+## How to use
 
-To start, type 'st20emu' in a DOS command window.  At the '>'
+To start, type 'st20emu' in a DOS command window. At the '>'
 prompt, type
 
-    l 7fe00000 Manuals-Firmware/6300.bin
-
-where `Manuals-Firmware/6300.bin` is the name of a file with ST20 instructions in
-it (e.g. a TSOP dump). It can be replaced with different file, but you need to adjust the firmware address:
+```plaintext
+l 7fe00000 firmware/6300.bin
 ```
+
+where `firmware/6300.bin` is the name of a file with ST20 instructions in
+it (e.g. a TSOP dump). It can be replaced with different file, but you need to adjust the firmware address:
+
+```plaintext
 2147483647-(firmware size in bytes)+1
 ```
+
 and convert it to hexadecimal.
 If you forget to do this, you'll get lots
 of errors since the emulator won't have any ST20 instructions to
@@ -42,9 +46,7 @@ understandable and the commands are self-explanatory.
 
 Now you can start issuing commands to the emulator
 
-
-Emulator commands
------------------
+## Emulator commands
 
 Before going into the commands, here is a list of the parameters
 that the commands use.
@@ -53,95 +55,110 @@ that the commands use.
 - `address` refers to a 32 bit octal address
 - `filename` refers to a TSOP dump filename
 - `register` is either
-   - a (A register)
-   - b (B register)
-   - c (C register)
-   - i (Iptr)
+  - a (A register)
+  - b (B register)
+  - c (C register)
+  - i (Iptr)
 - `index` is an octal number representing a valid Wptr index
 
-
-Here are the commands...
+Here are the commands:
 
 - `ENTER`
 
-    The ENTER key executes next instruction
+  The ENTER key executes next instruction
+
 - a `value`
 
-    Sets the A register to the specified value
+  Sets the A register to the specified value
+
 - b `value`
 
-    Sets the B register to the specified value
+  Sets the B register to the specified value
+
 - c `value`
 
-    Sets the C register to the specified value
+  Sets the C register to the specified value
+
 - db `value`
 
-    Search in the internal DB some info's about
-    the specified register passed as arguments (hex number).
+  Search in the internal DB some info's about
+  the specified register passed as arguments (hex number).
+
 - g
 
-    Tells the emulator to run the emulation from the current
-    address.  The prompting for commands is shut off.  Prompts
-    will appear when a watch condition is met (see the 's'
-    command) or when 1,000,000 instructions were executed without
-    encountering a watch condition.  You can't execute a 'g'
-    command if no watches are set.
-    During execution you can press the 'g' key to stop'em all :)
+  Tells the emulator to run the emulation from the current
+  address. The prompting for commands is shut off. Prompts
+  will appear when a watch condition is met (see the 's'
+  command) or when 1,000,000 instructions were executed without
+  encountering a watch condition. You can't execute a 'g'
+  command if no watches are set.
+  During execution you can press the 'g' key to stop'em all :)
 
 - i `value`
 
-    Sets the Iptr register to the specified value
+  Sets the Iptr register to the specified value
+
 - l `address` `filename`
-    Loads the specified file into memory at starting at the
-    specified address
+  Loads the specified file into memory at starting at the
+  specified address
 - load `name`
-    Loads a presaved ST20 state that was saved by the save command
+  Loads a presaved ST20 state that was saved by the save command
 - omr
 
-	show the contents of the 'Other Machine Registers', clock, some
-	status registers, trap, interrupts and others.
+  show the contents of the 'Other Machine Registers', clock, some
+  status registers, trap, interrupts and others.
+
 - q
 
-    quits the emulator
+  quits the emulator
+
 - s `register` `value`
 
-    sets a watch condition.  When the specified register is set
-    to the specified value, a watch condition is triggered.
+  sets a watch condition. When the specified register is set
+  to the specified value, a watch condition is triggered.
+
 - save `name`
 
-    Creates a directory with the specified name that contains a
-    dump of the memory contents and the CPU state.
-    The memory contents are dumped in 8K chunks.
-    The .bin files are the memory contents.  These can be loaded
-    into a hex editor or into IDA for further processing.
-    The .use files are flags indicating if a particular byte in
-    memory has been defined or not.
-    The cpu.bin file contains the CPU state.
+  Creates a directory with the specified name that contains a
+  dump of the memory contents and the CPU state.
+  The memory contents are dumped in 8K chunks.
+  The .bin files are the memory contents. These can be loaded
+  into a hex editor or into IDA for further processing.
+  The .use files are flags indicating if a particular byte in
+  memory has been defined or not.
+  The cpu.bin file contains the CPU state.
+
 - v `address`
 
-    views the word at the specified memory address
+  views the word at the specified memory address
+
 - va `address` `value`
 
-    set the word at the specified address with the specified value.
+  set the word at the specified address with the specified value.
+
 - vaa `address` `range`
 
-   views the number of words specified by the range parameter,
-   starting from the specified address
+  views the number of words specified by the range parameter,
+  starting from the specified address
+
 - ver
 
-	show the content of the 'Enables' register, with descriptive
-	labels for every bit set to 1.	
+  show the content of the 'Enables' register, with descriptive
+  labels for every bit set to 1.
+
 - vra
 
-   "V"erbose "R"egister "A"ccess, set the correspondent flag
-   for a verbose output when a devlb/sb devlw/sb instruction is
-   executed. (only STi5518 regs are supported at moment).   
+  "V"erbose "R"egister "A"ccess, set the correspondent flag
+  for a verbose output when a devlb/sb devlw/sb instruction is
+  executed. (only STi5518 regs are supported at moment).
+
 - w `index` `value`
 
-    sets the workspace word at index `index` to the specified
-    value.
+  sets the workspace word at index `index` to the specified
+  value.
 
 After a command is executed, the emulator will show
+
 - the contents of the A, B, C and Iptr registers
 - all of the allocated workspace words will also be shown
 - next, the address of the next command, the octal values of
@@ -150,7 +167,8 @@ After a command is executed, the emulator will show
 - finally, the command prompt ('>') will be displayed.
 
 Here's an example of what you might see:
-```
+
+```plaintext
 A=0x7fff0014 B=0xaaaaaaaa C=0xaaaaaaaa  Iptr=0x7fff0038
 Wptr  0=0x7fff0014  1=0x7ffffff0  2=0xaaaaaaaa 3=0xaaaaaaaa
       4=0x7ffffff0
@@ -158,8 +176,10 @@ Wptr  0=0x7fff0014  1=0x7ffffff0  2=0xaaaaaaaa 3=0xaaaaaaaa
 7fff0038  60 bd  ajw fffffffd
 >
 ```
+
 And this with the 'vra' mode ON (if an entry is found in the internal DB)
-```
+
+```plaintext
 7fff01a4  2f f1  devsb
 >
 NOTE: At 0x7fff01a4 Write to device at address 00000e00, value=0x00000007
@@ -172,6 +192,7 @@ Wptr  0=0x7fff01d2  1=0xaaaaaaaa  2=0xaaaaaaaa  3=0xaaaaaaaa
 7fff01a6  27 40  ldc 70
 >
 ```
+
 Where:
 
 NOTE is the usual field put there by st20emu
@@ -181,7 +202,8 @@ access: is the access allowed for this register (R)ead (W)rite etc.
 DESC: stand for (DESC)ription, when available.
 
 This is the output of the 'omr' command...
-```
+
+```plaintext
 
 > omr
 OTHER MACHINE REGISTERS
@@ -192,9 +214,10 @@ HP_ErrFlag=0x00 LP_ErrFlag=0x00 HaltOnError=0x00
 >
 
 ```
+
 ...and this for 'ver'
 
-```
+```plaintext
 > ver
 Enables Register Value=0xffffc000
  LP_PROCESS_INT_ENB     is set
@@ -208,7 +231,7 @@ Enables Register Value=0xffffc000
 >
 ```
 
-------------
+---
 
 devls/lb/lw and devss/sb/sw can be used for memory access too, so if a specific
 address isn't found in the internal DB, a more generic description is returned
@@ -216,21 +239,20 @@ based over the Datasheet memory map description. Example:
 
 NOTE: At 0xc0402804 Write to device at address c042a5e8, value=0x00000002
 DESCR: Address is into Shared SDRAM (Region 1)
-------------
 
-The ajw command has not been executed yet.  If you hit the ENTER
+---
+
+The ajw command has not been executed yet. If you hit the ENTER
 key, it will be executed and the results of its execution will be
 displayed.
 
-
-Notes
------
+## Notes
 
 Unused words are given the bit pattern 0xAAAAAAAA
 
 The workspace has been assigned to the memory addresses from
-0x1FFFF000 to 0x1FFFFFFF.  The first workspace word is stored
-at 0x1FFFFFFC.  The workspace words are stored at consecutively
+0x1FFFF000 to 0x1FFFFFFF. The first workspace word is stored
+at 0x1FFFFFFC. The workspace words are stored at consecutively
 lower words.
 
 Only the most common ST20 instructions have been implemented.
@@ -238,21 +260,20 @@ The emulator will warn you when an unimplemented instruction
 has been encountered.
 
 I still have lots of things to add to this emulator
+
 - implement the complete set of instructions
 - allow people to give names to addresses
 - add a command to step over subroutines
 - etc.
-I'm willing to accept other suggestions but there's no guarantee
-that I'll get any of the work done very quickly.
+  I'm willing to accept other suggestions but there's no guarantee
+  that I'll get any of the work done very quickly.
 
+## Troubleshooting
 
-Troubleshooting
----------------
-*Mar 2002
-This is a WIN32 app.  I don't think it will run in a 16 bit
-environment (does anyone actually use these any more?).  I wrote
-this for Win98.  I have no idea whether it works in NT/2000/XP.
+\*Mar 2002
+This is a WIN32 app. I don't think it will run in a 16 bit
+environment (does anyone actually use these any more?). I wrote
+this for Win98. I have no idea whether it works in NT/2000/XP.
 
-*Dec 2011
+\*Dec 2011
 Can be compiled with VC++ Express, work fine in 2K/XP/Win7.
-
