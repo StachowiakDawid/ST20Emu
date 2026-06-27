@@ -27,10 +27,15 @@ How to use
 To start, type 'st20emu' in a DOS command window.  At the '>'
 prompt, type
 
-    l 7ff80000 <filename>
+    l 7fe00000 Manuals-Firmware/6300.bin
 
-where <filename> is the name of a file with ST20 instructions in
-it (e.g. a TSOP dump).  If you forget to do this, you'll get lots
+where `Manuals-Firmware/6300.bin` is the name of a file with ST20 instructions in
+it (e.g. a TSOP dump). It can be replaced with different file, but you need to adjust the firmware address:
+```
+2147483647-(firmware size in bytes)+1
+```
+and convert it to hexadecimal.
+If you forget to do this, you'll get lots
 of errors since the emulator won't have any ST20 instructions to
 emulate.
 Some settings are read from 'st20emu.ini' file, that must be in the
@@ -46,36 +51,37 @@ Emulator commands
 Before going into the commands, here is a list of the parameters
 that the commands use.
 
-<value> refers to a 32 bit octal word.
-<address> refers to a 32 bit octal address
-<filename> refers to a TSOP dump filename
-<register> is either
-    a (A register)
-    b (B register)
-    c (C register)
-    i (Iptr)
-<index> is an octal number representing a valid Wptr index
+- `value` refers to a 32 bit octal word.
+- `address` refers to a 32 bit octal address
+- `filename` refers to a TSOP dump filename
+- `register` is either
+   - a (A register)
+   - b (B register)
+   - c (C register)
+   - i (Iptr)
+- `index` is an octal number representing a valid Wptr index
 
 
 Here are the commands...
 
-<ENTER>
+- `ENTER`
+
     The ENTER key executes next instruction
+- a `value`
 
-a <value>
     Sets the A register to the specified value
+- b `value`
 
-b <value>
     Sets the B register to the specified value
+- c `value`
 
-c <value>
     Sets the C register to the specified value
+- db `value`
 
-db <value>
     Search in the internal DB some info's about
     the specified register passed as arguments (hex number).
+- g
 
-g
     Tells the emulator to run the emulation from the current
     address.  The prompting for commands is shut off.  Prompts
     will appear when a watch condition is met (see the 's'
@@ -84,28 +90,27 @@ g
     command if no watches are set.
     During execution you can press the 'g' key to stop'em all :)
 
-i <value>
-    Sets the Iptr register to the specified value
+- i `value`
 
-l <address> <filename>
+    Sets the Iptr register to the specified value
+- l `address` `filename`
     Loads the specified file into memory at starting at the
     specified address
-
-load <name>
+- load `name`
     Loads a presaved ST20 state that was saved by the save command
+- omr
 
-omr
 	show the contents of the 'Other Machine Registers', clock, some
 	status registers, trap, interrupts and others.
+- q
 
-q
     quits the emulator
+- s `register` `value`
 
-s <register> <value>
     sets a watch condition.  When the specified register is set
     to the specified value, a watch condition is triggered.
+- save `name`
 
-save <name>
     Creates a directory with the specified name that contains a
     dump of the memory contents and the CPU state.
     The memory contents are dumped in 8K chunks.
@@ -114,28 +119,28 @@ save <name>
     The .use files are flags indicating if a particular byte in
     memory has been defined or not.
     The cpu.bin file contains the CPU state.
+- v `address`
 
-v <address>
     views the word at the specified memory address
+- va `address` `value`
 
-va <address> <value>
     set the word at the specified address with the specified value.
+- vaa `address` `range`
 
-vaa <address> <range>
    views the number of words specified by the range parameter,
    starting from the specified address
+- ver
 
-ver
 	show the content of the 'Enables' register, with descriptive
-	labels for every bit set to 1.
-	
-vra
+	labels for every bit set to 1.	
+- vra
+
    "V"erbose "R"egister "A"ccess, set the correspondent flag
    for a verbose output when a devlb/sb devlw/sb instruction is
-   executed. (only STi5518 regs are supported at moment).
-   
-w <index> <value>
-    sets the workspace word at index <index> to the specified
+   executed. (only STi5518 regs are supported at moment).   
+- w `index` `value`
+
+    sets the workspace word at index `index` to the specified
     value.
 
 After a command is executed, the emulator will show
@@ -147,18 +152,16 @@ After a command is executed, the emulator will show
 - finally, the command prompt ('>') will be displayed.
 
 Here's an example of what you might see:
-------------
-
+```
 A=0x7fff0014 B=0xaaaaaaaa C=0xaaaaaaaa  Iptr=0x7fff0038
 Wptr  0=0x7fff0014  1=0x7ffffff0  2=0xaaaaaaaa 3=0xaaaaaaaa
       4=0x7ffffff0
 
 7fff0038  60 bd  ajw fffffffd
 >
-
+```
 And this with the 'vra' mode ON (if an entry is found in the internal DB)
-------------
-
+```
 7fff01a4  2f f1  devsb
 >
 NOTE: At 0x7fff01a4 Write to device at address 00000e00, value=0x00000007
@@ -170,7 +173,7 @@ Wptr  0=0x7fff01d2  1=0xaaaaaaaa  2=0xaaaaaaaa  3=0xaaaaaaaa
 
 7fff01a6  27 40  ldc 70
 >
-------------
+```
 Where:
 
 NOTE is the usual field put there by st20emu
@@ -180,19 +183,20 @@ access: is the access allowed for this register (R)ead (W)rite etc.
 DESC: stand for (DESC)ription, when available.
 
 This is the output of the 'omr' command...
-------------
+```
 
 > omr
 OTHER MACHINE REGISTERS
------------------------
+
 Enables=0xffffc000
 ClockRegHP=0x20000000 ClockRegLP=0x20000000 ClockEnables=0x03
 HP_ErrFlag=0x00 LP_ErrFlag=0x00 HaltOnError=0x00
 >
 
-------------
+```
 ...and this for 'ver'
 
+```
 > ver
 Enables Register Value=0xffffc000
  LP_PROCESS_INT_ENB     is set
@@ -204,6 +208,7 @@ Enables Register Value=0xffffc000
  HP_EXTERNALEVENT_ENB   is set
  HP_TIMER_ALRM_ENB      is set
 >
+```
 
 ------------
 
