@@ -2,7 +2,7 @@
 
 ST20 Emulator, an ARM-based MCU used in some 90's Set Top Box, this is an old project and now i think it's completely useless, but i've decided to put here the code that maybe can be useful to someone who wanna write a simple emulator.
 The code can be useful in writing virtual machines too. Feel free to grab, use and misuse anything you want from this source code. The Project was compiled under Win (Visual Studio Professional 2013) and Linux, and run without efforts.
-In the repo there is also a file called '6300.bin', the firmware of a very very very old STB i bought so many years ago that i don't exactly remember when. This emu came back directly from the dust of my archive, as you can see i wrote the last version in january 2012, after that the project was abandoned due to lack of time to dedicate to it.
+In the repo there is also a file called `6300.bin`, the firmware of a very very very old STB i bought so many years ago that i don't exactly remember when. This emu came back directly from the dust of my archive, as you can see i wrote the last version in january 2012, after that the project was abandoned due to lack of time to dedicate to it.
 The instructions set manual is present too.
 
 ST20 emulator V3.0
@@ -22,7 +22,7 @@ make clean && make
 
 ## How to use
 
-To start, type 'st20emu' in a DOS command window. At the '>'
+To start, type `st20emu` in a terminal window. At the `>`
 prompt, type
 
 ```plaintext
@@ -40,131 +40,64 @@ and convert it to hexadecimal.
 If you forget to do this, you'll get lots
 of errors since the emulator won't have any ST20 instructions to
 emulate.
-Some settings are read from 'st20emu.ini' file, that must be in the
+Some settings are read from `st20emu.ini` file, that must be in the
 same directory of the emulator. The content of this file is easily
 understandable and the commands are self-explanatory.
 
 Now you can start issuing commands to the emulator
 
-## Emulator commands
+Here is a reorganized, clean, and highly scannable reference table for the **ST20Emu Emulator Commands**, grouped by their primary function to make it easier to read than the original document.
 
-Before going into the commands, here is a list of the parameters
-that the commands use.
+---
 
-- `value` refers to a 32 bit octal word.
-- `address` refers to a 32 bit octal address
-- `filename` refers to a TSOP dump filename
-- `register` is either
-  - a (A register)
-  - b (B register)
-  - c (C register)
-  - i (Iptr)
-- `index` is an octal number representing a valid Wptr index
+### Parameter definitions
 
-Here are the commands:
+Before using the commands, keep in mind these parameter meanings:
 
-- `ENTER`
+- `value` / `address`: A 32-bit **octal** value or address.
+- `filename` / `name`: A target file or directory name.
+- `register`: The specific register identifier (`a`, `b`, `c`, or `i`).
+- `index`: An octal number representing a valid workspace pointer (`Wptr`) index.
 
-  The ENTER key executes next instruction
+---
 
-- a `value`
+### Emulator commands reference
 
-  Sets the A register to the specified value
+| Category               | Command | Syntax               | Description                                                                                                                                                                                                                                                                                                                     |
+| ---------------------- | ------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Execution**          | `ENTER` | _(Press Enter)_      | Executes the single next instruction.                                                                                                                                                                                                                                                                                           |
+|                        | `g`     | `g`                  | Runs the emulation from the current address until a watch condition is met or 1,000,000 instructions pass. **Press `g` again during execution to stop.**                                                                                                                                                                        |
+|                        | `s`     | `s register value`   | Sets a watch condition on `a`, `b`, `c`, or `i`. When the register hits this value, execution halts and prompts you.                                                                                                                                                                                                            |
+| **Register control**   | `a`     | `a value`            | Sets the **A register** to the specified value.                                                                                                                                                                                                                                                                                 |
+|                        | `b`     | `b value`            | Sets the **B register** to the specified value.                                                                                                                                                                                                                                                                                 |
+|                        | `c`     | `c value`            | Sets the **C register** to the specified value.                                                                                                                                                                                                                                                                                 |
+|                        | `i`     | `i value`            | Sets the **Iptr (Instruction pointer)** register to the specified value.                                                                                                                                                                                                                                                        |
+|                        | `w`     | `w index value`      | Sets the workspace word at the specified `index` to the given value.                                                                                                                                                                                                                                                            |
+| **Memory control**     | `l`     | `l address filename` | Loads a binary/TSOP dump file into memory starting at the specified address.                                                                                                                                                                                                                                                    |
+|                        | `v`     | `v address`          | Views the word at the specified memory address.                                                                                                                                                                                                                                                                                 |
+|                        | `va`    | `va address value`   | Writes/sets the word at the specified address with a new value.                                                                                                                                                                                                                                                                 |
+|                        | `vaa`   | `vaa address range`  | Views a range of words starting from the specified address.                                                                                                                                                                                                                                                                     |
+| **State & session**    | `load`  | `load name`          | Loads a previously saved ST20 state.                                                                                                                                                                                                                                                                                            |
+|                        | `save`  | `save name`          | Dumps memory contents (in 8K chunks) and the CPU state into a new directory named `name`. The `.bin` files are the memory contents. These can be loaded into a hex editors or IDA Pro. The `.use` files are flags indicating if a particular byte in memory has been defined or not. The `cpu.bin` file contains the CPU state. |
+|                        | `q`     | `q`                  | Quits the emulator.                                                                                                                                                                                                                                                                                                             |
+| **Diagnostics & info** | `db`    | `db value`           | Searches the internal database for information about a specified register (passed as a hex number).                                                                                                                                                                                                                             |
+|                        | `omr`   | `omr`                | Displays "Other Machine Registers" (clock, status registers, traps, interrupts).                                                                                                                                                                                                                                                |
+|                        | `ver`   | `ver`                | Shows the contents of the "Enables" register with descriptive labels for every bit set to 1.                                                                                                                                                                                                                                    |
+|                        | `vra`   | `vra`                | Toggles **Verbose Register Access** mode ON/OFF for verbose output on `devlb`/`sb` and `devlw`/`sb` instructions. Only STi5518 regs are supported at moment.                                                                                                                                                                    |
 
-- b `value`
+---
 
-  Sets the B register to the specified value
+### Execution output
 
-- c `value`
+After a command is executed or `ENTER` is pressed, the emulator prints standard status block:
 
-  Sets the C register to the specified value
+- Displays the current hex values for `A`, `B`, `C` and the `Iptr` registers
+- Displays all currently allocated workspace words.
 
-- db `value`
+  > Note: Unused words default to the bit pattern 0xAAAAAAAA
 
-  Search in the internal DB some info's about
-  the specified register passed as arguments (hex number).
-
-- g
-
-  Tells the emulator to run the emulation from the current
-  address. The prompting for commands is shut off. Prompts
-  will appear when a watch condition is met (see the 's'
-  command) or when 1,000,000 instructions were executed without
-  encountering a watch condition. You can't execute a 'g'
-  command if no watches are set.
-  During execution you can press the 'g' key to stop'em all :)
-
-- i `value`
-
-  Sets the Iptr register to the specified value
-
-- l `address` `filename`
-  Loads the specified file into memory at starting at the
-  specified address
-- load `name`
-  Loads a presaved ST20 state that was saved by the save command
-- omr
-
-  show the contents of the 'Other Machine Registers', clock, some
-  status registers, trap, interrupts and others.
-
-- q
-
-  quits the emulator
-
-- s `register` `value`
-
-  sets a watch condition. When the specified register is set
-  to the specified value, a watch condition is triggered.
-
-- save `name`
-
-  Creates a directory with the specified name that contains a
-  dump of the memory contents and the CPU state.
-  The memory contents are dumped in 8K chunks.
-  The .bin files are the memory contents. These can be loaded
-  into a hex editor or into IDA for further processing.
-  The .use files are flags indicating if a particular byte in
-  memory has been defined or not.
-  The cpu.bin file contains the CPU state.
-
-- v `address`
-
-  views the word at the specified memory address
-
-- va `address` `value`
-
-  set the word at the specified address with the specified value.
-
-- vaa `address` `range`
-
-  views the number of words specified by the range parameter,
-  starting from the specified address
-
-- ver
-
-  show the content of the 'Enables' register, with descriptive
-  labels for every bit set to 1.
-
-- vra
-
-  "V"erbose "R"egister "A"ccess, set the correspondent flag
-  for a verbose output when a devlb/sb devlw/sb instruction is
-  executed. (only STi5518 regs are supported at moment).
-
-- w `index` `value`
-
-  sets the workspace word at index `index` to the specified
-  value.
-
-After a command is executed, the emulator will show
-
-- the contents of the A, B, C and Iptr registers
-- all of the allocated workspace words will also be shown
-- next, the address of the next command, the octal values of
-  the bytes that comprise the command and the mnemonic of the
-  next command will be displayed
-- finally, the command prompt ('>') will be displayed.
+- Displays the memory address of the upcoming command, its raw octal byte values, and its decoded assembly mnemonic.
+- Finally, it drops the cursor back to the command prompt (`>`), waiting for the input.
 
 Here's an example of what you might see:
 
@@ -177,7 +110,15 @@ Wptr  0=0x7fff0014  1=0x7ffffff0  2=0xaaaaaaaa 3=0xaaaaaaaa
 >
 ```
 
-And this with the 'vra' mode ON (if an entry is found in the internal DB)
+If you have `vra` mode turned on, you may see these additional diagnostic tags:
+
+- `NOTE`: Standard informational note generated by `st20emu`.
+- `REGN`: **Reg**ister **N**ame found in the internal hardware database.
+- `bits:`: The bit-width extension of the register.
+- `access:`: Allowed access permissions for the register (e.g., `R/W` for Read/Write).
+- `DESC`/`DESCR`: Text **desc**ription of the register or the targeted memory region.
+
+And this with the `vra` mode ON (if an entry is found in the internal DB):
 
 ```plaintext
 7fff01a4  2f f1  devsb
@@ -193,15 +134,7 @@ Wptr  0=0x7fff01d2  1=0xaaaaaaaa  2=0xaaaaaaaa  3=0xaaaaaaaa
 >
 ```
 
-Where:
-
-NOTE is the usual field put there by st20emu
-REGN stand for (REG)ister (N)ame
-bits: is the register extension in bit
-access: is the access allowed for this register (R)ead (W)rite etc.
-DESC: stand for (DESC)ription, when available.
-
-This is the output of the 'omr' command...
+This is the output of the `omr` command...
 
 ```plaintext
 
@@ -215,7 +148,7 @@ HP_ErrFlag=0x00 LP_ErrFlag=0x00 HaltOnError=0x00
 
 ```
 
-...and this for 'ver'
+...and this for `ver`
 
 ```plaintext
 > ver
