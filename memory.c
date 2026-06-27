@@ -310,10 +310,11 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
   struct stat st;
   stat(byteFile, &st);
   long size = st.st_size;
-  if (address == NULL) {
+
+  if (address == 0) {
     address = 2147483647 - size + 1;
   }
-  fprintf(stderr, "Loading %ld bytes from %s to 0x%08x\n", size, byteFile, address);
+  fprintf(stderr, "Loading %ld bytes from %s to 0x%08lx\n", size, byteFile, address);
   long nextAddress = address;
   char data[BLKSIZE];
   MEMBLK *cBlk;
@@ -350,7 +351,7 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
      * have to fill the block starting at the proper byte address within
      * the block
      */
-    nBytesRead = read(byteFd, &data, BLKSIZE);
+    nBytesRead = read(byteFd, data, BLKSIZE);
 
     /* if we haven't reach the end of the file's data */
     if (nBytesRead > 0) {
@@ -363,7 +364,7 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
       }
 
       /* copy the data into the memory block */
-      memcpy(&(cBlk->data[nextAddress & ADDR_IN_BLK_MASK]), &data,
+      memcpy(&(cBlk->data[nextAddress & ADDR_IN_BLK_MASK]), data,
              (size_t)BLKSIZE - (nextAddress & ADDR_IN_BLK_MASK));
 
       /* if there is no used byte file, set all of the bytes to used */
