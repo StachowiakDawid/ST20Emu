@@ -16,10 +16,8 @@ V3.2 January 04, 2012
 It was tested with clang version 18.1.3 (1ubuntu1).
 
 ```bash
-clang++ -O2 -std=c++11 -w st20emu.cpp omr.cpp stdafx.cpp commands.c memory.c st20.c -o st20emu -lncurses
+make clean && make
 ```
-
-> -w - disabled warnings as they take the whole terminal screen
 
 How to use
 ----------

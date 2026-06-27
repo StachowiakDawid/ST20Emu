@@ -12,11 +12,13 @@
 #include "stdafx.h"
 #include "ncurses.h"
 #include "defines.h"
+
+extern "C" {
 #include "commands.h"
 #include "memory.h"
-// #include "COMMANDS.C"
-/***************************************************/
 #include "st20.h"
+}
+
 #define ST20_ERROR_START		-2000
 #define ST20_ERROR_END			-2999
 
@@ -249,4 +251,3 @@ int main (int argc, char *argv[]) {
   printf ("Finished\n\n");
   return (0);
 }
-
