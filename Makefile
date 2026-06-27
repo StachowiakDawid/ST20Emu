@@ -6,8 +6,8 @@ CC = clang
 CXX = clang++
 
 # -w is there temporarily because of around 3 thousand warnings xD
-CFLAGS = -O2 -std=c99 -w
-CXXFLAGS = -O2 -std=c++11
+CFLAGS = -O2 -std=c23 -w
+CXXFLAGS = -O2 -std=c++23 -Wall -Wextra -Wpedantic
 LDFLAGS = -lncurses
 
 SRCS_CPP = st20emu.cpp omr.cpp stdafx.cpp
