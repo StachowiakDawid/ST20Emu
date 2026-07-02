@@ -2118,21 +2118,27 @@ int lshr_(FILE *outFp, long unused) {
   return (0);
 }
 
+/* Code: 23 F8
+  Description: Subtract with borrow in and check for overflow. The result of the
+  operation, put into Areg, is Breg minus Areg, minus bit 0 of Creg.
+*/
 int lsub_(FILE *outFp, long unused) {
-  float value1, value2;
-  long value3;
+  int64_t Areg, Breg, Creg, diff;
 
-  value1 = (float)pop();
-  value2 = (float)pop();
-  value3 = pop();
+  Areg = (int32_t)pop();
+  Breg = (int32_t)pop();
+  Creg = (int32_t)pop();
 
-  value1 = value2 - value1 - (value3 & 0x01);
-  if (value1 > 0x7fffffff) {
-    push((long)(value1 - 0x100000000));
-  } else if (value1 < 0x80000000) {
-    push((long)(value1 + 0x100000000));
+  diff = Breg - Areg - (Creg & 0x01);
+
+  if (diff > 0x7FFFFFFFLL) {
+    push((long)(diff - 0x100000000LL));
+    // TODO: Signal IntegerOverflow per documentation
+  } else if (diff < -0x80000000LL) {
+    push((long)(diff + 0x100000000LL));
+    // TODO: Signal IntegerOverflow per documentation
   } else {
-    push((long)value1);
+    push((long)diff);
   }
 
   return (0);
