@@ -1705,26 +1705,27 @@ int j_(FILE *outFp, long offset) {
   return (0);
 }
 
-/*	Code: 21 F6
+/* Code: 21 F6
   Description: Add with carry in and check for overflow. The result of the operation is
   the sum of Areg, Breg and bit 0 of Creg.
 */
 int ladd_(FILE *outFp, long unused) {
-  float value1, value2;
-  long value3;
+  int64_t Areg, Breg, Creg, sum;
 
-  value1 = (float)pop(); // Areg
-  value2 = (float)pop(); // Breg
-  value3 = pop();        // Creg
+  Areg = (int32_t)pop(); // Areg
+  Breg = (int32_t)pop(); // Breg
+  Creg = (int32_t)pop(); // Creg
 
-  value1 = value2 + value1 + (value3 & 0x01);
+  sum = Areg + Breg + (Creg & 0x01);
 
-  if (value1 > 0x7fffffff) {
-    push((long)(value1 - 0x100000000));
-  } else if (value1 < 0x80000000) {
-    push((long)(value1 + 0x100000000));
+  if (sum > 0x7FFFFFFFLL) {
+    push((long)(sum - 0x100000000LL));
+    // TODO: Signal IntegerOverflow per documentation
+  } else if (sum < -0x80000000LL) {
+    push((long)(sum + 0x100000000LL));
+    // TODO: Signal IntegerOverflow per documentation
   } else {
-    push((long)value1);
+    push((long)sum);
   }
 
   return (0);
