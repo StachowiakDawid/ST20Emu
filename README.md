@@ -20,6 +20,12 @@ It was tested with clang version 18.1.3 (1ubuntu1).
 make clean && make
 ```
 
+If you want to build a release version (it's too broken for now anyway and will silence runtime errors):
+
+```bash
+BUILD=release make clean && make
+```
+
 ## How to use
 
 To start, type `st20emu` in a terminal window. At the `>`
