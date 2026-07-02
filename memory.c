@@ -447,10 +447,10 @@ int saveMemory(char *dirName, FILE *outFp) {
       }
 
       /* create the file names */
-      if (sprintf(dataFileName, "%s/%08x.bin", dirName, cBlk->startAddr) == EOF) {
+      if (sprintf(dataFileName, "%s/%08lx.bin", dirName, cBlk->startAddr) == EOF) {
         return (INVALID_OUT_FILE);
       }
-      if (sprintf(usedFileName, "%s/%08x.use", dirName, cBlk->startAddr) == EOF) {
+      if (sprintf(usedFileName, "%s/%08lx.use", dirName, cBlk->startAddr) == EOF) {
         return (INVALID_OUT_FILE);
       }
 
@@ -521,7 +521,7 @@ int loadMemory(char *dirName, FILE *outFp) {
 
     /* the name contains the address to load the file at */
     strcpy(addressCh, entry->d_name);
-    if (sscanf(addressCh, "%8x.bin", &address) != 1) {
+    if (sscanf(addressCh, "%8lx.bin", &address) != 1) {
       return (INVALID_OUT_FILE);
     }
     // fprintf (stderr, "%s   \n",dirBlk.name);
