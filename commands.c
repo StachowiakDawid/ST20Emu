@@ -196,7 +196,7 @@ int u_load(FILE *inFp, FILE *outFp) {
   char dirName[NAME_SIZE];
   int result = 0;
 
-  if (sscanf(cmdState.parm1, "%s", &dirName) == 1) {
+  if (sscanf(cmdState.parm1, "%s", dirName) == 1) {
     result = loadMemory(dirName, outFp);
   } else {
     result = BAD_PARAMETER;
@@ -243,7 +243,7 @@ int u_save(FILE *inFp, FILE *outFp) {
   char dirName[NAME_SIZE];
   int result = 0;
 
-  if (sscanf(cmdState.parm1, "%s", &dirName) == 1) {
+  if (sscanf(cmdState.parm1, "%s", dirName) == 1) {
     result = saveMemory(dirName, outFp);
   } else {
     result = BAD_PARAMETER;
