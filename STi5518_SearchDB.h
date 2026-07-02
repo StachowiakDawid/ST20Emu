@@ -58,7 +58,7 @@ int SearchForReg(FILE *outFp, unsigned long reg) {
                                    (size_t)sizeof(REGDESCR), (fptr)compareRegs);
 
     if (regdescr == NULL) {
-      fprintf(outFp, "Sorry, no match for 0x%08x in Registers DB\n", reg);
+      fprintf(outFp, "Sorry, no match for 0x%08lx in Registers DB\n", reg);
       found = FALSE;
     } else {
       // printout of info's

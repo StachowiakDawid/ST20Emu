@@ -589,30 +589,30 @@ int st20Init(PARMS *userParms, FILE *outFp) {
 
   for (i = 0; i < userParms->nParms; i++) {
     if (!strcasecmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         st20ProductId = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], MEM_START_VAL_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         memStartVal = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], TIMER_GUESS_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         timerGuess = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         wptrEndAddr = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], START_ADDR_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         startAddr = value;
       }
     }
   }
 
-  fprintf(outFp, "START_ADDR=0x%08x\nMEM_START_VAL=0x%08x\nST20_PRODUCT_ID=0x%08x\n\
-TIMER_GUESS=0x%08x\nWPTR_END_ADDR=0x%08x\n",
+  fprintf(outFp, "START_ADDR=0x%08lx\nMEM_START_VAL=0x%08lx\nST20_PRODUCT_ID=0x%08lx\n\
+TIMER_GUESS=0x%08lx\nWPTR_END_ADDR=0x%08lx\n",
           startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
 
   initCPUState();
@@ -751,7 +751,7 @@ int setWatch(char *reg, char *parm) {
   } else {
     enable = FALSE;
   }
-  sscanf(parm, "%x", &value);
+  sscanf(parm, "%lx", &value);
 
   switch (reg[0]) {
   case 'a':
@@ -818,7 +818,7 @@ int printCPUState(FILE *outFp) {
   long address;
   long value;
 
-  fprintf(outFp, "A=0x%08x B=0x%08x C=0x%08x  Iptr=0x%08x \n", cpuState.areg, cpuState.breg,
+  fprintf(outFp, "A=0x%08lx B=0x%08lx C=0x%08lx  Iptr=0x%08lx \n", cpuState.areg, cpuState.breg,
           cpuState.creg, cpuState.iptr);
 
   for (i = 0; i < cpuState.nWptr; i++) {
@@ -828,7 +828,7 @@ int printCPUState(FILE *outFp) {
 
     addrWptrWord(i, &address);
     result = readBytes(address, 4, (unsigned long *)&value);
-    fprintf(outFp, " %2x=0x%08x", i, value);
+    fprintf(outFp, " %2x=0x%08lx", i, value);
 
     if (i % WPTR_PRINT_COLS == WPTR_PRINT_COLS - 1) {
       fprintf(outFp, "\n    ");
@@ -847,9 +847,9 @@ int printOMRState(FILE *outFp) {
   // show the OMR Enables register
   fprintf(outFp, "OTHER MACHINE REGISTERS\n");
   fprintf(outFp, "-----------------------\n");
-  fprintf(outFp, "Enables=0x%08x\n", omrState.Enables);
-  fprintf(outFp, "ClockRegHP=0x%08x ", omrState.ClockRegHP);
-  fprintf(outFp, "ClockRegLP=0x%08x ", omrState.ClockRegLP);
+  fprintf(outFp, "Enables=0x%08lx\n", omrState.Enables);
+  fprintf(outFp, "ClockRegHP=0x%08lx ", omrState.ClockRegHP);
+  fprintf(outFp, "ClockRegLP=0x%08lx ", omrState.ClockRegLP);
   fprintf(outFp, "ClockEnables=0x%02x \n", omrState.ClockEnables);
   fprintf(outFp, "HP_ErrFlag=0x%02x ", omrState.HP_ErrorFlag);
   fprintf(outFp, "LP_ErrFlag=0x%02x ", omrState.LP_ErrorFlag);
@@ -861,7 +861,7 @@ int printOMRState(FILE *outFp) {
  */
 int printEnablesRegState(FILE *outFp) {
 
-  fprintf(outFp, "Enables Register Value=0x%08x\n", omrState.Enables);
+  fprintf(outFp, "Enables Register Value=0x%08lx\n", omrState.Enables);
   // fprintf(outFp,"-GLOBAL INTERRUPTS ENABLES VALUES-\n");
   if (omrState.Enables & LP_PROCESS_INT_ENB)
     fprintf(outFp, " LP_PROCESS_INT_ENB	is set\n");
@@ -932,7 +932,7 @@ int decodeNextInstr(FILE *outFp) {
     result = readBytes(cpuState.iptr + instrLength, 1, &cByte);
     if (result) {
       fprintf(outFp, "%s\n", memoryError(result));
-      fprintf(outFp, "Error occurred when reading instruction at %8x, offset %2x\n", cpuState.iptr,
+      fprintf(outFp, "Error occurred when reading instruction at %8lx, offset %2x\n", cpuState.iptr,
               instrLength);
       return (-1);
     }
@@ -1001,7 +1001,7 @@ int printNextInstr(FILE *outFp) {
   int i;
   char operandCh[100];
 
-  fprintf(outFp, "%08x  ", cpuState.iptr);
+  fprintf(outFp, "%08lx  ", cpuState.iptr);
 
   for (i = 0; i < instrLength; i++) {
     fprintf(outFp, "%2x ", instrBytes[i]);
@@ -1012,13 +1012,13 @@ int printNextInstr(FILE *outFp) {
    * the address (i.e. iptr + operand) rather than the operand
    */
   if (instrCode == 0x00 || instrCode == 0x0A) {
-    sprintf(operandCh, " loc_%08x", (cpuState.iptr + instrLength + operand) & 0xFFFFFFFF);
+    sprintf(operandCh, " loc_%08lx", (cpuState.iptr + instrLength + operand) & 0xFFFFFFFF);
   } else if (instrCode == 0x09) {
-    sprintf(operandCh, " sub_%08x", (cpuState.iptr + instrLength + operand) & 0xFFFFFFFF);
+    sprintf(operandCh, " sub_%08lx", (cpuState.iptr + instrLength + operand) & 0xFFFFFFFF);
   } else if (instrCode > 0x0F) {
     operandCh[0] = '\0';
   } else {
-    sprintf(operandCh, " %-8x", operand & 0xFFFFFFFF);
+    sprintf(operandCh, " %-8lx", operand & 0xFFFFFFFF);
   }
 
   fprintf(outFp, " %s%s\n", instrEntry[instrCode].mnemonic, operandCh);
@@ -1336,7 +1336,7 @@ int call_(FILE *outFp, long offset) {
   cpuState.creg = UNDEFINED_WORD;
   cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
 
-  fprintf(outFp, "Call to %8x ,return to %8x\n", cpuState.iptr, addr);
+  fprintf(outFp, "Call to %8lx ,return to %8lx\n", cpuState.iptr, addr);
   return (0);
 }
 
@@ -1369,7 +1369,7 @@ int devlb_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08x Read of device at address %08x, value=0x%08x\n",
+    fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
             addr - instrLength, oldAreg, newAreg);
     fprintf(outFp, "Value of A register is questionable\n");
 
@@ -1405,7 +1405,7 @@ int devls_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08x Read of device at address %08x, value=0x%08x\n",
+    fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
             addr - instrLength, oldAreg, newAreg);
     fprintf(outFp, "Value of A register is questionable\n");
 
@@ -1441,7 +1441,7 @@ int devlw_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08x Read of device at address %08x, value=0x%08x\n",
+    fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
             addr - instrLength, oldAreg, newAreg);
     fprintf(outFp, "Value of A register is questionable\n");
 
@@ -1477,7 +1477,7 @@ int devsb_(FILE *outFp, long value) {
   result = storeBytes(value1, 1, (unsigned char)(value2 & 0xFF));
 
   if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08x Write to device at address %08x, value=0x%08x\n",
+    fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
             addr - instrLength, value1, (unsigned char)value2 & 0xFF);
     if (showRegs())
       SearchForReg(outFp, value1);
@@ -1510,7 +1510,7 @@ int devss_(FILE *outFp, long value) {
   result = storeBytes(value1, 2, (unsigned int)(value2 & 0xFFFF));
 
   if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08x Write to device at address %08x, value=0x%08x\n",
+    fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
             addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
 
     // Search description in register database
@@ -1545,7 +1545,7 @@ int devsw_(FILE *outFp, long value) {
   result = storeBytes(value1, 4, (unsigned long)(value2 & 0xFFFFFFFF));
 
   if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08x Write to device at address %08x, value=0x%08x\n",
+    fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
             addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
 
     // Search description in register database
@@ -1742,7 +1742,7 @@ int lb_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08x\n", oldAreg, newAreg);
+    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   }
 
   if (result) {
@@ -1769,7 +1769,7 @@ int lbx_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08x\n", oldAreg, newAreg);
+    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   }
 
   if (result) {
@@ -1909,13 +1909,13 @@ int ldnl_(FILE *outFp, long offset) {
   push(cWord);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08x\n", oldAreg + offset * 4,
+    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg + offset * 4,
             cWord);
   }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing ldnl %08x  iptr=%08x\n", oldAreg + offset * 4,
+    fprintf(outFp, "  Error occurred when executing ldnl %08lx  iptr=%08lx\n", oldAreg + offset * 4,
             get_iptr());
     return (-1);
   }
@@ -1978,7 +1978,7 @@ int ldtraph_(FILE *outFp, long unused) {
   oldBreg = pop();
   oldCreg = pop();
 
-  fprintf(outFp, "ldtraph: Group, &TrapHandler, priority: %x, %x,  %x\n", oldAreg, oldBreg,
+  fprintf(outFp, "ldtraph: Group, &TrapHandler, priority: %lx, %lx,  %lx\n", oldAreg, oldBreg,
           oldCreg);
 
   trapbase = trapbase + 0x40 + 0x80 * oldCreg + 0x20 * oldAreg;
@@ -2063,7 +2063,7 @@ int ls_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08x\n", oldAreg, newAreg);
+    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   }
 
   if (result) {
@@ -2236,16 +2236,16 @@ int resetch_(FILE *outFp, long unused) {
   push(newAreg);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08x\n", oldAreg, newAreg);
+    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   }
 
   result = storeBytes(oldAreg, 4, (long)NOT_PROCESS);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write memory address %08x, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
+    fprintf(outFp, "NOTE: Write memory address %08lx, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
   }
 
-  fprintf(outFp, "Channel at address %08x was reset\n", oldAreg);
+  fprintf(outFp, "Channel at address %08lx was reset\n", oldAreg);
 
   return (result);
 }
@@ -2283,7 +2283,7 @@ int runp_(FILE *outFp, long unused) {
   pop();
   pop();
 
-  fprintf(outFp, "A new process was started.  Process descriptor =0x%08x\n", oldAreg);
+  fprintf(outFp, "A new process was started.  Process descriptor =0x%08lx\n", oldAreg);
 
   return (result);
 }
@@ -2297,7 +2297,7 @@ int sb_(FILE *outFp, long value) {
   result = storeBytes(value1, 1, (unsigned char)(value2 & 0xFF));
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write to memory address %08x, value=0x%08x\n", value1, value2 & 0xFF);
+    fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFF);
   }
 
   if (result) {
@@ -2339,7 +2339,7 @@ int signal_(FILE *outFp, long unused) {
   pop();
 
   if (needPrompt()) {
-    fprintf(outFp, "A signal was received for address 0x%08x\n", oldAreg);
+    fprintf(outFp, "A signal was received for address 0x%08lx\n", oldAreg);
   }
 
   return (result);
@@ -2354,7 +2354,7 @@ int ss_(FILE *outFp, long value) {
   result = storeBytes(value1, 2, (unsigned)(value2 & 0xFFFF));
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write to memory address %08x, value=0x%08x\n", value1, value2 & 0xFFFF);
+    fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFFFF);
   }
 
   if (result) {
@@ -2385,7 +2385,7 @@ int startp_(FILE *outFp, long unused) {
   oldBreg = pop();
   pop();
 
-  fprintf(outFp, "A new process was started.  Workspace=0x%08x, Iptr=0x%08x\n", oldAreg,
+  fprintf(outFp, "A new process was started.  Workspace=0x%08lx, Iptr=0x%08lx\n", oldAreg,
           cpuState.iptr + oldBreg);
 
   return (0);
@@ -2410,7 +2410,7 @@ int stclock_(FILE *outFp, long unused) {
   oldAreg = pop();
   oldBreg = pop();
 
-  fprintf(outFp, "0x%08x stored in %s clock\n", oldBreg,
+  fprintf(outFp, "0x%08lx stored in %s clock\n", oldBreg,
           (oldAreg & 1) ? "low priority" : "high priority");
 
   if (oldAreg & 1)
@@ -2455,7 +2455,7 @@ int stnl_(FILE *outFp, long offset) {
   result = storeBytes(oldAreg + offset * 4, 4, oldBreg);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write to memory address %08x, value=0x%08x\n", oldAreg + offset * 4,
+    fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08x\n", oldAreg + offset * 4,
             oldBreg);
   }
 
@@ -2527,7 +2527,7 @@ int wait_(FILE *outFp, long unused) {
   pop();
 
   if (needPrompt()) {
-    fprintf(outFp, "Wait on semaphore at 0x%08x\n", oldAreg);
+    fprintf(outFp, "Wait on semaphore at 0x%08lx\n", oldAreg);
   }
 
   return (0);
@@ -2624,7 +2624,7 @@ int initTimer(FILE *outFp) {
   omrState.Enables = 0xffffc000;         // the initial state, see omr.h
                                          // bit 14 and 15 are reserved but set to 1
   //'ticking' code is into execInstr() subroutine
-  fprintf(outFp, "CPU_CLOCK=%d Hz\n HPTimerTick=%d cpucycles\n LPTimerTick=%d cpucycles\n",
+  fprintf(outFp, "CPU_CLOCK=%d Hz\n HPTimerTick=%ld cpucycles\n LPTimerTick=%ld cpucycles\n",
           CPU_CLOCK, hp_timertick, lp_timertick);
 
   return (0);
@@ -2647,10 +2647,10 @@ int ldtimer_(FILE *outFp, long unused) {
 
   if (cpuState.nWptr & 0x01) { // HighPriority
     push(omrState.ClockRegHP);
-    fprintf(outFp, "Read of HIGH_PRIORITY timer. Value is 0x%08x\n", omrState.ClockRegHP);
+    fprintf(outFp, "Read of HIGH_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegHP);
   } else { // LowPriority
     push(omrState.ClockRegLP);
-    fprintf(outFp, "Read of LOW_PRIORITY timer. Value is 0x%08x\n", omrState.ClockRegLP);
+    fprintf(outFp, "Read of LOW_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegLP);
   }
   //'ticking' code is into execInstr() subroutine
   return (0);
@@ -2675,7 +2675,7 @@ Error signals: none
 int sttimer_(FILE *outFp, long unused) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
-  fprintf(outFp, "LOW and HIGH priority clock registers were set to 0x%08x\n", omrState.ClockRegHP);
+  fprintf(outFp, "LOW and HIGH priority clock registers were set to 0x%08lx\n", omrState.ClockRegHP);
 
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
   omrState.ClockEnables |= LPTIMER_MASK; // set bit1

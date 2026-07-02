@@ -196,7 +196,7 @@ int u_load(FILE *inFp, FILE *outFp) {
   char dirName[NAME_SIZE];
   int result = 0;
 
-  if (sscanf(cmdState.parm1, "%s", &dirName) == 1) {
+  if (sscanf(cmdState.parm1, "%s", dirName) == 1) {
     result = loadMemory(dirName, outFp);
   } else {
     result = BAD_PARAMETER;
@@ -215,12 +215,12 @@ int u_loadData(FILE *inFp, FILE *outFp) {
   long dataLength;
   int result = 0;
   /* convert the first parameter into the address to load the file to */
-  if (cmdState.parm2[0] != '\0' && sscanf(cmdState.parm1, "%x", &startAddr) == 1) {
+  if (cmdState.parm2[0] != '\0' && sscanf(cmdState.parm1, "%lx", &startAddr) == 1) {
     startAddr &= 0xFFFFFFFF;
     result = bulkLoadBytes(startAddr, cmdState.parm2, (char *)NULL, &dataLength);
   } else {
     result = bulkLoadBytes((long)NULL, cmdState.parm1, (char *)NULL, &dataLength);
-    fprintf(outFp, "Read %d bytes from %s\n", dataLength, cmdState.parm1);
+    fprintf(outFp, "Read %ld bytes from %s\n", dataLength, cmdState.parm1);
   }
   return (result);
 }
@@ -243,7 +243,7 @@ int u_save(FILE *inFp, FILE *outFp) {
   char dirName[NAME_SIZE];
   int result = 0;
 
-  if (sscanf(cmdState.parm1, "%s", &dirName) == 1) {
+  if (sscanf(cmdState.parm1, "%s", dirName) == 1) {
     result = saveMemory(dirName, outFp);
   } else {
     result = BAD_PARAMETER;
@@ -260,7 +260,7 @@ int u_save(FILE *inFp, FILE *outFp) {
 int u_setAreg(FILE *inFp, FILE *outFp) {
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &value) == 1) {
+  if (sscanf(cmdState.parm1, "%lx", &value) == 1) {
     return (setAreg(value));
   } else {
     return (BAD_PARAMETER);
@@ -271,7 +271,7 @@ int u_setAreg(FILE *inFp, FILE *outFp) {
 int u_setBreg(FILE *inFp, FILE *outFp) {
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &value) == 1) {
+  if (sscanf(cmdState.parm1, "%lx", &value) == 1) {
     return (setBreg(value));
   } else {
     return (BAD_PARAMETER);
@@ -282,7 +282,7 @@ int u_setBreg(FILE *inFp, FILE *outFp) {
 int u_setCreg(FILE *inFp, FILE *outFp) {
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &value) == 1) {
+  if (sscanf(cmdState.parm1, "%lx", &value) == 1) {
     return (setCreg(value));
   } else {
     return (BAD_PARAMETER);
@@ -293,7 +293,7 @@ int u_setCreg(FILE *inFp, FILE *outFp) {
 int u_setIptr(FILE *inFp, FILE *outFp) {
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &value) == 1) {
+  if (sscanf(cmdState.parm1, "%lx", &value) == 1) {
     return (setIptr(value));
   } else {
     return (BAD_PARAMETER);
@@ -308,10 +308,10 @@ int u_stop(FILE *inFp, FILE *outFp) {
 int u_storeWptr(FILE *inFp, FILE *outFp) {
   long index, value;
 
-  if (sscanf(cmdState.parm1, "%x", &index) != 1) {
+  if (sscanf(cmdState.parm1, "%lx", &index) != 1) {
     return (BAD_PARAMETER);
   }
-  if (sscanf(cmdState.parm2, "%x", &value) != 1) {
+  if (sscanf(cmdState.parm2, "%lx", &value) != 1) {
     return (BAD_PARAMETER);
   }
   return (storeWptrWord(index, value));
@@ -323,12 +323,12 @@ int u_view(FILE *inFp, FILE *outFp) {
   long address;
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &address) != 1) {
+  if (sscanf(cmdState.parm1, "%lx", &address) != 1) {
     return (BAD_PARAMETER);
   }
 
   result = readBytes(address, 4, (unsigned long *)&value);
-  fprintf(outFp, "Value at 0x%08x is 0x%08x\n", address, value);
+  fprintf(outFp, "Value at 0x%08lx is 0x%08lx\n", address, value);
 
   return (result);
 }
@@ -338,14 +338,14 @@ int u_view_a(FILE *inFp, FILE *outFp) {
   long address;
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &address) != 1) {
+  if (sscanf(cmdState.parm1, "%lx", &address) != 1) {
     return (BAD_PARAMETER);
   }
-  if (sscanf(cmdState.parm2, "%x", &value) != 1) {
+  if (sscanf(cmdState.parm2, "%lx", &value) != 1) {
     return (BAD_PARAMETER);
   }
   result = storeBytes(address, 4, value);
-  fprintf(outFp, "Value at 0x%08x is 0x%08x\n", address, value);
+  fprintf(outFp, "Value at 0x%08lx is 0x%08lx\n", address, value);
 
   return (result);
 }
@@ -357,19 +357,19 @@ int u_view_aa(FILE *inFp, FILE *outFp) {
   long range;
   long i;
 
-  if (sscanf(cmdState.parm1, "%x", &address) != 1) {
+  if (sscanf(cmdState.parm1, "%lx", &address) != 1) {
     return (BAD_PARAMETER);
   }
-  if (sscanf(cmdState.parm2, "%x", &range) != 1) {
+  if (sscanf(cmdState.parm2, "%lx", &range) != 1) {
     return (BAD_PARAMETER);
   }
 
   for (i = address; i < (address + range); i = i + 4) {
     result = readInvBytes(i, 4, &value);
     if (!(i & 0x0f)) {
-      fprintf(outFp, "\n\r0x%08x : %08x", i, value);
+      fprintf(outFp, "\n\r0x%08lx : %08lx", i, value);
     } else {
-      fprintf(outFp, " 0x%08x", value);
+      fprintf(outFp, " 0x%08lx", value);
     }
   }
   fprintf(outFp, "\n\r");
@@ -381,11 +381,11 @@ int u_view_w(FILE *inFp, FILE *outFp) {
   long n = 0;
   long value;
 
-  if (sscanf(cmdState.parm1, "%x", &n) != 1) {
+  if (sscanf(cmdState.parm1, "%lx", &n) != 1) {
     return (BAD_PARAMETER);
   }
   result = addrWptrWord(n, &value);
-  fprintf(outFp, "Wptr_n is at 0x%08x\n", value);
+  fprintf(outFp, "Wptr_n is at 0x%08lx\n", value);
 
   return (result);
 }
@@ -397,7 +397,7 @@ int u_query_db(FILE *inFp, FILE *outFp) {
   int result = 0;
   unsigned long n = 0;
 
-  if (sscanf(cmdState.parm1, "%x", &n) != 1) {
+  if (sscanf(cmdState.parm1, "%lx", &n) != 1) {
     return (BAD_PARAMETER);
   }
 
