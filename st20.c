@@ -589,23 +589,23 @@ int st20Init(PARMS *userParms, FILE *outFp) {
 
   for (i = 0; i < userParms->nParms; i++) {
     if (!strcasecmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         st20ProductId = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], MEM_START_VAL_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         memStartVal = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], TIMER_GUESS_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         timerGuess = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         wptrEndAddr = value;
       }
     } else if (!strcasecmp(userParms->parameter[i], START_ADDR_CH)) {
-      if (sscanf(userParms->value[i], "%x", &value) == 1) {
+      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         startAddr = value;
       }
     }
@@ -751,7 +751,7 @@ int setWatch(char *reg, char *parm) {
   } else {
     enable = FALSE;
   }
-  sscanf(parm, "%x", &value);
+  sscanf(parm, "%lx", &value);
 
   switch (reg[0]) {
   case 'a':
@@ -1978,7 +1978,7 @@ int ldtraph_(FILE *outFp, long unused) {
   oldBreg = pop();
   oldCreg = pop();
 
-  fprintf(outFp, "ldtraph: Group, &TrapHandler, priority: %x, %x,  %x\n", oldAreg, oldBreg,
+  fprintf(outFp, "ldtraph: Group, &TrapHandler, priority: %lx, %lx,  %lx\n", oldAreg, oldBreg,
           oldCreg);
 
   trapbase = trapbase + 0x40 + 0x80 * oldCreg + 0x20 * oldAreg;
