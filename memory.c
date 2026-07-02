@@ -236,13 +236,13 @@ int storeByteRange(long srcAddr, long destAddr, int nBytes) {
 
     /* get the block that the current byte is in */
     /* if the memory block can't be created, return an error */
-    if (result = readBytes(srcAddr + i, 1, &cWord)) {
+    if ((result = readBytes(srcAddr + i, 1, &cWord))) {
       return (result);
     }
 
     cWord &= 0xFF;
 
-    if (result = storeBytes(destAddr + i, 1, cWord)) {
+    if ((result = storeBytes(destAddr + i, 1, cWord))) {
       return (result);
     }
   }
