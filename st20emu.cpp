@@ -136,7 +136,7 @@ int st20emuInit(PARMS *userParms, FILE *outFp) {
 }
 
 //***********
-int main(int argc, char *argv[]) {
+int main() {
   //   initscr();
   //   scrollok(stdscr, TRUE);
   //   nodelay(stdscr, TRUE);
