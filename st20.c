@@ -1122,7 +1122,7 @@ int wptrPopState() {
 
   readWptrWord(0, &cpuState.iptr);
 
-  if (result = allocWptr((long)4)) {
+  if ((result = allocWptr((long)4))) {
     return (result);
   }
 
@@ -1132,7 +1132,7 @@ int wptrPopState() {
 int wptrPushState() {
   int result = 0;
 
-  if (result = allocWptr((long)-4)) {
+  if ((result = allocWptr((long)-4))) {
     return (result);
   }
 
