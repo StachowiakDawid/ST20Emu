@@ -12,5 +12,8 @@
   },
   "[markdown]": {
     "editor.defaultFormatter": "yzhang.markdown-all-in-one"
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "tombi-toml.tombi"
   }
 }

@@ -1,0 +1,35 @@
+[settings]
+lockfile = true
+minimum_release_age = "7d"
+
+[tools]
+# clang = "22"
+# clang-format = "22"
+# meson = "latest"
+# ninja = "latest"
+# just = "latest"
+# mold = "latest"
+
+[env]
+CC = "clang"
+CXX = "clang++"
+
+[tasks.setup]
+description = "Initialize the Meson build directory"
+run = "meson setup builddir"
+
+[tasks.build]
+description = "Compile the emulator"
+run = """
+if [ ! -d "builddir" ]; then meson setup builddir; fi
+meson compile -C builddir
+"""
+
+[tasks.run]
+description = "Build and execute the emulator"
+depends = ["build"]
+run = "./builddir/st20emu"
+
+[tasks.clean]
+description = "Wipe out the build files"
+run = "rm -rf builddir"
