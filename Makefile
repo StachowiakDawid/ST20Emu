@@ -10,7 +10,7 @@ OBJS = $(addprefix $(OBJ_DIR)/, $(SRCS_CPP:.cpp=.o) $(SRCS_C:.c=.o))
 
 CFLAGS_BASE   = -std=c23
 CXXFLAGS_BASE = -std=c++23 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wold-style-cast
-LDFLAGS_BASE  = -lncurses
+LDFLAGS_BASE  =
 
 BUILD ?= debug
 
