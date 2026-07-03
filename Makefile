@@ -8,7 +8,7 @@ SRCS_CPP = st20emu.cpp omr.cpp stdafx.cpp
 SRCS_C   = commands.c memory.c st20.c
 OBJS = $(addprefix $(OBJ_DIR)/, $(SRCS_CPP:.cpp=.o) $(SRCS_C:.c=.o))
 
-CFLAGS_BASE   = -std=c23 -w
+CFLAGS_BASE   = -std=c23
 CXXFLAGS_BASE = -std=c++23 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wold-style-cast
 LDFLAGS_BASE  = -lncurses
 
