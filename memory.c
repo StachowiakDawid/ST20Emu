@@ -1,6 +1,3 @@
-/*#include <sys/file.h>*/
-#pragma warning(disable : 4996)
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
