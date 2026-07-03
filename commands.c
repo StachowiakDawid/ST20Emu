@@ -1,4 +1,8 @@
-#include "stdafx.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "defines.h"
 #include "st20.h"
 #include "memory.h"

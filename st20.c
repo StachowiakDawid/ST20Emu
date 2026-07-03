@@ -29,7 +29,15 @@
 /*				-HighPriority and LowPriority ClockReg more precise */
 /********************************************************************/
 
-#include "stdafx.h"
+// std
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
+
+// posix / linux
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "defines.h"
 #include "memory.h"
@@ -37,7 +45,7 @@
 #include "st20.h"
 #include "STi5518_SearchDB.h" //Internal DB facility
 #include "omr.h"              //Other Machine Registers include file
-#include <unistd.h>
+
 static OMRSTATE omrState; // The OMR register itself
 
 static CPUSTATE cpuState;

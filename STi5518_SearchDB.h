@@ -3,7 +3,10 @@
 // Method for a more descriptive system added to "st20emu2.exe"
 //////////////////////////////////////////////////////////////////////////
 
+#include <stdio.h>
 #include <stdlib.h> //this for bsearch()
+
+#include "defines.h"
 #include "STi5518_RegisterDB.h"
 #include "STi5518_Region0.h"
 

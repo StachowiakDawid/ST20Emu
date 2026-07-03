@@ -1,15 +1,17 @@
-#include <fcntl.h>
+// std
 #include <stdio.h>
-#include <sys/stat.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
+
+// posix / linux
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
 #include "defines.h"
 #include "st20.h"
 #include "memory.h"
-#include <dirent.h>
-#include <sys/stat.h>
 
 /* this structure hold the state of the memory */
 typedef struct memblk_struct {
