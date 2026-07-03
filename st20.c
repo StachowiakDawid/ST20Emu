@@ -1979,7 +1979,8 @@ int ldtraph_(FILE *outFp, long unused) {
   unsigned long oldAreg, oldBreg, oldCreg;
   unsigned long trapbase = 0x80000000;
   unsigned long value;
-  int result;
+  // int result;
+  // result was not used but could be for info
   oldAreg = pop();
   oldBreg = pop();
   oldCreg = pop();
@@ -1988,8 +1989,21 @@ int ldtraph_(FILE *outFp, long unused) {
           oldCreg);
 
   trapbase = trapbase + 0x40 + 0x80 * oldCreg + 0x20 * oldAreg;
-  result = readBytes(oldBreg, 4, &value);
-  result = storeByteRange(oldBreg, trapbase, 0x10);
+
+  // TODO: what happened here?
+  // this reads 4 bytes from Breg and writes them into value variable
+
+  // result = 
+  readBytes(oldBreg, 4, &value);
+
+  // but
+  // this reads 16 (sic!) bytes from Breg and writes them into trapbase
+  // why 16 bytes now?
+  // also this function does it with for loop 1 by 1 so there's performance issue
+  // commented by: Omikorin
+
+  // result = 
+  storeByteRange(oldBreg, trapbase, 0x10);
   return (0);
 }
 
