@@ -1576,18 +1576,23 @@ int diff_(FILE *outFp, long unused) {
 
   return (0);
 }
-
+/* Code: 22 FC
+  Description: Divide Breg by Areg, with checking for overflow. The result when not
+  exact is rounded towards zero.
+*/
 int div_(FILE *outFp, long unused) {
-  int value1, value2;
+  int32_t Areg, Breg;
 
-  value1 = pop();
-  value2 = pop();
+  Areg = (int32_t)pop();
+  Breg = (int32_t)pop();
 
-  if (value1 == 0 || (value2 == MINIMUM_INTEGER && value1 == MAXIMUM_INTEGER)) {
-    /* integer overflow */
+  if ((Areg == 0) || ((Breg == MINIMUM_INTEGER) && (Areg == -1))) {
+    (int32_t)pop(); // Areg' <- undefined
+    // TODO: Signal IntegerOverflow per documentation
     return (0);
   }
-  push(value2 / value1);
+
+  push((long)(Breg / Areg));
 
   return (0);
 }
@@ -1993,7 +1998,7 @@ int ldtraph_(FILE *outFp, long unused) {
   // TODO: what happened here?
   // this reads 4 bytes from Breg and writes them into value variable
 
-  // result = 
+  // result =
   readBytes(oldBreg, 4, &value);
 
   // but
@@ -2002,7 +2007,7 @@ int ldtraph_(FILE *outFp, long unused) {
   // also this function does it with for loop 1 by 1 so there's performance issue
   // commented by: Omikorin
 
-  // result = 
+  // result =
   storeByteRange(oldBreg, trapbase, 0x10);
   return (0);
 }
