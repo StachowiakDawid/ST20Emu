@@ -507,17 +507,25 @@ int loadMemory(char *dirName, FILE *outFp) {
   int result = 0;
 
   if (sprintf(fileMask, "%s/???????0.bin", dirName) == EOF) {
+    fprintf(outFp, "filemask failed\n");
     return (INVALID_OUT_FILE);
   }
+  fprintf(outFp, "filemask: %s\n", fileMask);
 
+  // TODO: this will fail because file mask is not actually a mask, just a string
   dirBlk = opendir(fileMask);
   if (dirBlk == NULL) {
+    fprintf(outFp, "opendir failed\n");
     return (INVALID_OUT_FILE);
   }
+  fprintf(outFp, "opendir successed\n");
+
   do { /* for each file */
 
     /* the name contains the address to load the file at */
+    fprintf(outFp, "d_name: %s\n", entry->d_name);
     strcpy(addressCh, entry->d_name);
+    fprintf(outFp, "address: %s\n", addressCh);
     if (sscanf(addressCh, "%8lx.bin", &address) != 1) {
       return (INVALID_OUT_FILE);
     }
