@@ -41,7 +41,7 @@
 
 #include "defines.h"
 #include "memory.h"
-#include "commands.h"
+// #include "commands.h" // disabled until ported to C++
 #include "st20.h"
 #include "STi5518_SearchDB.h" //Internal DB facility
 #include "omr.h"              //Other Machine Registers include file
