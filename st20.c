@@ -1561,13 +1561,18 @@ int devsw_(FILE *outFp, long value) {
   return (0);
 }
 
+/* Code: F4
+  Description: Subtract Areg from Breg, without checking for overflow.
+*/
 int diff_(FILE *outFp, long unused) {
-  int value1, value2;
+  uint32_t Areg, Breg;
 
-  value1 = pop();
-  value2 = pop();
-
-  push(value2 - value1);
+  Areg = (uint32_t)pop();
+  Breg = (uint32_t)pop();
+  
+  // We need to use uint to omit runtime integer overflow errors
+  // It's safer than to depend on C undefined behaviors
+  push((long)(int32_t)(Breg - Areg));
 
   return (0);
 }
