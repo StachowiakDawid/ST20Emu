@@ -1388,13 +1388,14 @@ int devlb_(FILE *outFp, long unused) {
   result = readBytes(oldAreg, 1, (unsigned long *)&newAreg);
   push(newAreg);
 
-  if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-            addr - instrLength, oldAreg, newAreg);
-    fprintf(outFp, "Value of A register is questionable\n");
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt() || showRegs()) {
+  fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
+          addr - instrLength, oldAreg, newAreg);
+  fprintf(outFp, "Value of A register is questionable\n");
 
-    SearchForReg(outFp, oldAreg);
-  }
+  // SearchForReg(outFp, oldAreg);
+  // }
 
   if (result && result != READ_UNUSED_MEM) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -1424,14 +1425,15 @@ int devls_(FILE *outFp, long unused) {
   result = readBytes(oldAreg, 2, (unsigned long *)&newAreg);
   push(newAreg);
 
-  if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-            addr - instrLength, oldAreg, newAreg);
-    fprintf(outFp, "Value of A register is questionable\n");
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt() || showRegs()) {
+  fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
+          addr - instrLength, oldAreg, newAreg);
+  fprintf(outFp, "Value of A register is questionable\n");
 
-    if (showRegs())
-      SearchForReg(outFp, oldAreg);
-  }
+  // if (showRegs())
+  //   SearchForReg(outFp, oldAreg);
+  // }
 
   if (result && result != READ_UNUSED_MEM) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -1460,14 +1462,15 @@ int devlw_(FILE *outFp, long unused) {
   result = readBytes(oldAreg, 4, (unsigned long *)&newAreg);
   push(newAreg);
 
-  if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-            addr - instrLength, oldAreg, newAreg);
-    fprintf(outFp, "Value of A register is questionable\n");
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt() || showRegs()) {
+  fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
+          addr - instrLength, oldAreg, newAreg);
+  fprintf(outFp, "Value of A register is questionable\n");
 
-    if (showRegs())
-      SearchForReg(outFp, oldAreg);
-  }
+  //   if (showRegs())
+  //     SearchForReg(outFp, oldAreg);
+  // }
 
   if (result && result != READ_UNUSED_MEM) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -1496,12 +1499,13 @@ int devsb_(FILE *outFp, long value) {
   value2 = pop();
   result = storeBytes(value1, 1, (unsigned char)(value2 & 0xFF));
 
-  if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-            addr - instrLength, value1, (unsigned char)value2 & 0xFF);
-    if (showRegs())
-      SearchForReg(outFp, value1);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt() || showRegs()) {
+  fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
+          addr - instrLength, value1, (unsigned char)value2 & 0xFF);
+  //   if (showRegs())
+  //     SearchForReg(outFp, value1);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", st20Error(result));
@@ -1529,14 +1533,15 @@ int devss_(FILE *outFp, long value) {
   value2 = pop();
   result = storeBytes(value1, 2, (unsigned int)(value2 & 0xFFFF));
 
-  if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-            addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt() || showRegs()) {
+  fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
+          addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
 
-    // Search description in register database
-    if (showRegs())
-      SearchForReg(outFp, value1);
-  }
+  //   // Search description in register database
+  //   if (showRegs())
+  //     SearchForReg(outFp, value1);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", st20Error(result));
@@ -1564,14 +1569,15 @@ int devsw_(FILE *outFp, long value) {
   value2 = pop();
   result = storeBytes(value1, 4, (unsigned long)(value2 & 0xFFFFFFFF));
 
-  if (needPrompt() || showRegs()) {
-    fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-            addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt() || showRegs()) {
+  fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
+          addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
 
-    // Search description in register database
-    if (showRegs())
-      SearchForReg(outFp, value1);
-  }
+  //   // Search description in register database
+  //   if (showRegs())
+  //     SearchForReg(outFp, value1);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", st20Error(result));
@@ -1772,9 +1778,10 @@ int lb_(FILE *outFp, long unused) {
   result = readBytes(oldAreg, 1, (unsigned long *)&newAreg);
   push(newAreg);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -1799,9 +1806,10 @@ int lbx_(FILE *outFp, long unused) {
   }
   push(newAreg);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -1943,9 +1951,10 @@ int ldnl_(FILE *outFp, long offset) {
   result = readBytes((long)address, 4, &cWord);
   push((long)cWord);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08lx\n", address, cWord);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08lx\n", address, cWord);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -2110,9 +2119,10 @@ int ls_(FILE *outFp, long unused) {
   result = readBytes(oldAreg, 2, (unsigned long *)&newAreg);
   push(newAreg);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
@@ -2289,15 +2299,17 @@ int resetch_(FILE *outFp, long unused) {
   result = readBytes(oldAreg, 4, (unsigned long *)&newAreg);
   push(newAreg);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  // }
 
   result = storeBytes(oldAreg, 4, (long)NOT_PROCESS);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write memory address %08lx, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Write memory address %08lx, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
+  // }
 
   fprintf(outFp, "Channel at address %08lx was reset\n", oldAreg);
 
@@ -2350,9 +2362,10 @@ int sb_(FILE *outFp, long value) {
   value2 = pop();
   result = storeBytes(value1, 1, (unsigned char)(value2 & 0xFF));
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFF);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFF);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", st20Error(result));
@@ -2392,9 +2405,10 @@ int signal_(FILE *outFp, long unused) {
   pop();
   pop();
 
-  if (needPrompt()) {
-    fprintf(outFp, "A signal was received for address 0x%08lx\n", oldAreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "A signal was received for address 0x%08lx\n", oldAreg);
+  // }
 
   return (result);
 }
@@ -2407,9 +2421,10 @@ int ss_(FILE *outFp, long value) {
   value2 = pop();
   result = storeBytes(value1, 2, (unsigned)(value2 & 0xFFFF));
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFFFF);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFFFF);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", st20Error(result));
@@ -2508,10 +2523,11 @@ int stnl_(FILE *outFp, long offset) {
 
   result = storeBytes(oldAreg + offset * 4, 4, oldBreg);
 
-  if (needPrompt()) {
-    fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08x\n", oldAreg + offset * 4,
-            oldBreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08x\n", oldAreg + offset * 4,
+          oldBreg);
+  // }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", st20Error(result));
@@ -2580,9 +2596,10 @@ int wait_(FILE *outFp, long unused) {
   pop();
   pop();
 
-  if (needPrompt()) {
-    fprintf(outFp, "Wait on semaphore at 0x%08lx\n", oldAreg);
-  }
+  // TODO: rework with commands.cpp when possible
+  // if (needPrompt()) {
+  fprintf(outFp, "Wait on semaphore at 0x%08lx\n", oldAreg);
+  // }
 
   return (0);
 }

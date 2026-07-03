@@ -24,8 +24,8 @@ int quitRequested(void);
 int setQuit(int);
 int needCmd(void);
 int setNeedCmd(int);
-int needPrompt(void);
-int showRegs(void);
+int needPrompt(void); // used in st20.c
+int showRegs(void); // used in st20.c
 int setNeedPrompt(int);
 int initCmdState(void);
 int getCommand(FILE *, FILE *);
