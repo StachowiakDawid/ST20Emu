@@ -8,7 +8,6 @@
 #include <system_error>
 #include <strings.h> // POSIX strcasecmp
 
-#include "ncurses.h"
 #include "defines.h"
 
 #include "commands.h"
@@ -142,9 +141,10 @@ int main() {
                         maxInstr, get_iptr());
       }
 
-      if (getch() == 'g') {
-        setNeedPrompt(true);
-      }
+      // TODO: add an option to leave the `g` command other than ncurses
+      // if (getch() == 'g') {
+      //   setNeedPrompt(true);
+      // }
     }
 
     if (watchTripped) {
