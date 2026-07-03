@@ -403,7 +403,7 @@ int saveMemory(char *dirName, FILE *outFp) {
   int usedFileFd = 0;
   unsigned long nextAddress = 0xFFFFFFFF;
   MEMBLK *cBlk;
-  int result = 0;
+  // int result = 0;
 
   /* check the directory name */
   if (dirName == NULL || *dirName == '\0') {
@@ -496,7 +496,7 @@ int saveMemory(char *dirName, FILE *outFp) {
 int loadMemory(char *dirName, FILE *outFp) {
   DIR *dirBlk;
   struct dirent *entry;
-  int doneDir;
+  // int doneDir;
   char fileMask[NAME_SIZE];
   char byteFileName[NAME_SIZE];
   char usedFileName[NAME_SIZE];
