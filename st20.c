@@ -1731,7 +1731,7 @@ int ladd_(FILE *outFp, long unused) {
   if (sum > 0x7FFFFFFFLL) {
     push((long)(sum - 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
-  } else if (sum < -0x80000000LL) {
+  } else if (sum < -2147483648LL) {
     push((long)(sum + 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
   } else {
@@ -2158,7 +2158,7 @@ int lsub_(FILE *outFp, long unused) {
   if (diff > 0x7FFFFFFFLL) {
     push((long)(diff - 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
-  } else if (diff < -0x80000000LL) {
+  } else if (diff < -2147483648LL) {
     push((long)(diff + 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
   } else {
