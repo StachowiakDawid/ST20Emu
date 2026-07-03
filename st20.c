@@ -1908,26 +1908,29 @@ int ldmemstartval_(FILE *outFp, long unused) {
 
 int ldnl_(FILE *outFp, long offset) {
   int result;
-  int oldAreg;
-  long cWord;
+  uint32_t oldAreg;
+  uint32_t address;
+  unsigned long cWord = 0;
 
-  oldAreg = pop();
+  oldAreg = (uint32_t)pop();
+
   if (oldAreg & 0x03) {
     fprintf(outFp, "WARNING: Attempt to access a word that is not on a word boundary\n");
   }
 
-  result = readBytes(oldAreg + offset * 4, 4, (unsigned long *)&cWord);
-  push(cWord);
+  address = oldAreg + (uint32_t)(offset * 4);
+
+  result = readBytes((long)address, 4, &cWord);
+  push((long)cWord);
 
   if (needPrompt()) {
-    fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg + offset * 4,
-            cWord);
+    fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08lx\n", address, cWord);
   }
 
   if (result) {
     fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing ldnl %08lx  iptr=%08lx\n", oldAreg + offset * 4,
-            get_iptr());
+    fprintf(outFp, "  Error occurred when executing ldnl %08x  iptr=%08lx\n", address,
+            (long)get_iptr());
     return (-1);
   }
 
