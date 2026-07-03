@@ -419,7 +419,7 @@ int u_showregs(FILE *inFp, FILE *outFp) {
   fprintf(outFp, "Verbose Register Access %s\n", cmdState.showVerboseRegs ? "ON" : "OFF");
 
   return result;
-};
+}
 
 //////////////////////////////////////////////////////////////////////////
 /* SHOW THE ENABLES REGISTER CONTENTS, BIT by BIT */
@@ -430,7 +430,7 @@ int u_showenbreg(FILE *inFp, FILE *outFp) {
   printEnablesRegState(outFp);
 
   return result;
-};
+}
 
 //////////////////////////////////////////////////////////////////////////
 /* SHOW THE 'OTHER MACHINE REGISTER' CONTENTS */
@@ -441,7 +441,8 @@ int u_omr(FILE *inFp, FILE *outFp) {
   printOMRState(outFp);
 
   return result;
-};
+}
+
 char *commandError(int error) {
   switch (error) {
 

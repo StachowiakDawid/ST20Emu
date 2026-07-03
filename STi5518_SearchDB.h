@@ -16,7 +16,6 @@ int compareRegs(const unsigned long *reg, const REGDESCR *regdescr) {
 //////////////////////////////////////////////////////////////////////////
 int SearchForReg(FILE *outFp, unsigned long reg) {
   char found = FALSE, recogn = FALSE;
-  int i;
   REGDESCR *regdescr;
 
   /*FIRST THING FIRST. Check in what memory range we are*/
