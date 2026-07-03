@@ -60,12 +60,6 @@ typedef struct omrState {
 #endif
 
 // Function Prototypes
-int ldtimer_(FILE *, long);
-int sttimer_(FILE *, long);
-int clockdis_(FILE *, long);
-int clockenb_(FILE *, long);
-int ldclock_(FILE *, long);
-int initTimer(FILE *);
 /*
  - ENABLES REGISTER -
 The Enables register contains:
@@ -156,11 +150,5 @@ Figure
 #define HP_EXTERNALEVENT_ENB 0x200000 // bit 22
 #define HP_TIMER_ALRM_ENB 0x400000    // bit 23
 // bits24-31 are reserved
-
-// Function Prototypes
-int trapdis_(FILE *, long);
-int trapenb_(FILE *, long);
-int gintdis_(FILE *, long);
-int gintenb_(FILE *, long);
 
 #endif

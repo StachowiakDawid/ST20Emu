@@ -52,6 +52,18 @@ static long timerGuess = TIMER_GUESS;
 static long startAddr = START_ADDR;
 static long wptrEndAddr = WPTR_END_ADDR;
 
+int ldtimer_(FILE *, long);
+int sttimer_(FILE *, long);
+int clockdis_(FILE *, long);
+int clockenb_(FILE *, long);
+int ldclock_(FILE *, long);
+int initTimer(FILE *outFp);
+
+int trapdis_(FILE *, long);
+int trapenb_(FILE *, long);
+int gintdis_(FILE *, long);
+int gintenb_(FILE *, long);
+
 static INSTRENTRY instrEntry[] = {
     /*00*/ {"j", j_, 5},
     {"ldlp", ldlp_, 1},
@@ -2676,8 +2688,8 @@ Error signals: none
 */
 
 int ldtimer_(FILE *outFp, long unused) {
-  ////Current Priority is obtained reading WDesc flag in the process descriptor
-  ////see #include OMR.h
+  // Current Priority is obtained reading WDesc flag in the process descriptor
+  // see #include OMR.h
 
   if (cpuState.nWptr & 0x01) { // HighPriority
     push(omrState.ClockRegHP);
