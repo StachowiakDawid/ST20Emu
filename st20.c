@@ -1569,7 +1569,7 @@ int diff_(FILE *outFp, long unused) {
 
   Areg = (uint32_t)pop();
   Breg = (uint32_t)pop();
-  
+
   // We need to use uint to omit runtime integer overflow errors
   // It's safer than to depend on C undefined behaviors
   push((long)(int32_t)(Breg - Areg));
@@ -2687,7 +2687,8 @@ Error signals: none
 int sttimer_(FILE *outFp, long unused) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
-  fprintf(outFp, "LOW and HIGH priority clock registers were set to 0x%08lx\n", omrState.ClockRegHP);
+  fprintf(outFp, "LOW and HIGH priority clock registers were set to 0x%08lx\n",
+          omrState.ClockRegHP);
 
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
   omrState.ClockEnables |= LPTIMER_MASK; // set bit1
