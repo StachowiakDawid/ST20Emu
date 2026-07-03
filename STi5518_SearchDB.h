@@ -28,7 +28,7 @@ int SearchForReg(FILE *outFp, unsigned long reg) {
         "DESCR: Internal SRAM if data cache is not enabled.User-code, data and stack (Region 0)\n");
   if (reg <= 0x80000fff && reg >= 0x80000000) { // 4Kb SRAM
 
-    for (i = 0; i <= (sizeof(REG0_Entry) / sizeof(REG0DESCR)); i++) {
+    for (unsigned int i = 0; i <= (sizeof(REG0_Entry) / sizeof(REG0DESCR)); i++) {
       if (reg >= REG0_Entry[i].lbaddr && reg <= REG0_Entry[i].hbaddr) {
         fprintf(outFp, "DESCR: %s\n", REG0_Entry[i].description);
         recogn = TRUE;
