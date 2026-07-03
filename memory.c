@@ -434,6 +434,8 @@ int saveMemory(char *dirName, FILE *outFp) {
      * the last file rather than creating a new file.
      * If not, create a new file.
      */
+    // TODO: why startAddr is a SIGNED long?
+    // this will be a big task to refactor addresses
     if (cBlk->startAddr != nextAddress) {
       /* close the file if it is already open */
       if (dataFileFd) {
