@@ -98,7 +98,7 @@ int readBytes(long address, int nBytes, unsigned long *value) {
   unsigned long cWord = 0;
   int offset = 0;
 
-  *value = UNDEFINED_WORD;
+  *value = UNDEFINED_WORD_OLD;
 
   /* this routine won't work with anything longer than a double word */
   if (nBytes > 4) {
@@ -140,7 +140,7 @@ int readInvBytes(long address, int nBytes, long *value) {
   unsigned long cWord = 0;
   int offset = 0;
 
-  *value = UNDEFINED_WORD;
+  *value = UNDEFINED_WORD_OLD;
 
   /* this routine won't work with anything longer than a double word */
   if (nBytes > 4) {
@@ -248,7 +248,7 @@ int storeByteRange(long srcAddr, long destAddr, int nBytes) {
 }
 
 int allocBytes(long address, int nBytes) {
-  return (storeBytes(address, nBytes, UNDEFINED_WORD));
+  return (storeBytes(address, nBytes, UNDEFINED_WORD_OLD));
 }
 
 /**************************

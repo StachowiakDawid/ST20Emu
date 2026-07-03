@@ -3,17 +3,8 @@
 #define TRUE 1
 #define FALSE 0
 
-#define INI_FILE "st20emu.ini"
-#define COMMENT '#'
-
-#define MAX_UNPROMPTED_INSTR 1000000
-#define MAX_UNPROMPTED_INSTR_CH "MAX_UNPROMPTED_INSTR"
-#define WARN_UNPROMPTED_INSTR 100000
-#define WARN_UNPROMPTED_INSTR_CH "WARN_UNPROMPTED_INSTR"
-
-/* value to set undefined words to */
-#define UNDEFINED_WORD 0xCCCCCCCC
-#define UNDEFINED_WORD_CH "UNDEFINED_WORD"
+// TODO: remove when constexpr can be moved
+#define UNDEFINED_WORD_OLD 0xCCCCCCCC
 
 #define NAME_SIZE 100
 #define PARM_SIZE 30
@@ -27,8 +18,3 @@ typedef struct parm_struct {
   char value[PARM_SIZE][MAX_PARMS];
 } PARMS;
 #endif
-
-int readParms(PARMS *);
-int st20emuInit(PARMS *, FILE *);
-int printError(int, FILE *);
-extern long undefinedWord;

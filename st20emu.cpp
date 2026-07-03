@@ -1,15 +1,16 @@
-// st20emu.cpp : Defines the entry point for the console application.
-// 16/12/11
-// General fixup of the project, now can be compiled trough VC++
-// Fixup of bitcnt routine (see st20.c)
-// Various comments added
-// Internal DB & Search Facilities added
-// Now the 'g' command can be interrupted during execution, pressing the 'g' key
-// Written ldclock/ldtimer/sttimer/clockenb/clockdis/gintdis/gintenb functions
-// HP & LPCLockReg now are ticking at quasi-proper value
-// CPU CLOCK set to 60.75Mhz
+#include <algorithm>
+#include <charconv>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <format>
+#include <fstream>
+#include <string_view>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <strings.h> // POSIX strcasecmp
 
-#include "stdafx.h"
 #include "ncurses.h"
 #include "defines.h"
 
@@ -17,157 +18,164 @@
 #include "memory.h"
 #include "st20.h"
 
+// C++23 <print> fallback emulator
+namespace compat {
+template <typename... Args>
+void println(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
+  std::string str = std::format(fmt, std::forward<Args>(args)...) + '\n';
+  std::fputs(str.c_str(), stream);
+}
+
+template <typename... Args> void println(std::format_string<Args...> fmt, Args &&...args) {
+  println(stdout, fmt, std::forward<Args>(args)...);
+}
+} // namespace compat
+
+// Helper to efficiently trim whitespace from string_view
+constexpr std::string_view trim(std::string_view sv) {
+  auto start = sv.find_first_not_of(" \t\r\n");
+  if (start == std::string_view::npos)
+    return {};
+  auto end = sv.find_last_not_of(" \t\r\n");
+  return sv.substr(start, end - start + 1);
+}
+
 #define ST20_ERROR_START -2000
 #define ST20_ERROR_END -2999
-
-// extern "C" int printNextInstr (FILE *);
-// extern "C" int printCPUState (FILE *);
-// extern "C" int decodeNextInstr(FILE *);
-// extern "C" long get_iptr (void);
-// extern "C" int execInstr (FILE *, int *);
-// extern "C" int st20Init (PARMS *, FILE *);
-// extern "C" char *st20Error (int);
-/***************************************************/
-// #include "memory.c"
 #define MEMORY_ERROR_START -1000
 #define MEMORY_ERROR_END -1999
-
-// extern "C" int memoryInit(PARMS *, FILE *);
-// extern "C" char *memoryError (int);
-/***************************************************/
-// #include "commands.h"
-/* Error codes from commands.c */
 #define COMMAND_ERROR_START -3000
 #define COMMAND_ERROR_END -3999
 
-// extern "C" int commandsInit (PARMS *, FILE *);
-// extern "C" int quitRequested (void);
-// extern "C" int setQuit (int);
-// extern "C" int needCmd (void);
-// extern "C" int setNeedCmd (int);
-// extern "C" int needPrompt (void);
-// extern "C" int setNeedPrompt (int);
-// extern "C" int initCmdState (void);
-// extern "C" int getCommand (FILE *, FILE *);
-// extern "C" int execCommand (FILE *, FILE *);
-// extern "C" char *commandError (int);
-/***************************************************/
+// TODO: replace macros with this later
+// constexpr int ST20_ERROR_START{-2000};
+// constexpr int ST20_ERROR_END{-2999};
+// constexpr int MEMORY_ERROR_START{-1000};
+// constexpr int MEMORY_ERROR_END{-1999};
+// constexpr int COMMAND_ERROR_START{-3000};
+// constexpr int COMMAND_ERROR_END{-3999};
 
-// GLOBALS ***
-long maxInstr = MAX_UNPROMPTED_INSTR;
-long warnInstr = WARN_UNPROMPTED_INSTR;
-long undefinedWord = UNDEFINED_WORD;
+constexpr const char *INI_FILE{"st20emu.ini"};
+constexpr const char COMMENT_CHAR{'#'};
 
-int printError(int error, FILE *outFp) {
+constexpr uint64_t MAX_UNPROMPTED_INSTR{1000000};
+constexpr const char *MAX_UNPROMPTED_INSTR_CH{"MAX_UNPROMPTED_INSTR"};
+constexpr uint64_t WARN_UNPROMPTED_INSTR{100000};
+constexpr const char *WARN_UNPROMPTED_INSTR_CH{"WARN_UNPROMPTED_INSTR"};
+constexpr uint64_t UNDEFINED_WORD{0xCCCCCCCC};
+constexpr const char *UNDEFINED_WORD_CH{"UNDEFINED_WORD"};
+
+uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
+uint64_t warnInstr = WARN_UNPROMPTED_INSTR;
+uint64_t undefinedWord = UNDEFINED_WORD;
+
+void printError(int error) {
   if (error <= ST20_ERROR_START && error >= ST20_ERROR_END) {
-    fprintf(outFp, "ERROR (%d) %s\n", error, st20Error(error));
+    compat::println(stderr, "ERROR ({}) {}", error, st20Error(error));
   } else if (error <= MEMORY_ERROR_START && error >= MEMORY_ERROR_END) {
-    fprintf(outFp, "ERROR (%d) %s\n", error, memoryError(error));
+    compat::println(stderr, "ERROR ({}) {}", error, memoryError(error));
   } else if (error <= COMMAND_ERROR_START && error >= COMMAND_ERROR_END) {
-    fprintf(outFp, "ERROR (%d) %s\n", error, commandError(error));
+    compat::println(stderr, "ERROR ({}) {}", error, commandError(error));
   } else {
-    fprintf(outFp, "Unknown error (%d)\n", error);
+    compat::println(stderr, "Unknown error ({})", error);
   }
-  return (0);
 }
 
-int readParms(PARMS *userParms) {
-  FILE *parmFp;
-  char recBuf[PARM_SIZE * 2];
-  char firstChar[2];
-
+void readParms(PARMS *userParms) {
   userParms->nParms = 0;
 
-  if ((parmFp = fopen(INI_FILE, "r")) == NULL) {
-    fprintf(stderr, "Cannot open INI file %s\nUsing program defaults\n", INI_FILE);
-    return (0);
+  std::ifstream parmFp{INI_FILE};
+  if (!parmFp) {
+    compat::println(stderr, "Cannot open INI file {}\nUsing program defaults", INI_FILE);
+    return;
   }
 
-  while (fgets(recBuf, PARM_SIZE * 2, parmFp) != NULL) {
-    /* ignore any comments */
-    if (sscanf(recBuf, "%1s", firstChar) == 1 && firstChar[0] == COMMENT)
-      continue;
+  std::string line;
+  while (std::getline(parmFp, line)) {
+    std::string_view sv = trim(line);
 
-    /* ignore the line if we can't get a parameter and a value from it */
-    if (sscanf(recBuf, "%s = %s", userParms->parameter[userParms->nParms],
-               userParms->value[userParms->nParms]) != 2) {
+    // Ignore empty lines and comments
+    if (sv.empty() || sv.front() == COMMENT_CHAR) {
       continue;
     }
+
+    auto eqPos = sv.find('=');
+    if (eqPos == std::string_view::npos) {
+      continue;
+    }
+
+    std::string_view key = trim(sv.substr(0, eqPos));
+    std::string_view val = trim(sv.substr(eqPos + 1));
+
+    if (key.empty() || val.empty()) {
+      continue;
+    }
+
+    // Safely copy to the legacy C-struct fixed buffers
+    auto copySafe = [](char *dest, std::string_view src, size_t max_size) {
+      size_t len = std::min(src.size(), max_size - 1);
+      std::memcpy(dest, src.data(), len);
+      dest[len] = '\0'; // Ensure null-termination
+    };
+
+    copySafe(userParms->parameter[userParms->nParms], key, PARM_SIZE);
+    copySafe(userParms->value[userParms->nParms], val, PARM_SIZE);
 
     userParms->nParms++;
-  }
 
-  /*
-    if (1) {
-     int i=0;
-     for (i=0; i < userParms->nParms; i++) {
-      fprintf (stderr, "%s=%s\n", userParms->parameter[i], userParms->value[i]);
-     }
+    if (userParms->nParms >= MAX_PARMS) {
+      compat::println(stderr, "WARNING: INI file exceeds max parameters ({})", MAX_PARMS);
+      break;
     }
-  */
-
-  return (userParms->nParms);
+  }
 }
 
-int st20emuInit(PARMS *userParms, FILE *outFp) {
-  int i;
-  long value;
+void st20emuInit(const PARMS *userParms) {
+  for (int i{0}; i < userParms->nParms; ++i) {
+    uint64_t value{0};
+    std::string_view valStr{userParms->value[i]};
+    int base{10};
 
-  for (i = 0; i < userParms->nParms; i++) {
+    if (valStr.starts_with("0x") || valStr.starts_with("0X")) {
+      valStr.remove_prefix(2);
+      base = 16;
+    }
 
-    if (!strcasecmp(userParms->parameter[i], MAX_UNPROMPTED_INSTR_CH)) {
-      if (sscanf(userParms->value[i], "%ld", &value) == 1) {
+    auto [ptr, ec] = std::from_chars(valStr.data(), valStr.data() + valStr.size(), value, base);
+
+    if (ec == std::errc{}) {
+      if (!strcasecmp(userParms->parameter[i], MAX_UNPROMPTED_INSTR_CH)) {
         maxInstr = value;
-      }
-    } else if (!strcasecmp(userParms->parameter[i], WARN_UNPROMPTED_INSTR_CH)) {
-      if (sscanf(userParms->value[i], "%ld", &value) == 1) {
+      } else if (!strcasecmp(userParms->parameter[i], WARN_UNPROMPTED_INSTR_CH)) {
         warnInstr = value;
-      }
-    } else if (!strcasecmp(userParms->parameter[i], UNDEFINED_WORD_CH)) {
-      if (sscanf(userParms->value[i], "%lx", &value) == 1) {
+      } else if (!strcasecmp(userParms->parameter[i], UNDEFINED_WORD_CH)) {
         undefinedWord = value;
       }
     }
   }
 
-  fprintf(outFp, "MAX_UNPROMPTED_INSTR=%ld\nWARN_UNPROMPTED_INSTR=%ld\nUNDEFINED_WORD=0x%08lx\n",
-          maxInstr, warnInstr, undefinedWord);
-  return (0);
+  compat::println("MAX_UNPROMPTED_INSTR={}\nWARN_UNPROMPTED_INSTR={}\nUNDEFINED_WORD=0x{:08x}",
+                  maxInstr, warnInstr, undefinedWord);
 }
 
-//***********
 int main() {
-  //   initscr();
-  //   scrollok(stdscr, TRUE);
-  //   nodelay(stdscr, TRUE);
-  //   cbreak();
-  //   noecho();
+  int result{0};
+  // TODO: refactor this to bool when possible
+  int watchTripped{0};
+  uint64_t instrCount{0};
+  PARMS userParms{};
 
-  int result = 0;
-  FILE *inFp, *outFp;
-  int watchTripped = FALSE;
-  int instrCount = 0;
-  PARMS userParms;
-
-  outFp = stdout;
-  inFp = stdin;
-
-  /* read the settings from the INI file */
   readParms(&userParms);
 
-  st20emuInit(&userParms, outFp);
-  st20Init(&userParms, outFp);
-  memoryInit(&userParms, outFp);
-  commandsInit(&userParms, outFp);
+  st20emuInit(&userParms);
+  st20Init(&userParms, stdout);
+  memoryInit(&userParms, stdout);
+  commandsInit(&userParms, stdout);
 
-  fprintf(outFp, "\n");
-  //////////////////////////////////////////////////////////////////////////
-  //						EMULATOR MAIN CYCLE
-  // Changed do{..}while() in favour of for(;;){ if() break;}
-  //////////////////////////////////////////////////////////////////////////
-  for (;;) {
-    /* execute the saved instruction */
-    execInstr(outFp, &watchTripped);
+  compat::println("");
+
+  while (!quitRequested()) {
+    execInstr(stdout, &watchTripped);
 
     /*
      * if the program is running without prompts, exit this state if
@@ -176,25 +184,23 @@ int main() {
      */
     if (!needPrompt()) {
       if (++instrCount >= maxInstr) {
-        fprintf(outFp, "We've run %d instr without encountering a watch  curr iptr:%08lu\n",
-                instrCount, get_iptr());
-        setNeedPrompt(TRUE);
+        compat::println("We've run {} instr without encountering a watch  curr iptr:{:08x}",
+                        instrCount, get_iptr());
+        setNeedPrompt(true);
       } else if (instrCount % warnInstr == 0) {
-        fprintf(outFp, "Executed %d of %ld instr before next prompt  curr iptr: %08lx\n",
-                instrCount, maxInstr, get_iptr());
+        compat::println("Executed {} of {} instr before next prompt  curr iptr: {:08x}", instrCount,
+                        maxInstr, get_iptr());
       }
 
-      // This for interrupt the 'g' command
-      // lot of cpu time spent here!!!
-      if (getch() == 'g')
-        setNeedPrompt(TRUE);
+      if (getch() == 'g') {
+        setNeedPrompt(true);
+      }
     }
 
-    /* if we encountered a watch condition, enable the prompt */
     if (watchTripped) {
-      fprintf(outFp, "Watch condition encountered\n");
-      setNeedPrompt(TRUE);
-      watchTripped = FALSE;
+      compat::println("Watch condition encountered");
+      setNeedPrompt(true);
+      watchTripped = false;
     }
 
     /*
@@ -202,26 +208,23 @@ int main() {
      * after executing the instruction
      */
     if (needPrompt()) {
-      printCPUState(outFp);
+      printCPUState(stdout);
     }
 
-    /* get the next instruction */
-    decodeNextInstr(outFp);
+    decodeNextInstr(stdout);
 
-    /* print the instruction that was just read */
     if (needPrompt()) {
-      printNextInstr(outFp);
+      printNextInstr(stdout);
 
-      setNeedCmd(TRUE);
+      setNeedCmd(true);
       while (needCmd() && needPrompt()) {
 
-        /* get a command from the user and execute it */
-        if ((result = getCommand(inFp, outFp))) {
-          printError(result, outFp);
+        if ((result = getCommand(stdin, stdout))) {
+          printError(result);
         }
 
-        if ((result = execCommand(inFp, outFp))) {
-          printError(result, outFp);
+        if ((result = execCommand(stdin, stdout))) {
+          printError(result);
         }
 
         /*
@@ -233,12 +236,10 @@ int main() {
         }
       }
 
-      /* get the next instruction */
-      decodeNextInstr(outFp);
+      decodeNextInstr(stdout);
     }
-    if (quitRequested())
-      break;
   }
-  printf("Finished\n\n");
-  return (0);
+
+  compat::println("Finished\n");
+  return 0;
 }

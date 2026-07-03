@@ -647,12 +647,12 @@ int initCPUState(void) {
   cpuState.wptrUsed[6] = TRUE;
   addrWptrWord((int)0, &address);
   result = allocBytes(address - 4 * 7, 4 * 7);
-  /*  cpuState.wptr[0] = UNDEFINED_WORD;*/
+  /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
 
   for (i = 7; i < MAX_WPTR; i++) {
     cpuState.wptrUsed[i] = FALSE;
   }
-  cpuState.areg = cpuState.breg = cpuState.creg = UNDEFINED_WORD;
+  cpuState.areg = cpuState.breg = cpuState.creg = UNDEFINED_WORD_OLD;
   cpuState.iptr = 0;
 
   return (result);
@@ -1160,7 +1160,7 @@ int allocWptr(long count) {
       cpuState.nWptr++;
       addrWptrWord(0, &address);
       result = allocBytes(address, 4);
-      /*		cpuState.wptr[cpuState.nWptr++] = UNDEFINED_WORD; */
+      /*		cpuState.wptr[cpuState.nWptr++] = UNDEFINED_WORD_OLD; */
     }
   }
 
@@ -1184,7 +1184,7 @@ long pop(void) {
   holdValue = cpuState.areg;
   cpuState.areg = cpuState.breg;
   cpuState.breg = cpuState.creg;
-  cpuState.creg = UNDEFINED_WORD;
+  cpuState.creg = UNDEFINED_WORD_OLD;
 
   return (holdValue);
 }
@@ -1332,8 +1332,8 @@ int call_(FILE *outFp, long offset) {
   }
 
   cpuState.areg = cpuState.iptr;
-  cpuState.breg = UNDEFINED_WORD;
-  cpuState.creg = UNDEFINED_WORD;
+  cpuState.breg = UNDEFINED_WORD_OLD;
+  cpuState.creg = UNDEFINED_WORD_OLD;
   cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
 
   fprintf(outFp, "Call to %8lx ,return to %8lx\n", cpuState.iptr, addr);
@@ -1644,7 +1644,7 @@ int gajw_(FILE *outFp, long unused) {
 
   addrWptrWord((int)0, &address);
   result = allocBytes(address, 4);
-  /*  cpuState.wptr[0] = UNDEFINED_WORD;*/
+  /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
 
   for (i = 1; i < MAX_WPTR; i++) {
     cpuState.wptrUsed[i] = FALSE;
