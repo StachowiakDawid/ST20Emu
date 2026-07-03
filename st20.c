@@ -1587,7 +1587,7 @@ int div_(FILE *outFp, long unused) {
   Breg = (int32_t)pop();
 
   if ((Areg == 0) || ((Breg == -2147483648LL) && (Areg == -1))) {
-    (int32_t)pop(); // Areg' <- undefined
+    (void)pop(); // Areg' <- undefined
     // TODO: Signal IntegerOverflow per documentation
     return (0);
   }
