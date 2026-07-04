@@ -1,28 +1,35 @@
 #include "../cli_commands.h"
-#include "../cli_state.h"
-#include "../../defines.h"
-// #include "../../core/defines.h"
 #include "../../st20.h"
+#include <string>
 
-int u_doError() {
-  return INPUT_ERROR;
+namespace cli::cmds {
+
+CliError cmd_do_error(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
+  return CliError::InputError;
 }
 
-int u_go() {
-  return setNeedPrompt(!needPrompt());
+CliError cmd_go(CliEngine &engine, std::span<const std::string_view> /*args*/) {
+  return engine.set_need_prompt(!engine.needs_prompt());
 }
 
-int u_next() {
-  setNeedCmd(false);
-  return 0;
+CliError cmd_next(CliEngine &engine, std::span<const std::string_view> /*args*/) {
+  engine.set_need_cmd(false);
+  return CliError::Success;
 }
 
-int u_quit() {
-  setQuit(true);
-  setNeedCmd(false);
-  return 0;
+CliError cmd_quit(CliEngine &engine, std::span<const std::string_view> /*args*/) {
+  engine.request_quit();
+  engine.set_need_cmd(false);
+  return CliError::Success;
 }
 
-int u_stop() {
-  return setWatch(getCmdParm1().c_str(), getCmdParm2().c_str());
+CliError cmd_stop(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  std::string p1 = args.size() > 0 ? std::string(args[0]) : "";
+  std::string p2 = args.size() > 1 ? std::string(args[1]) : "";
+
+  // TODO: assuming setWatch returns 0 on success in the legacy backend
+  int result = setWatch(p1.c_str(), p2.c_str());
+  return result == 0 ? CliError::Success : CliError::InputError;
 }
+
+} // namespace cli::cmds

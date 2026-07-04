@@ -1,64 +1,82 @@
 #include "../cli_commands.h"
-#include "../cli_state.h"
 #include "../../utils/compat.h"
-// #include "../../core/st20.h"
-// #include "../../core/omr.h"
-// #include "../../core/defines.h"
 #include "../../st20.h"
-#include "../../omr.h"
-#include "../../defines.h"
+#include <string>
 
 extern "C" int SearchForReg(FILE *, unsigned long);
 
-int u_setAreg() {
+namespace cli::cmds {
+
+CliError cmd_set_areg(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long value;
-  return parseHex(getCmdParm1(), value) ? setAreg(value) : BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), value))
+    return CliError::BadParameter;
+
+  setAreg(value);
+  return CliError::Success;
 }
 
-int u_setBreg() {
+CliError cmd_set_breg(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long value;
-  return parseHex(getCmdParm1(), value) ? setBreg(value) : BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), value))
+    return CliError::BadParameter;
+
+  setBreg(value);
+  return CliError::Success;
 }
 
-int u_setCreg() {
+CliError cmd_set_creg(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long value;
-  return parseHex(getCmdParm1(), value) ? setCreg(value) : BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), value))
+    return CliError::BadParameter;
+
+  setCreg(value);
+  return CliError::Success;
 }
 
-int u_setIptr() {
+CliError cmd_set_iptr(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long value;
-  return parseHex(getCmdParm1(), value) ? setIptr(value) : BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), value))
+    return CliError::BadParameter;
+
+  setIptr(value);
+  return CliError::Success;
 }
 
-int u_storeWptr() {
+CliError cmd_store_wptr(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long index, value;
-  if (!parseHex(getCmdParm1(), index) || !parseHex(getCmdParm2(), value)) {
-    return BAD_PARAMETER;
+  if (args.size() < 2 || !parseHex(std::string(args[0]), index) ||
+      !parseHex(std::string(args[1]), value)) {
+    return CliError::BadParameter;
   }
-  return storeWptrWord(index, value);
+
+  storeWptrWord(index, value);
+  return CliError::Success;
 }
 
-int u_showregs() {
-  toggleShowRegs();
-  compat::println("Verbose Register Access {}", showRegs() ? "ON" : "OFF");
-  return 0;
+CliError cmd_show_regs(CliEngine &engine, std::span<const std::string_view> /*args*/) {
+  engine.toggle_verbose_regs();
+  compat::println("Verbose Register Access {}", engine.is_verbose_regs() ? "ON" : "OFF");
+  return CliError::Success;
 }
 
-int u_query_db() {
+CliError cmd_query_db(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   unsigned long n = 0;
-  if (!parseHex(getCmdParm1(), n))
-    return BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), n))
+    return CliError::BadParameter;
 
   SearchForReg(stdout, n);
-  return 0;
+  return CliError::Success;
 }
 
-int u_showenbreg() {
+CliError cmd_show_enbreg(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
   printEnablesRegState(stdout);
-  return 0;
+  return CliError::Success;
 }
 
-int u_omr() {
+CliError cmd_omr(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
   printOMRState(stdout);
-  return 0;
+  return CliError::Success;
 }
+
+} // namespace cli::cmds

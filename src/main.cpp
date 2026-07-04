@@ -10,7 +10,7 @@
 
 #include "defines.h"
 
-#include "cli/cli_state.h"
+#include "cli/cli_engine.h"
 #include "memory.h"
 #include "st20.h"
 
@@ -23,8 +23,6 @@ void printError(int error) {
     compat::println(stderr, "ERROR ({}) {}", error, st20Error(error));
   } else if (error <= MEMORY_ERROR_START && error >= MEMORY_ERROR_END) {
     compat::println(stderr, "ERROR ({}) {}", error, memoryError(error));
-  } else if (error <= COMMAND_ERROR_START && error >= COMMAND_ERROR_END) {
-    compat::println(stderr, "ERROR ({}) {}", error, commandError(error));
   } else {
     compat::println(stderr, "Unknown error ({})", error);
   }
@@ -108,22 +106,21 @@ void st20emuInit(const PARMS *userParms) {
 }
 
 int main() {
-  int result{0};
   // TODO: refactor this to bool when possible
   int watchTripped{0};
   uint64_t instrCount{0};
   PARMS userParms{};
+  cli::CliEngine cli;
 
   readParms(&userParms);
 
   st20emuInit(&userParms);
   st20Init(&userParms, stdout);
   memoryInit(&userParms, stdout);
-  commandsInit();
 
   compat::println("");
 
-  while (!quitRequested()) {
+  while (!cli.is_quit_requested()) {
     execInstr(stdout, &watchTripped);
 
     /*
@@ -131,11 +128,11 @@ int main() {
      * we have executed lots of instructions and haven't encountered
      * a watch condition or if a key has been pressed.
      */
-    if (!needPrompt()) {
+    if (!cli.needs_prompt()) {
       if (++instrCount >= maxInstr) {
         compat::println("We've run {} instr without encountering a watch  curr iptr:{:08x}",
                         instrCount, get_iptr());
-        setNeedPrompt(true);
+        cli.set_need_prompt(true);
       } else if (instrCount % warnInstr == 0) {
         compat::println("Executed {} of {} instr before next prompt  curr iptr: {:08x}", instrCount,
                         maxInstr, get_iptr());
@@ -143,13 +140,13 @@ int main() {
 
       // TODO: add an option to leave the `g` command other than ncurses
       // if (getch() == 'g') {
-      //   setNeedPrompt(true);
+      //   cli.set_need_prompt(true);
       // }
     }
 
     if (watchTripped) {
       compat::println("Watch condition encountered");
-      setNeedPrompt(true);
+      cli.set_need_prompt(true);
       watchTripped = false;
     }
 
@@ -157,31 +154,28 @@ int main() {
      * print the state of the processor
      * after executing the instruction
      */
-    if (needPrompt()) {
+    if (cli.needs_prompt()) {
       printCPUState(stdout);
     }
 
     decodeNextInstr(stdout);
 
-    if (needPrompt()) {
+    if (cli.needs_prompt()) {
       printNextInstr(stdout);
 
-      setNeedCmd(true);
-      while (needCmd() && needPrompt()) {
+      cli.set_need_cmd(true);
+      while (cli.needs_cmd() && cli.needs_prompt()) {
+        cli::CliError err = cli.prompt_and_execute();
 
-        if ((result = getCommand())) {
-          printError(result);
-        }
-
-        if ((result = execCommand())) {
-          printError(result);
+        if (err != cli::CliError::Success) {
+          compat::println(stderr, "ERROR: {}", cli::format_error(err));
         }
 
         /*
          * if a person wants the program to run without prompting, start
          * a counter to make sure control eventually returns to the user
          */
-        if (!needPrompt()) {
+        if (!cli.needs_prompt()) {
           instrCount = 0;
         }
       }

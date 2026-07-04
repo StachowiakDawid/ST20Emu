@@ -1,87 +1,93 @@
 #include "../cli_commands.h"
-#include "../cli_state.h"
 #include "../../utils/compat.h"
-// #include "../../core/memory.h"
-// #include "../../core/defines.h"
-#include "../../st20.h"
 #include "../../memory.h"
-#include "../../defines.h"
+#include "../../st20.h"
 #include <cstdint>
+#include <string>
 
-int u_load() {
-  const auto &p1 = getCmdParm1();
-  if (p1.empty())
-    return BAD_PARAMETER;
+namespace cli::cmds {
+CliError cmd_load(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  if (args.empty())
+    return CliError::BadParameter;
 
-  int result = loadMemory(p1.c_str(), stdout);
-  if (!result) {
-    result = loadCPUState(p1.c_str(), stdout);
-  }
+  std::string file_path(args[0]);
+  int result = loadMemory(file_path.c_str(), stdout);
+  if (result == 0)
+    result = loadCPUState(file_path.c_str(), stdout);
 
   printCPUState(stdout);
-  return result;
+  return result == 0 ? CliError::Success : CliError::InputError;
 }
 
-int u_loadData() {
+CliError cmd_load_data(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  if (args.empty())
+    return CliError::BadParameter;
+
   uint32_t startAddr = 0;
   long dataLength = 0;
   int result = 0;
 
-  if (!getCmdParm2().empty() && parseHex(getCmdParm1(), startAddr)) {
-    result = bulkLoadBytes(startAddr, getCmdParm2().c_str(), nullptr, &dataLength);
+  if (args.size() >= 2 && parseHex(std::string(args[0]), startAddr)) {
+    std::string file_path(args[1]);
+    result = bulkLoadBytes(startAddr, file_path.c_str(), nullptr, &dataLength);
   } else {
-    result = bulkLoadBytes(0, getCmdParm1().c_str(), nullptr, &dataLength);
-    compat::println("Read {} bytes from {}", dataLength, getCmdParm1());
+    std::string file_path(args[0]);
+    result = bulkLoadBytes(0, file_path.c_str(), nullptr, &dataLength);
+    compat::println("Read {} bytes from {}", dataLength, file_path);
   }
-  return result;
+
+  return result == 0 ? CliError::Success : CliError::InputError;
 }
 
-int u_save() {
-  if (getCmdParm1().empty())
-    return BAD_PARAMETER;
+CliError cmd_save(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  if (args.empty())
+    return CliError::BadParameter;
 
-  int result = saveMemory(getCmdParm1().c_str(), stdout);
-  if (!result) {
-    result = saveCPUState(getCmdParm1().c_str(), stdout);
+  std::string file_path(args[0]);
+  int result = saveMemory(file_path.c_str(), stdout);
+  if (result == 0) {
+    result = saveCPUState(file_path.c_str(), stdout);
   }
-  return result;
+
+  return result == 0 ? CliError::Success : CliError::InputError;
 }
 
-int u_view() {
+CliError cmd_view(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long address;
   unsigned long value = 0;
 
-  if (!parseHex(getCmdParm1(), address))
-    return BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), address))
+    return CliError::BadParameter;
 
-  int result = readBytes(address, 4, &value);
+  readBytes(address, 4, &value);
   compat::println("Value at 0x{:08x} is 0x{:08x}", address, value);
-  return result;
+  return CliError::Success;
 }
 
-int u_view_a() {
+CliError cmd_view_a(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long address, value;
 
-  if (!parseHex(getCmdParm1(), address) || !parseHex(getCmdParm2(), value)) {
-    return BAD_PARAMETER;
+  if (args.size() < 2 || !parseHex(std::string(args[0]), address) ||
+      !parseHex(std::string(args[1]), value)) {
+    return CliError::BadParameter;
   }
 
-  int result = storeBytes(address, 4, value);
+  storeBytes(address, 4, value);
   compat::println("Value at 0x{:08x} is 0x{:08x}", address, value);
-  return result;
+  return CliError::Success;
 }
 
-int u_view_aa() {
+CliError cmd_view_aa(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long address, range;
 
-  if (!parseHex(getCmdParm1(), address) || !parseHex(getCmdParm2(), range)) {
-    return BAD_PARAMETER;
+  if (args.size() < 2 || !parseHex(std::string(args[0]), address) ||
+      !parseHex(std::string(args[1]), range)) {
+    return CliError::BadParameter;
   }
 
-  int result = 0;
   for (long i = address; i < (address + range); i += 4) {
     long value = 0;
-    result = readInvBytes(i, 4, &value);
+    readInvBytes(i, 4, &value);
 
     if (!(i & 0x0f)) {
       compat::print("\n\r0x{:08x} : {:08x}", i, value);
@@ -90,16 +96,18 @@ int u_view_aa() {
     }
   }
   compat::print("\n\r");
-  return result;
+  return CliError::Success;
 }
 
-int u_view_w() {
+CliError cmd_view_w(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   long n, value;
 
-  if (!parseHex(getCmdParm1(), n))
-    return BAD_PARAMETER;
+  if (args.empty() || !parseHex(std::string(args[0]), n)) {
+    return CliError::BadParameter;
+  }
 
-  int result = addrWptrWord(n, &value);
+  addrWptrWord(n, &value);
   compat::println("Wptr_n is at 0x{:08x}", value);
-  return result;
+  return CliError::Success;
 }
+} // namespace cli::cmds
