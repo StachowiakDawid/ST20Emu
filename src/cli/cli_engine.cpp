@@ -2,7 +2,6 @@
 #include "cli_commands.h"
 #include "../utils/compat.h"
 #include "../st20.h"
-
 #include <iostream>
 #include <sstream>
 #include <algorithm>

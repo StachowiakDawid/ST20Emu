@@ -3,8 +3,8 @@
 // but which are not part of the process state. See #include file
 //  -------------------------------------------
 
-#include <ctime>
 #include "omr.h"
+#include <ctime>
 
 OMRSTATE omrState;
 

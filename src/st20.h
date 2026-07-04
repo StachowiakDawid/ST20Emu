@@ -5,8 +5,8 @@
 extern "C" {
 #endif
 
-#include <stdio.h>
 #include "defines.h"
+#include <stdio.h>
 
 /* this is the starting address for CPU execution */
 #define START_ADDR 0x7FFFFFFE

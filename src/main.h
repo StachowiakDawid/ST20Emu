@@ -1,8 +1,7 @@
 #pragma once
 
-#include <cstdint>
-
 #include "utils/compat.h"
+#include <cstdint>
 
 #define ST20_ERROR_START -2000
 #define ST20_ERROR_END -2999
@@ -14,8 +13,6 @@
 // constexpr int ST20_ERROR_END{-2999};
 // constexpr int MEMORY_ERROR_START{-1000};
 // constexpr int MEMORY_ERROR_END{-1999};
-// constexpr int COMMAND_ERROR_START{-3000};
-// constexpr int COMMAND_ERROR_END{-3999};
 
 constexpr const char *INI_FILE{"st20emu.ini"};
 constexpr const char COMMENT_CHAR{'#'};
