@@ -688,7 +688,7 @@ int initWatch(void) {
   return (0);
 }
 
-int saveCPUState(char *dirName, FILE *outFp) {
+int saveCPUState(const char *dirName, FILE *outFp) {
   char cpuFileName[NAME_SIZE];
   int cpuFileFd = -1;
 
@@ -727,7 +727,7 @@ long get_iptr(void) {
   return (cpuState.iptr);
 }
 
-int loadCPUState(char *dirName, FILE *outFp) {
+int loadCPUState(const char *dirName, FILE *outFp) {
   char cpuFileName[NAME_SIZE];
   int cpuFileFd = -1;
 
@@ -762,7 +762,7 @@ int loadCPUState(char *dirName, FILE *outFp) {
   return (0);
 }
 
-int setWatch(char *reg, char *parm) {
+int setWatch(const char *reg, const char *parm) {
   int enable;
   long value;
 
