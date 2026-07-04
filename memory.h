@@ -34,10 +34,10 @@ int readInvBytes(long, int, long *);
 int storeBytes(long, int, long);
 int allocBytes(long, int);
 int storeByteRange(long, long, int);
-int bulkLoadBytes(long, char *, char *, long *);
+int bulkLoadBytes(long, const char *, char *, long *);
 /*int readBlockByte (MEMBLK *, int, unsigned char *);  NOT NEEDED */
-int saveMemory(char *, FILE *);
-int loadMemory(char *, FILE *);
+int saveMemory(const char *, FILE *);
+int loadMemory(const char *, FILE *);
 char *memoryError(int);
 
 #ifdef __cplusplus

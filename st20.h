@@ -99,8 +99,8 @@ typedef struct instrEntry_struct {
 
 int st20Init(PARMS *, FILE *);
 int initCPUState(void);
-int loadCPUState(char *, FILE *);
-int saveCPUState(char *, FILE *);
+int loadCPUState(const char *, FILE *);
+int saveCPUState(const char *, FILE *);
 int printCPUState(FILE *);
 int printEnablesRegState(FILE *);
 int printOMRState(FILE *);
@@ -113,7 +113,7 @@ int setCreg(long);
 int setIptr(long);
 int storeWptrWord(long, long);
 int initWatch(void);
-int setWatch(char *, char *);
+int setWatch(const char *, const char *);
 int anyWatch(void);
 int checkWatch(void);
 char *st20Error(int);

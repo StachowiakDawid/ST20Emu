@@ -4,8 +4,8 @@ OBJ_DIR = obj
 CC = clang
 CXX = clang++
 
-SRCS_CPP = st20emu.cpp omr.cpp
-SRCS_C   = commands.c memory.c st20.c
+SRCS_CPP = st20emu.cpp omr.cpp commands.cpp
+SRCS_C   = memory.c st20.c
 OBJS = $(addprefix $(OBJ_DIR)/, $(SRCS_CPP:.cpp=.o) $(SRCS_C:.c=.o))
 
 CFLAGS_BASE   = -std=c23

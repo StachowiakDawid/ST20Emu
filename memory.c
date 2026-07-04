@@ -301,7 +301,7 @@ MEMBLK *getMemBlk(long address, int create_flag) {
 /**************************
  * stores a large number of bytes in memory blocks
  */
-int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes) {
+int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *totalBytes) {
   int i = 0;
   int nBytesRead = 0;
   int byteFd = -1;
@@ -398,7 +398,7 @@ int bulkLoadBytes(long address, char *byteFile, char *usedFile, long *totalBytes
   return (0);
 }
 
-int saveMemory(char *dirName, FILE *outFp) {
+int saveMemory(const char *dirName, FILE *outFp) {
   char dataFileName[NAME_SIZE];
   int dataFileFd = 0;
   char usedFileName[NAME_SIZE];
@@ -497,7 +497,7 @@ int saveMemory(char *dirName, FILE *outFp) {
   return (0);
 }
 
-int loadMemory(char *dirName, FILE *outFp) {
+int loadMemory(const char *dirName, FILE *outFp) {
   DIR *dirBlk;
   struct dirent *entry;
   // int doneDir;
