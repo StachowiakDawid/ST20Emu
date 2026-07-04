@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "compat.h"
+#include "utils/compat.h"
 
 #define ST20_ERROR_START -2000
 #define ST20_ERROR_END -2999

@@ -10,7 +10,7 @@
 
 #include "defines.h"
 
-#include "commands.h"
+#include "cli/cli_state.h"
 #include "memory.h"
 #include "st20.h"
 

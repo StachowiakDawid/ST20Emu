@@ -1,8 +1,9 @@
+#ifndef CLI_STATE_H
+#define CLI_STATE_H
+
 #pragma once
 
-#include <cstdio>
-
-#include "defines.h"
+#include <string>
 
 constexpr int COMMAND_ERROR_START{-3000};
 constexpr int COMMAND_ERROR_END{-3999};
@@ -16,15 +17,24 @@ constexpr int NO_WATCHES_SET{-3012};
 
 constexpr int COMMAND_LEN{256};
 
+// public API
 void commandsInit();
 bool quitRequested();
-void setQuit(bool);
+void setQuit(bool flag);
 bool needCmd();
-void setNeedCmd(bool);
+void setNeedCmd(bool flag);
 bool needPrompt();
+int setNeedPrompt(bool flag);
 bool showRegs();
-int setNeedPrompt(bool);
-void initCmdState();
+
 int getCommand();
 int execCommand();
-const char *commandError(int);
+const char *commandError(int error);
+
+// internal
+const std::string &getCmdName();
+const std::string &getCmdParm1();
+const std::string &getCmdParm2();
+void toggleShowRegs();
+
+#endif
