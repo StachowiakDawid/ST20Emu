@@ -9,8 +9,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "defines.h"
-#include "st20.h"
+#include "../../common/defines.h"
+#include "../cpu/st20.h"
 #include "memory.h"
 
 /* this structure hold the state of the memory */

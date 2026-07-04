@@ -3,7 +3,7 @@
 // Method for a more descriptive system added to "st20emu2.exe"
 //////////////////////////////////////////////////////////////////////////
 
-#include "defines.h"
+#include "../../common/defines.h"
 #include "STi5518_RegisterDB.h"
 #include "STi5518_Region0.h"
 #include <stdio.h>

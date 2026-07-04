@@ -8,11 +8,11 @@
 #include <system_error>
 #include <strings.h> // POSIX strcasecmp
 
-#include "defines.h"
+#include "common/defines.h"
 
 #include "cli/cli_engine.h"
-#include "memory.h"
-#include "st20.h"
+#include "core/memory/memory.h"
+#include "core/cpu/st20.h"
 
 uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
 uint64_t warnInstr = WARN_UNPROMPTED_INSTR;

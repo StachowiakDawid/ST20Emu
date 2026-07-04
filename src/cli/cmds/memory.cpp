@@ -1,7 +1,7 @@
 #include "../cli_commands.h"
-#include "../../utils/compat.h"
-#include "../../memory.h"
-#include "../../st20.h"
+#include "../../common/compat.h"
+#include "../../core/memory/memory.h"
+#include "../../core/cpu/st20.h"
 #include <cstdint>
 #include <string>
 

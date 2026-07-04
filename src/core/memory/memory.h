@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#include "defines.h"
+#include "../../common/defines.h"
 #include <stdio.h>
 
 #define BLKSIZE 8 * 1024

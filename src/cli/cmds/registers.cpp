@@ -1,6 +1,6 @@
 #include "../cli_commands.h"
-#include "../../utils/compat.h"
-#include "../../st20.h"
+#include "../../common/compat.h"
+#include "../../core/cpu/st20.h"
 #include <string>
 
 extern "C" int SearchForReg(FILE *, unsigned long);
