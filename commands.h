@@ -16,15 +16,15 @@ constexpr int NO_WATCHES_SET{-3012};
 
 constexpr int COMMAND_LEN{256};
 
-int commandsInit(PARMS *, FILE *);
+void commandsInit();
 bool quitRequested();
-int setQuit(bool);
+void setQuit(bool);
 bool needCmd();
-int setNeedCmd(bool);
+void setNeedCmd(bool);
 bool needPrompt();
 bool showRegs();
 int setNeedPrompt(bool);
-int initCmdState();
-int getCommand(FILE *, FILE *);
-int execCommand(FILE *, FILE *);
+void initCmdState();
+int getCommand();
+int execCommand();
 const char *commandError(int);

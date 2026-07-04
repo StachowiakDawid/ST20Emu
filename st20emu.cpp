@@ -119,7 +119,7 @@ int main() {
   st20emuInit(&userParms);
   st20Init(&userParms, stdout);
   memoryInit(&userParms, stdout);
-  commandsInit(&userParms, stdout);
+  commandsInit();
 
   compat::println("");
 
@@ -169,11 +169,11 @@ int main() {
       setNeedCmd(true);
       while (needCmd() && needPrompt()) {
 
-        if ((result = getCommand(stdin, stdout))) {
+        if ((result = getCommand())) {
           printError(result);
         }
 
-        if ((result = execCommand(stdin, stdout))) {
+        if ((result = execCommand())) {
           printError(result);
         }
 

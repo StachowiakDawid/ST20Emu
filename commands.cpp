@@ -29,31 +29,29 @@ struct CMDSTATE {
 
 static CMDSTATE cmdState;
 
-using CmdFunc = int (*)(FILE *, FILE *);
+using CmdFunc = int (*)();
 
-extern "C" {
-int u_next(FILE *, FILE *);
-int u_setAreg(FILE *, FILE *);
-int u_setBreg(FILE *, FILE *);
-int u_setCreg(FILE *, FILE *);
-int u_doError(FILE *, FILE *);
-int u_setIptr(FILE *, FILE *);
-int u_go(FILE *, FILE *);
-int u_load(FILE *, FILE *);
-int u_loadData(FILE *, FILE *);
-int u_quit(FILE *, FILE *);
-int u_save(FILE *, FILE *);
-int u_stop(FILE *, FILE *);
-int u_storeWptr(FILE *, FILE *);
-int u_view(FILE *, FILE *);
-int u_view_a(FILE *, FILE *);
-int u_view_w(FILE *, FILE *);
-int u_view_aa(FILE *, FILE *);
-int u_query_db(FILE *, FILE *);
-int u_showregs(FILE *, FILE *);
-int u_showenbreg(FILE *, FILE *);
-int u_omr(FILE *, FILE *);
-}
+int u_next();
+int u_setAreg();
+int u_setBreg();
+int u_setCreg();
+int u_doError();
+int u_setIptr();
+int u_go();
+int u_load();
+int u_loadData();
+int u_quit();
+int u_save();
+int u_stop();
+int u_storeWptr();
+int u_view();
+int u_view_a();
+int u_view_w();
+int u_view_aa();
+int u_query_db();
+int u_showregs();
+int u_showenbreg();
+int u_omr();
 
 static const std::unordered_map<std::string_view, CmdFunc> uCommands = {
     {"", u_next},       {"a", u_setAreg},       {"b", u_setBreg},    {"c", u_setCreg},
@@ -63,32 +61,28 @@ static const std::unordered_map<std::string_view, CmdFunc> uCommands = {
     {"vaa", u_view_aa}, {"ver", u_showenbreg},  {"vra", u_showregs}, {"vw", u_view_w},
     {"w", u_storeWptr}};
 
-int commandsInit(PARMS *userParm, FILE *outFp) {
+void commandsInit() {
   initCmdState();
-  return 0;
 }
 
-int initCmdState() {
+void initCmdState() {
   cmdState = CMDSTATE{};
-  return 0;
 }
 
 bool quitRequested() {
   return cmdState.quit;
 }
 
-int setQuit(bool flag) {
+void setQuit(bool flag) {
   cmdState.quit = flag;
-  return 0;
 }
 
 bool needCmd() {
   return cmdState.needCmd;
 }
 
-int setNeedCmd(bool flag) {
+void setNeedCmd(bool flag) {
   cmdState.needCmd = flag;
-  return 0;
 }
 
 bool needPrompt() {
@@ -111,16 +105,16 @@ int setNeedPrompt(bool flag) {
   return 0;
 }
 
-int getCommand(FILE *inFp, FILE *outFp) {
+int getCommand() {
   cmdState.command = "doerror";
   cmdState.parm1.clear();
   cmdState.parm2.clear();
 
-  compat::print(outFp, "> ");
-  std::fflush(outFp);
+  compat::print("> ");
+  std::fflush(stdout);
 
   char commandLine[COMMAND_LEN];
-  if (std::fgets(commandLine, COMMAND_LEN, inFp) == nullptr) {
+  if (std::fgets(commandLine, COMMAND_LEN, stdin) == nullptr) {
     return GET_COMMAND_ERROR;
   }
 
@@ -140,38 +134,38 @@ int getCommand(FILE *inFp, FILE *outFp) {
   return 0;
 }
 
-int execCommand(FILE *inFp, FILE *outFp) {
+int execCommand() {
   auto it = uCommands.find(cmdState.command);
   if (it == uCommands.end()) {
     return UNKNOWN_COMMAND;
   }
-  return it->second(inFp, outFp);
+  return it->second();
 }
 
-int u_doError(FILE *inFp, FILE *outFp) {
-  return (INPUT_ERROR);
+int u_doError() {
+  return INPUT_ERROR;
 }
 
 /* GO */
-int u_go(FILE *inFp, FILE *outFp) {
+int u_go() {
   return setNeedPrompt(!needPrompt());
 }
 
 /* LOAD */
-int u_load(FILE *inFp, FILE *outFp) {
+int u_load() {
   if (cmdState.parm1.empty())
     return BAD_PARAMETER;
 
-  int result = loadMemory(cmdState.parm1.c_str(), outFp);
+  int result = loadMemory(cmdState.parm1.c_str(), stdout);
   if (!result)
-    result = loadCPUState(cmdState.parm1.c_str(), outFp);
+    result = loadCPUState(cmdState.parm1.c_str(), stdout);
 
-  printCPUState(outFp);
+  printCPUState(stdout);
   return result;
 }
 
 /* LOAD DATA */
-int u_loadData(FILE *inFp, FILE *outFp) {
+int u_loadData() {
   uint32_t startAddr = 0; // forced to 32-bit to mirror the original startAddr & 0xFFFFFFFF
   long dataLength = 0;
   int result = 0;
@@ -180,39 +174,39 @@ int u_loadData(FILE *inFp, FILE *outFp) {
     result = bulkLoadBytes(startAddr, cmdState.parm2.c_str(), nullptr, &dataLength);
   } else {
     result = bulkLoadBytes(0, cmdState.parm1.c_str(), nullptr, &dataLength);
-    compat::println(outFp, "Read {} bytes from {}", dataLength, cmdState.parm1);
+    compat::println("Read {} bytes from {}", dataLength, cmdState.parm1);
   }
   return result;
 }
 
 /* NEXT */
-int u_next(FILE *inFp, FILE *outFp) {
+int u_next() {
   setNeedCmd(false);
   return 0;
 }
 
 /* QUIT */
-int u_quit(FILE *inFp, FILE *outFp) {
+int u_quit() {
   setQuit(true);
   setNeedCmd(false);
   return 0;
 }
 
 /* SAVE */
-int u_save(FILE *inFp, FILE *outFp) {
+int u_save() {
   if (cmdState.parm1.empty()) {
     return BAD_PARAMETER;
   }
 
-  int result = saveMemory(cmdState.parm1.c_str(), outFp);
+  int result = saveMemory(cmdState.parm1.c_str(), stdout);
   if (!result)
-    result = saveCPUState(cmdState.parm1.c_str(), outFp);
+    result = saveCPUState(cmdState.parm1.c_str(), stdout);
 
   return result;
 }
 
 /* setAreg */
-int u_setAreg(FILE *inFp, FILE *outFp) {
+int u_setAreg() {
   long value;
   if (parseHex(cmdState.parm1, value))
     return setAreg(value);
@@ -221,7 +215,7 @@ int u_setAreg(FILE *inFp, FILE *outFp) {
 }
 
 /* setBreg */
-int u_setBreg(FILE *inFp, FILE *outFp) {
+int u_setBreg() {
   long value;
   if (parseHex(cmdState.parm1, value))
     return setBreg(value);
@@ -230,7 +224,7 @@ int u_setBreg(FILE *inFp, FILE *outFp) {
 }
 
 /* setCreg */
-int u_setCreg(FILE *inFp, FILE *outFp) {
+int u_setCreg() {
   long value;
   if (parseHex(cmdState.parm1, value))
     return setCreg(value);
@@ -239,7 +233,7 @@ int u_setCreg(FILE *inFp, FILE *outFp) {
 }
 
 /* setIptr */
-int u_setIptr(FILE *inFp, FILE *outFp) {
+int u_setIptr() {
   long value;
   if (parseHex(cmdState.parm1, value))
     return setIptr(value);
@@ -248,12 +242,12 @@ int u_setIptr(FILE *inFp, FILE *outFp) {
 }
 
 /* stop */
-int u_stop(FILE *inFp, FILE *outFp) {
+int u_stop() {
   return setWatch(cmdState.parm1.c_str(), cmdState.parm2.c_str());
 }
 
 /* storeWptr */
-int u_storeWptr(FILE *inFp, FILE *outFp) {
+int u_storeWptr() {
   long index, value;
 
   if (!parseHex(cmdState.parm1, index) || !parseHex(cmdState.parm2, value))
@@ -263,7 +257,7 @@ int u_storeWptr(FILE *inFp, FILE *outFp) {
 }
 
 /* view */
-int u_view(FILE *inFp, FILE *outFp) {
+int u_view() {
   long address;
   unsigned long value = 0;
 
@@ -271,26 +265,26 @@ int u_view(FILE *inFp, FILE *outFp) {
     return BAD_PARAMETER;
 
   int result = readBytes(address, 4, &value);
-  compat::println(outFp, "Value at 0x{:08x} is 0x{:08x}", address, value);
+  compat::println("Value at 0x{:08x} is 0x{:08x}", address, value);
 
   return result;
 }
 
 /* view_a */
-int u_view_a(FILE *inFp, FILE *outFp) {
+int u_view_a() {
   long address, value;
 
   if (!parseHex(cmdState.parm1, address) || !parseHex(cmdState.parm2, value))
     return BAD_PARAMETER;
 
   int result = storeBytes(address, 4, value);
-  compat::println(outFp, "Value at 0x{:08x} is 0x{:08x}", address, value);
+  compat::println("Value at 0x{:08x} is 0x{:08x}", address, value);
 
   return result;
 }
 
 /* view_aa */
-int u_view_aa(FILE *inFp, FILE *outFp) {
+int u_view_aa() {
   long address, range;
 
   if (!parseHex(cmdState.parm1, address) || !parseHex(cmdState.parm2, range))
@@ -302,57 +296,57 @@ int u_view_aa(FILE *inFp, FILE *outFp) {
     result = readInvBytes(i, 4, &value);
 
     if (!(i & 0x0f)) {
-      compat::print(outFp, "\n\r0x{:08x} : {:08x}", i, value);
+      compat::print("\n\r0x{:08x} : {:08x}", i, value);
     } else {
-      compat::print(outFp, " 0x{:08x}", value);
+      compat::print(" 0x{:08x}", value);
     }
   }
-  compat::print(outFp, "\n\r");
+  compat::print("\n\r");
   return result;
 }
 
 /* view_w */
-int u_view_w(FILE *inFp, FILE *outFp) {
+int u_view_w() {
   long n, value;
 
   if (!parseHex(cmdState.parm1, n))
     return BAD_PARAMETER;
 
   int result = addrWptrWord(n, &value);
-  compat::println(outFp, "Wptr_n is at 0x{:08x}", value);
+  compat::println("Wptr_n is at 0x{:08x}", value);
 
   return result;
 }
 
 // QUERY REGISTER NAME BY VALUE
-int u_query_db(FILE *inFp, FILE *outFp) {
+int u_query_db() {
   unsigned long n = 0;
 
   if (!parseHex(cmdState.parm1, n))
     return BAD_PARAMETER;
 
-  SearchForReg(outFp, n);
+  SearchForReg(stdout, n);
   return 0;
 }
 
 // SET THE "SHOW REGISTER ACCESS" FLAG
-int u_showregs(FILE *inFp, FILE *outFp) {
+int u_showregs() {
   // Flag flip-flopping & show status
   cmdState.showVerboseRegs = !cmdState.showVerboseRegs;
-  compat::println(outFp, "Verbose Register Access {}", cmdState.showVerboseRegs ? "ON" : "OFF");
+  compat::println("Verbose Register Access {}", cmdState.showVerboseRegs ? "ON" : "OFF");
 
   return 0;
 }
 
 // SHOW THE ENABLES REGISTER CONTENTS, BIT by BIT
-int u_showenbreg(FILE *inFp, FILE *outFp) {
-  printEnablesRegState(outFp);
+int u_showenbreg() {
+  printEnablesRegState(stdout);
   return 0;
 }
 
 // SHOW THE 'OTHER MACHINE REGISTER' CONTENTS
-int u_omr(FILE *inFp, FILE *outFp) {
-  printOMRState(outFp);
+int u_omr() {
+  printOMRState(stdout);
   return 0;
 }
 
