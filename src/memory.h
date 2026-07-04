@@ -5,6 +5,9 @@
 extern "C" {
 #endif
 
+#include <stdio.h>
+#include "defines.h"
+
 #define BLKSIZE 8 * 1024
 #define ADDR_IN_BLK_MASK ((long)(BLKSIZE - 1))
 #define ADDR_OF_BLK_MASK ((long)(0xFFFFFFFF - ADDR_IN_BLK_MASK))
