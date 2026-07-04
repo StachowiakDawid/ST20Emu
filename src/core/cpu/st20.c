@@ -43,8 +43,8 @@
 #include "../memory/memory.h"
 // #include "commands.h" // disabled until ported to C++
 #include "st20.h"
-#include "../../soc/sti5518/STi5518_SearchDB.h" //Internal DB facility
-#include "omr.h"                                //Other Machine Registers include file
+// #include "../../soc/sti5518/STi5518_SearchDB.h" //Internal DB facility
+#include "omr.h" //Other Machine Registers include file
 
 static OMRSTATE omrState; // The OMR register itself
 

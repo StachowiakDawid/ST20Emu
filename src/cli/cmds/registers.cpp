@@ -1,9 +1,8 @@
 #include "../cli_commands.h"
 #include "../../common/compat.h"
 #include "../../core/cpu/st20.h"
+#include "../../soc/sti5518/STi5518_SearchDB.h"
 #include <string>
-
-extern "C" int SearchForReg(FILE *, unsigned long);
 
 namespace cli::cmds {
 
@@ -65,7 +64,7 @@ CliError cmd_query_db(CliEngine & /*engine*/, std::span<const std::string_view> 
   if (args.empty() || !parseHex(std::string(args[0]), n))
     return CliError::BadParameter;
 
-  SearchForReg(stdout, n);
+  soc::sti5518::search_for_reg(static_cast<uint32_t>(n));
   return CliError::Success;
 }
 

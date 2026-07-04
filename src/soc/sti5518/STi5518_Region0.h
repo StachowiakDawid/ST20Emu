@@ -1,11 +1,18 @@
-typedef struct Region0_Description {
-  unsigned long lbaddr; // Lower Address Boundary
-  unsigned long hbaddr; // Higher Address Boundary
-  char *description;    // Short description for the register
-} REG0DESCR;
+#pragma once
 
-// The Reg's Database
-static REG0DESCR REG0_Entry[] = {
+#include <array>
+#include <cstdint>
+#include <string_view>
+
+namespace soc::sti5518 {
+
+struct Region0Description {
+  uint32_t lbaddr; // Lower Address Boundary
+  uint32_t hbaddr; // Higher Address Boundary
+  std::string_view description;
+};
+
+constexpr std::array<Region0Description, 21> region0_entries = {{
     {0x80000000, 0x80000003, "Reserved for system use"},
     {0x80000004, 0x8000000F, "Reserved for system use"},
     {0x80000010, 0x80000013, "Reserved for system use"},
@@ -26,7 +33,11 @@ static REG0DESCR REG0_Entry[] = {
     {0x80000110, 0x8000011F, "Low priority SystemOperations trapped process"},
     {0x80000120, 0x8000012F, "Low priority Scheduler trap handler"},
     {0x80000130, 0x8000013F, "Low priority Scheduler trapped process"},
-    {0x80000140, 0x80000FFF, "Internal SRAM: < 4 Kbytes user code, data and stack"},
-    //{0x80001000,0x800017FF,"Internal SRAM if data cache is not enabled.User-code, data and
-    //stack"},
-    {0x00, 0x00, "??"}};
+    {0x80000140, 0x80000FFF, "Internal SRAM: < 4 Kbytes user code, data and stack"}
+    //{0x80001000, 0x800017FF, "Internal SRAM if data cache is not enabled. User-code, data and
+    // stack"},
+    //  {0x00, 0x00, "??"}
+
+}};
+
+} // namespace soc::sti5518
