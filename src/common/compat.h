@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <charconv>
 
 // C++23 <print> fallback emulator
 namespace compat {
@@ -25,7 +26,7 @@ void print(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
 }
 
 template <typename... Args> void print(std::format_string<Args...> fmt, Args &&...args) {
-  print(stdout, fmt, std::forward<Args>(args)...);
+  compat::print(stdout, fmt, std::forward<Args>(args)...);
 }
 } // namespace compat
 
