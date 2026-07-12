@@ -2516,9 +2516,10 @@ Description: Store the contents of Breg into the non-local variable at the speci
 */
 int stnl_(FILE *outFp, long offset) {
   int result;
-  int oldAreg, oldBreg;
+  unsigned int oldAreg, oldBreg;
 
   oldAreg = pop();
+  fprintf(outFp, "stnl: Areg=%08lx, offset=%ld\n", oldAreg + offset * 4, offset);
   oldBreg = pop();
 
   result = storeBytes(oldAreg + offset * 4, 4, oldBreg);
