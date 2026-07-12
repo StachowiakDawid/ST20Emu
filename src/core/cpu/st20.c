@@ -2519,7 +2519,6 @@ int stnl_(FILE *outFp, long offset) {
   unsigned int oldAreg, oldBreg;
 
   oldAreg = pop();
-  fprintf(outFp, "stnl: Areg=%08lx, offset=%ld\n", oldAreg + offset * 4, offset);
   oldBreg = pop();
 
   result = storeBytes(oldAreg + offset * 4, 4, oldBreg);
