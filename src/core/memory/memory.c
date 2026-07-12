@@ -127,7 +127,7 @@ int readBytes(long address, int nBytes, unsigned long *value) {
     cByte = cBlk->data[offset] & 0xFF;
 
     /* build the return value from its component bytes */
-    cWord += cByte << (8 * i);
+    cWord += ((unsigned long)cByte) << (8 * i);
   }
 
   *value = cWord;
@@ -169,7 +169,7 @@ int readInvBytes(long address, int nBytes, long *value) {
     cByte = cBlk->data[offset] & 0xFF;
 
     /* build the return value from its component bytes */
-    cWord += cByte << (8 * (3 - i));
+    cWord += ((unsigned long)cByte) << (8 * (3 - i));
   }
 
   *value = cWord;

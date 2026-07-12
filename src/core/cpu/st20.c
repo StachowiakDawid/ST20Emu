@@ -51,7 +51,7 @@ static OMRSTATE omrState; // The OMR register itself
 static CPUSTATE cpuState;
 static WATCH watch;
 static long instrCode = 0;
-static long operand = (long)START_ADDR;
+static unsigned long operand = (long)START_ADDR;
 static unsigned char instrBytes[100];
 static int instrLength = 0;
 static long st20ProductId = ST20_PRODUCT_ID;
