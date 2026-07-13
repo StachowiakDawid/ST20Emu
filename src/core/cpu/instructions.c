@@ -534,6 +534,7 @@ int lb_(FILE *outFp, long unused) {
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
+  // TODO: CPU module should not have a knowledge about CLI
   // if (needPrompt()) {
   fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   // }
