@@ -6,13 +6,15 @@
 #include "omr.h"
 #include <ctime>
 
-OMRSTATE omrState;
+// this is unused
 
-// TODO: probably unused
-int initTimer(void) {
+// OMRSTATE omrState;
 
-  // init the fields with the current system time:
-  time(&omrState.ClockRegHP);
-  time(&omrState.ClockRegLP);
-  return (0);
-}
+// // TODO: probably unused
+// int initTimer(void) {
+
+//   // init the fields with the current system time:
+//   time(&omrState.ClockRegHP);
+//   time(&omrState.ClockRegLP);
+//   return (0);
+// }
