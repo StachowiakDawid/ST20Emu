@@ -6,7 +6,6 @@
 #include <cstring>
 #include <fstream>
 #include <system_error>
-#include <strings.h> // POSIX strcasecmp
 
 #include "common/defines.h"
 
@@ -91,11 +90,11 @@ void st20emuInit(const PARMS *userParms) {
     auto [ptr, ec] = std::from_chars(valStr.data(), valStr.data() + valStr.size(), value, base);
 
     if (ec == std::errc{}) {
-      if (!strcasecmp(userParms->parameter[i], MAX_UNPROMPTED_INSTR_CH)) {
+      if (!std::strcmp(userParms->parameter[i], MAX_UNPROMPTED_INSTR_CH)) {
         maxInstr = value;
-      } else if (!strcasecmp(userParms->parameter[i], WARN_UNPROMPTED_INSTR_CH)) {
+      } else if (!std::strcmp(userParms->parameter[i], WARN_UNPROMPTED_INSTR_CH)) {
         warnInstr = value;
-      } else if (!strcasecmp(userParms->parameter[i], UNDEFINED_WORD_CH)) {
+      } else if (!std::strcmp(userParms->parameter[i], UNDEFINED_WORD_CH)) {
         undefinedWord = value;
       }
     }

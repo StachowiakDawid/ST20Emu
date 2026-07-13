@@ -32,7 +32,7 @@
 // std
 #include <stdint.h>
 #include <stdio.h>
-#include <strings.h>
+#include <string.h>
 
 // posix / linux
 #include <fcntl.h>
@@ -68,23 +68,23 @@ int st20Init(PARMS *userParms, FILE *outFp) {
   long value;
 
   for (i = 0; i < userParms->nParms; i++) {
-    if (!strcasecmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
+    if (!strcmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
       if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         st20ProductId = value;
       }
-    } else if (!strcasecmp(userParms->parameter[i], MEM_START_VAL_CH)) {
+    } else if (!strcmp(userParms->parameter[i], MEM_START_VAL_CH)) {
       if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         memStartVal = value;
       }
-    } else if (!strcasecmp(userParms->parameter[i], TIMER_GUESS_CH)) {
+    } else if (!strcmp(userParms->parameter[i], TIMER_GUESS_CH)) {
       if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         timerGuess = value;
       }
-    } else if (!strcasecmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
+    } else if (!strcmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
       if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         wptrEndAddr = value;
       }
-    } else if (!strcasecmp(userParms->parameter[i], START_ADDR_CH)) {
+    } else if (!strcmp(userParms->parameter[i], START_ADDR_CH)) {
       if (sscanf(userParms->value[i], "%lx", &value) == 1) {
         startAddr = value;
       }
@@ -226,7 +226,7 @@ int setWatch(const char *reg, const char *parm) {
   int enable;
   long value;
 
-  if (strcasecmp(parm, "clear")) {
+  if (strcmp(parm, "clear")) {
     enable = TRUE;
   } else {
     enable = FALSE;
