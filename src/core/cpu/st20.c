@@ -29,21 +29,23 @@
 /*				-HighPriority and LowPriority ClockReg more precise */
 /********************************************************************/
 
-// std
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+#include "st20.h"
+
+#include "omr.h"
+
+#include "../../common/defines.h"
+// #include "../../soc/sti5518/STi5518_SearchDB.h"
+// #include "commands.h" // disabled until ported to C++
+#include "../memory/memory.h"
 
 // posix / linux
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "../../common/defines.h"
-#include "../memory/memory.h"
-// #include "commands.h" // disabled until ported to C++
-#include "st20.h"
-// #include "../../soc/sti5518/STi5518_SearchDB.h" //Internal DB facility
-#include "omr.h" //Other Machine Registers include file
+// std
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 // cannot use static when sharing with other C objects
 OMRSTATE omrState;

@@ -4,9 +4,10 @@
 #pragma once
 
 #include "cli_types.h"
-#include <string>
-#include <string_view>
+
 #include <span>
+#include <string_view>
+#include <string>
 #include <vector>
 
 namespace cli {

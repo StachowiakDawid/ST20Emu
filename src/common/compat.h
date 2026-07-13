@@ -1,11 +1,12 @@
 #pragma once
 
-#include <cstdio>
-#include <format>
-#include <string>
-#include <string_view>
-#include <utility>
 #include <charconv>
+#include <format>
+#include <string_view>
+#include <string>
+#include <utility>
+
+#include <cstdio>
 
 // C++23 <print> fallback emulator
 namespace compat {

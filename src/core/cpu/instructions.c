@@ -1,12 +1,13 @@
-// std
-#include <stdint.h>
-#include <stdio.h>
+#include "st20.h"
+
+#include "omr.h"
 
 #include "../../common/defines.h"
+// #include "../../soc/sti5518/STi5518_SearchDB.h"
 #include "../memory/memory.h"
-#include "st20.h"
-// #include "../../soc/sti5518/STi5518_SearchDB.h" //Internal DB facility
-#include "omr.h" //Other Machine Registers include file
+
+#include <stdint.h>
+#include <stdio.h>
 
 extern OMRSTATE omrState;
 extern CPUSTATE cpuState;

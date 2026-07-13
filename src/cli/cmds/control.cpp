@@ -1,5 +1,7 @@
 #include "../cli_commands.h"
+
 #include "../../core/cpu/st20.h"
+
 #include <string>
 
 namespace cli::cmds {

@@ -3,8 +3,9 @@
 // but which are not part of the process state. See #include file
 //  -------------------------------------------
 
-#include "omr.h"
-#include <ctime>
+// #include "omr.h"
+
+// #include <ctime>
 
 // this is unused
 

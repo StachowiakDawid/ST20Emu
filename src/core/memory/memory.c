@@ -1,7 +1,7 @@
-// std
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "memory.h"
+
+#include "../../common/defines.h"
+#include "../cpu/st20.h"
 
 // posix / linux
 #include <dirent.h>
@@ -9,9 +9,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../../common/defines.h"
-#include "../cpu/st20.h"
-#include "memory.h"
+// std
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* this structure hold the state of the memory */
 typedef struct memblk_struct {

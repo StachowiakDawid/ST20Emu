@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/compat.h"
+
 #include <cstdint>
 
 #define ST20_ERROR_START -2000

@@ -1,9 +1,12 @@
 #include "../cli_commands.h"
+
 #include "../../common/compat.h"
-#include "../../core/memory/memory.h"
 #include "../../core/cpu/st20.h"
-#include <cstdint>
+#include "../../core/memory/memory.h"
+
 #include <string>
+
+#include <cstdint>
 
 namespace cli::cmds {
 CliError cmd_load(CliEngine & /*engine*/, std::span<const std::string_view> args) {

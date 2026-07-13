@@ -1,17 +1,17 @@
 #include "main.h"
 
+#include "cli/cli_engine.h"
+#include "common/defines.h"
+#include "core/cpu/st20.h"
+#include "core/memory/memory.h"
+
 #include <algorithm>
 #include <charconv>
-#include <cstdint>
-#include <cstring>
 #include <fstream>
 #include <system_error>
 
-#include "common/defines.h"
-
-#include "cli/cli_engine.h"
-#include "core/memory/memory.h"
-#include "core/cpu/st20.h"
+#include <cstdint>
+#include <cstring>
 
 uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
 uint64_t warnInstr = WARN_UNPROMPTED_INSTR;

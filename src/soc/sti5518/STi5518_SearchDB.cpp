@@ -1,7 +1,10 @@
 #include "STi5518_SearchDB.h"
+
 #include "STi5518_Region0.h"
 #include "STi5518_RegisterDB.h"
+
 #include "../../common/compat.h"
+
 #include <algorithm>
 #include <iterator>
 

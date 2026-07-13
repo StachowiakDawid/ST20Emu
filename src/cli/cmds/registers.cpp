@@ -1,7 +1,9 @@
 #include "../cli_commands.h"
+
 #include "../../common/compat.h"
 #include "../../core/cpu/st20.h"
 #include "../../soc/sti5518/STi5518_SearchDB.h"
+
 #include <string>
 
 namespace cli::cmds {

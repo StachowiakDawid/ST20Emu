@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "../../common/defines.h"
+
 #include <stdio.h>
 
 /* this is the starting address for CPU execution */

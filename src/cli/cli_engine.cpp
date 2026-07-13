@@ -1,10 +1,13 @@
 #include "cli_engine.h"
+
 #include "cli_commands.h"
+
 #include "../common/compat.h"
 #include "../core/cpu/st20.h"
+
+#include <algorithm>
 #include <iostream>
 #include <sstream>
-#include <algorithm>
 
 namespace cli {
 
