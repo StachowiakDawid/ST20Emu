@@ -2,21 +2,28 @@
 
 ST20Emu is an emulator for the ST20, a 32-bit transputer-based processor architecture developed by SGS-Thomson (later STMicroelectronics). Widely used throughout the late 1990s and early 2000s, ST20 cores powered many iconic digital Set-Top Boxes (STBs) and DVD players of the era.
 
-## Building
+## Development
 
-It was tested with clang version 18.1.3 (1ubuntu1).
+### Requirements
+
+- clang 18.1.3
+- make
+
+### Building
+
+Build a debug version:
 
 ```bash
 make clean && make
 ```
 
-If you want to build a release version (it's too broken for now anyway and will silence runtime errors):
+Build a release version (it's too broken for now anyway and will silence runtime errors):
 
 ```bash
 BUILD=release make clean && make
 ```
 
-## How to use
+## Getting started
 
 Run the binary from your terminal:
 
@@ -156,12 +163,14 @@ Enables Register Value=0xffffc000
 
 ---
 
-devls/lb/lw and devss/sb/sw can be used for memory access too, so if a specific
-address isn't found in the internal DB, a more generic description is returned
-based over the Datasheet memory map description. Example:
+`devls`/`lb`/`lw` and `devss`/`sb`/`sw` can be used for memory access too, so if a specific address isn't found in the internal DB, a more generic description is returned based on the datasheet memory map description.
 
+Example:
+
+```plaintext
 NOTE: At 0xc0402804 Write to device at address c042a5e8, value=0x00000002
 DESCR: Address is into Shared SDRAM (Region 1)
+```
 
 ---
 
@@ -169,34 +178,10 @@ The ajw command has not been executed yet. If you hit the ENTER
 key, it will be executed and the results of its execution will be
 displayed.
 
-## Notes
+## Acknowledgments
 
-Unused words are given the bit pattern 0xAAAAAAAA
+This project is a fork of the original [ST20Emu](https://github.com/IU5HKU/ST20Emu) created by Marco Campinoti.
 
-The workspace has been assigned to the memory addresses from
-0x1FFFF000 to 0x1FFFFFFF. The first workspace word is stored
-at 0x1FFFFFFC. The workspace words are stored at consecutively
-lower words.
+## License
 
-Only the most common ST20 instructions have been implemented.
-The emulator will warn you when an unimplemented instruction
-has been encountered.
-
-I still have lots of things to add to this emulator
-
-- implement the complete set of instructions
-- allow people to give names to addresses
-- add a command to step over subroutines
-- etc.
-  I'm willing to accept other suggestions but there's no guarantee
-  that I'll get any of the work done very quickly.
-
-## Troubleshooting
-
-\*Mar 2002
-This is a WIN32 app. I don't think it will run in a 16 bit
-environment (does anyone actually use these any more?). I wrote
-this for Win98. I have no idea whether it works in NT/2000/XP.
-
-\*Dec 2011
-Can be compiled with VC++ Express, work fine in 2K/XP/Win7.
+This project is licensed under the terms of the [GPL-3.0 license](https://github.com/StachowiakDawid/ST20Emu/blob/main/LICENSE).
