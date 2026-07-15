@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fnmatch.h>
 
 // std
 #include <stdio.h>
@@ -518,15 +519,17 @@ int loadMemory(const char *dirName, FILE *outFp) {
   fprintf(outFp, "filemask: %s\n", fileMask);
 
   // TODO: this will fail because file mask is not actually a mask, just a string
-  dirBlk = opendir(fileMask);
+  dirBlk = opendir(dirName);
   if (dirBlk == NULL) {
     fprintf(outFp, "opendir failed\n");
     return (INVALID_OUT_FILE);
   }
   fprintf(outFp, "opendir successed\n");
 
-  do { /* for each file */
-
+  while ((entry = readdir(dirBlk)) != NULL) { /* for each file */
+    if (fnmatch("???????0.bin", entry->d_name, 0) != 0) {
+        continue; // skip non-matching files
+    }
     /* the name contains the address to load the file at */
     fprintf(outFp, "d_name: %s\n", entry->d_name);
     strcpy(addressCh, entry->d_name);
@@ -558,7 +561,7 @@ int loadMemory(const char *dirName, FILE *outFp) {
       return (result);
     }
 
-  } while (readdir(dirBlk) != NULL); /* end of for each data file */
+  } /* end of for each data file */
   closedir(dirBlk);
   return (0);
 }
