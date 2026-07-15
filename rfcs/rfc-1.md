@@ -1,7 +1,7 @@
 # RFC 1
 
 **Status**: In Progress
-**Last Updated**: 14 July 2026
+**Last Updated**: 15 July 2026
 **Created on**: 14 July 2026
 **Created by**: Michał Korczak
 
@@ -10,7 +10,7 @@
 The core principle of this project is separation of concerns.
 The ST20 is an instruction set architecture (ISA), while chips like STi5518 are System-on-Chips (SoCs) that embed an ST20 core alongside specific peripherals, memory maps, and hardware registers.
 
-To ensure future extensibility, the CPU must know absolutely nothing about the SoC, and the core emulation libraries must know absolutely nothing about how they are being rendered to the screen (CLI or GUI).
+To ensure future extensibility, the CPU must know absolutely nothing about the SoC, and the core emulation libraries must know absolutely nothing about how they are being rendered to the screen (CLI or GUI). The emulator should allow emulating at device-native speed by using deltaTime method.
 
 This is not the case with the current project state. In example, CPU emulation calls CLI functions directly.
 
@@ -85,7 +85,7 @@ Hardcoding STi5518 video/audio registers directly into the ST20 CPU class will m
 
 It is possible to find common patterns between these huge register manuals. During the advanced stage of this project we could redefine the structure to YAML files or keep it in the `.cpp` source code as we get to know more about the shared intricacies of ST20 SoCs.
 
-## Meson build system
+## Proposed toolchain
 
 The proposed stack is: `mise` + `meson` (with `ninja` and `mold`) + `just`. Meson is the most modern build system, not only for C++ projects, that we can use along with `ninja` builder and `mold` linker. With `mise` we can ensure reproducible environments, and `just` is just a simpler `make`.
 
