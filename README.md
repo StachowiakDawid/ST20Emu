@@ -1,16 +1,6 @@
 # ST20Emu
 
-ST20 Emulator, an ARM-based MCU used in some 90's Set Top Box, this is an old project and now i think it's completely useless, but i've decided to put here the code that maybe can be useful to someone who wanna write a simple emulator.
-The code can be useful in writing virtual machines too. Feel free to grab, use and misuse anything you want from this source code. The Project was compiled under Win (Visual Studio Professional 2013) and Linux, and run without efforts.
-In the repo there is also a file called `6300.bin`, the firmware of a very very very old STB i bought so many years ago that i don't exactly remember when. This emu came back directly from the dust of my archive, as you can see i wrote the last version in january 2012, after that the project was abandoned due to lack of time to dedicate to it.
-The instructions set manual is present too.
-
-ST20 emulator V3.0
-
-V2.0 March 15, 2002
-V3.0 December 20, 2011
-V3.1 December 31, 2011
-V3.2 January 04, 2012
+ST20Emu is an emulator for the ST20, a 32-bit transputer-based processor architecture developed by SGS-Thomson (later STMicroelectronics). Widely used throughout the late 1990s and early 2000s, ST20 cores powered many iconic digital Set-Top Boxes (STBs) and DVD players of the era.
 
 ## Building
 
@@ -28,24 +18,25 @@ BUILD=release make clean && make
 
 ## How to use
 
-To start, type `st20emu` in a terminal window. At the `>`
-prompt, type
+Run the binary from your terminal:
+
+```bash
+./st20emu
+```
+
+Once inside the interactive command prompt (`>`), load a binary file containing valid ST20 instructions (such as a TSOP dump) using the `l` command:
 
 ```plaintext
 l firmware/6300.bin
 ```
 
-where `firmware/6300.bin` is the name of a file with ST20 instructions in
-it (e.g. a TSOP dump). It can be replaced with different file. If you forget to do this, you'll get lots
-of errors since the emulator won't have any ST20 instructions to
-emulate.
-Some settings are read from `st20emu.ini` file, that must be in the
-same directory of the emulator. The content of this file is easily
-understandable and the commands are self-explanatory.
+> **Note:** You can load any compatible ST20 binary. Ensure you load a file before starting execution; attempting to run the emulator with empty memory will result in immediate execution errors.
 
-Now you can start issuing commands to the emulator
+The emulator reads configuration values from `st20emu.ini`, which must reside in the same directory as the executable. The settings in this file are straightforward and self-explanatory.
 
-Here is a reorganized, clean, and highly scannable reference table for the **ST20Emu Emulator Commands**, grouped by their primary function to make it easier to read than the original document.
+> **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
+
+Once your firmware is loaded, you can begin issuing commands to the emulator.
 
 ---
 
