@@ -1,9 +1,8 @@
 #ifndef MEMORY_H
 #define MEMORY_H
 
+#include "../../common/compat.h"
 #include "../../common/defines.h"
-
-#include <stdio.h>
 
 inline constexpr long BLKSIZE = 8 * 1024;
 inline constexpr long ADDR_IN_BLK_MASK = BLKSIZE - 1L;

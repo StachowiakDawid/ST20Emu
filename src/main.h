@@ -1,3 +1,6 @@
+#ifndef MAIN_H
+#define MAIN_H
+
 #pragma once
 
 #include "common/compat.h"
@@ -24,3 +27,5 @@ constexpr uint64_t WARN_UNPROMPTED_INSTR{100000};
 constexpr const char *WARN_UNPROMPTED_INSTR_CH{"WARN_UNPROMPTED_INSTR"};
 constexpr uint64_t UNDEFINED_WORD{0xCCCCCCCC};
 constexpr const char *UNDEFINED_WORD_CH{"UNDEFINED_WORD"};
+
+#endif

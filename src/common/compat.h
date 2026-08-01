@@ -1,3 +1,6 @@
+#ifndef COMPAT_H
+#define COMPAT_H
+
 #pragma once
 
 #include <charconv>
@@ -47,3 +50,5 @@ template <typename T> static bool parseHex(const std::string &str, T &value) {
   auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), value, 16);
   return ec == std::errc{};
 }
+
+#endif
