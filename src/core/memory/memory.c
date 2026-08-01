@@ -29,7 +29,7 @@ static MEMBLK *memoryMap = NULL;
 MEMBLK *getMemBlk(long, int);
 int byteUsedBit(MEMBLK *, int, int);
 
-int memoryInit(PARMS *userParms, FILE *outFp) {
+int memoryInit(PARMS *userParms) {
 
   /* the emulator will get into an infinite loop if this initialization isn't done */
   storeBytes((long)0x3004, 4, 0);
@@ -400,7 +400,7 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
   return (0);
 }
 
-int saveMemory(const char *dirName, FILE *outFp) {
+int saveMemory(const char *dirName) {
   char dataFileName[NAME_SIZE];
   int dataFileFd = 0;
   char usedFileName[NAME_SIZE];
@@ -499,7 +499,7 @@ int saveMemory(const char *dirName, FILE *outFp) {
   return (0);
 }
 
-int loadMemory(const char *dirName, FILE *outFp) {
+int loadMemory(const char *dirName) {
   DIR *dirBlk;
   struct dirent *entry;
   // int doneDir;
@@ -513,27 +513,27 @@ int loadMemory(const char *dirName, FILE *outFp) {
   int result = 0;
 
   if (sprintf(fileMask, "%s/???????0.bin", dirName) == EOF) {
-    fprintf(outFp, "filemask failed\n");
+    fprintf(stdout, "filemask failed\n");
     return (INVALID_OUT_FILE);
   }
-  fprintf(outFp, "filemask: %s\n", fileMask);
+  fprintf(stdout, "filemask: %s\n", fileMask);
 
   // TODO: this will fail because file mask is not actually a mask, just a string
   dirBlk = opendir(dirName);
   if (dirBlk == NULL) {
-    fprintf(outFp, "opendir failed\n");
+    fprintf(stdout, "opendir failed\n");
     return (INVALID_OUT_FILE);
   }
-  fprintf(outFp, "opendir successed\n");
+  fprintf(stdout, "opendir successed\n");
 
   while ((entry = readdir(dirBlk)) != NULL) { /* for each file */
     if (fnmatch("???????0.bin", entry->d_name, 0) != 0) {
         continue; // skip non-matching files
     }
     /* the name contains the address to load the file at */
-    fprintf(outFp, "d_name: %s\n", entry->d_name);
+    fprintf(stdout, "d_name: %s\n", entry->d_name);
     strcpy(addressCh, entry->d_name);
-    fprintf(outFp, "address: %s\n", addressCh);
+    fprintf(stdout, "address: %s\n", addressCh);
     if (sscanf(addressCh, "%8lx.bin", &address) != 1) {
       return (INVALID_OUT_FILE);
     }

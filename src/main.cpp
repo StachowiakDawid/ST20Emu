@@ -114,13 +114,13 @@ int main() {
   readParms(&userParms);
 
   st20emuInit(&userParms);
-  st20Init(&userParms, stdout);
-  memoryInit(&userParms, stdout);
+  st20Init(&userParms);
+  memoryInit(&userParms);
 
   compat::println("");
 
   while (!cli.is_quit_requested()) {
-    execInstr(stdout, &watchTripped);
+    execInstr(&watchTripped);
 
     /*
      * if the program is running without prompts, exit this state if
@@ -154,13 +154,13 @@ int main() {
      * after executing the instruction
      */
     if (cli.needs_prompt()) {
-      printCPUState(stdout);
+      printCPUState();
     }
 
-    decodeNextInstr(stdout);
+    decodeNextInstr();
 
     if (cli.needs_prompt()) {
-      printNextInstr(stdout);
+      printNextInstr();
 
       cli.set_need_cmd(true);
       while (cli.needs_cmd() && cli.needs_prompt()) {
@@ -179,7 +179,7 @@ int main() {
         }
       }
 
-      decodeNextInstr(stdout);
+      decodeNextInstr();
     }
   }
 

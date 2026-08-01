@@ -32,7 +32,7 @@ extern "C" {
 #define DONT_ALTER_BIT 3
 
 /* routines used to update the state of the memory */
-int memoryInit(PARMS *, FILE *);
+int memoryInit(PARMS *);
 int readBytes(long, int, unsigned long *);
 int readInvBytes(long, int, long *);
 int storeBytes(long, int, long);
@@ -40,8 +40,8 @@ int allocBytes(long, int);
 int storeByteRange(long, long, int);
 int bulkLoadBytes(long, const char *, char *, long *);
 /*int readBlockByte (MEMBLK *, int, unsigned char *);  NOT NEEDED */
-int saveMemory(const char *, FILE *);
-int loadMemory(const char *, FILE *);
+int saveMemory(const char *);
+int loadMemory(const char *);
 char *memoryError(int);
 
 #ifdef __cplusplus

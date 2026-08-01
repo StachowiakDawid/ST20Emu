@@ -43,16 +43,15 @@
 #include <unistd.h>
 
 // std
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
 
 // cannot use static when sharing with other C objects
 OMRSTATE omrState;
 CPUSTATE cpuState;
 WATCH watch;
 long instrCode = 0;
-unsigned long operand = (long)START_ADDR;
+unsigned long operand = static_cast<unsigned long>(START_ADDR);
 unsigned char instrBytes[100];
 int instrLength = 0;
 long st20ProductId = ST20_PRODUCT_ID;
@@ -61,11 +60,11 @@ long timerGuess = TIMER_GUESS;
 long startAddr = START_ADDR;
 long wptrEndAddr = WPTR_END_ADDR;
 
-int initTimer(FILE *outFp);
+int initTimer();
 
 extern INSTRENTRY instrEntry[];
 
-int st20Init(PARMS *userParms, FILE *outFp) {
+int st20Init(PARMS *userParms) {
   int i;
   long value;
 
@@ -93,14 +92,14 @@ int st20Init(PARMS *userParms, FILE *outFp) {
     }
   }
 
-  fprintf(outFp, "START_ADDR=0x%08lx\nMEM_START_VAL=0x%08lx\nST20_PRODUCT_ID=0x%08lx\n\
+  fprintf(stdout, "START_ADDR=0x%08lx\nMEM_START_VAL=0x%08lx\nST20_PRODUCT_ID=0x%08lx\n\
 TIMER_GUESS=0x%08lx\nWPTR_END_ADDR=0x%08lx\n",
           startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
 
   initCPUState();
   initWatch();
   // added for timers
-  initTimer(outFp);
+  initTimer();
 
   return (0);
 }
@@ -115,7 +114,7 @@ int initCPUState(void) {
 
   /* prepare to start the processing at 0x7FFFFFFE */
   instrCode = 0;
-  operand = (long)startAddr;
+  operand = static_cast<unsigned long>(startAddr);
   instrLength = 0;
 
   /* initialize the state of the processor */
@@ -127,7 +126,7 @@ int initCPUState(void) {
   cpuState.wptrUsed[4] = TRUE;
   cpuState.wptrUsed[5] = TRUE;
   cpuState.wptrUsed[6] = TRUE;
-  addrWptrWord((int)0, &address);
+  addrWptrWord(0, &address);
   result = allocBytes(address - 4 * 7, 4 * 7);
   /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
 
@@ -140,17 +139,17 @@ int initCPUState(void) {
   return (result);
 }
 
-int initWatch(void) {
-  watch.watchAreg = FALSE;
-  watch.watchBreg = FALSE;
-  watch.watchCreg = FALSE;
-  watch.watchIptr = FALSE;
-  watch.watchNWptr = FALSE;
+int initWatch() {
+  watch.watchAreg = false;
+  watch.watchBreg = false;
+  watch.watchCreg = false;
+  watch.watchIptr = false;
+  watch.watchNWptr = false;
 
-  return (0);
+  return 0;
 }
 
-int saveCPUState(const char *dirName, FILE *outFp) {
+int saveCPUState(const char *dirName) {
   char cpuFileName[NAME_SIZE];
   int cpuFileFd = -1;
 
@@ -169,15 +168,16 @@ int saveCPUState(const char *dirName, FILE *outFp) {
   }
 #endif
 
-  if (write(cpuFileFd, (void *)&cpuState, sizeof(CPUSTATE)) < 0) {
-    return (INVALID_CPU_WRITE);
+  if (write(cpuFileFd, &cpuState, sizeof(CPUSTATE)) < 0) {
+    return INVALID_CPU_WRITE;
   }
 
-  if (write(cpuFileFd, (void *)&wptrEndAddr, 4) < 0) {
-    return (INVALID_CPU_WRITE);
+  if (write(cpuFileFd, &wptrEndAddr, 4) < 0) {
+    return INVALID_CPU_WRITE;
   }
-  if (write(cpuFileFd, (void *)&watch, sizeof(WATCH)) < 0) {
-    return (INVALID_CPU_WRITE);
+
+  if (write(cpuFileFd, &watch, sizeof(WATCH)) < 0) {
+    return INVALID_CPU_WRITE;
   }
 
   close(cpuFileFd);
@@ -189,7 +189,7 @@ long get_iptr(void) {
   return (cpuState.iptr);
 }
 
-int loadCPUState(const char *dirName, FILE *outFp) {
+int loadCPUState(const char *dirName) {
   char cpuFileName[NAME_SIZE];
   int cpuFileFd = -1;
 
@@ -225,15 +225,13 @@ int loadCPUState(const char *dirName, FILE *outFp) {
 }
 
 int setWatch(const char *reg, const char *parm) {
-  int enable;
-  long value;
+  long value{0};
 
-  if (strcmp(parm, "clear")) {
-    enable = TRUE;
-  } else {
-    enable = FALSE;
+  bool enable = (strcmp(parm, "clear") != 0);
+
+  if (enable) {
+    sscanf(parm, "%lx", &value);
   }
-  sscanf(parm, "%lx", &value);
 
   switch (reg[0]) {
   case 'a':
@@ -263,61 +261,57 @@ int setWatch(const char *reg, const char *parm) {
   case 'w':
   case 'W':
     watch.watchNWptr = enable;
-    watch.nWptr = value;
+    watch.nWptr = static_cast<int>(value);
     break;
 
   default:
-    return (BAD_WATCH_CONDITION);
+    return BAD_WATCH_CONDITION;
     break;
   }
 
-  return (0);
+  return 0;
 }
 
-int anyWatch() {
-  return (watch.watchAreg || watch.watchBreg || watch.watchCreg || watch.watchIptr ||
-          watch.watchNWptr);
+bool anyWatch() {
+  return watch.watchAreg || watch.watchBreg || watch.watchCreg || watch.watchIptr ||
+         watch.watchNWptr;
 }
 
-int checkWatch() {
-  int result = FALSE;
-
-  result |= (int)(watch.watchAreg && (cpuState.areg == watch.areg));
-  result |= (int)(watch.watchBreg && (cpuState.breg == watch.breg));
-  result |= (int)(watch.watchCreg && (cpuState.creg == watch.creg));
-  result |= (int)(watch.watchIptr && (cpuState.iptr == watch.iptr));
-  result |= (int)(watch.watchNWptr && (cpuState.nWptr == watch.nWptr));
-
-  return (result);
+bool checkWatch() {
+  return (watch.watchAreg && (cpuState.areg == watch.areg)) ||
+         (watch.watchBreg && (cpuState.breg == watch.breg)) ||
+         (watch.watchCreg && (cpuState.creg == watch.creg)) ||
+         (watch.watchIptr && (cpuState.iptr == watch.iptr)) ||
+         (watch.watchNWptr && (cpuState.nWptr == watch.nWptr));
 }
 
 /**************************
  * Print the values in the processor state
  */
-int printCPUState(FILE *outFp) {
+int printCPUState() {
   int i;
   int result = 0;
-  long address;
-  long value;
+  long address = 0;
+  unsigned long value = 0;
 
-  fprintf(outFp, "A=0x%08lx B=0x%08lx C=0x%08lx  Iptr=0x%08lx \n", cpuState.areg, cpuState.breg,
+  fprintf(stdout, "A=0x%08lx B=0x%08lx C=0x%08lx  Iptr=0x%08lx \n", cpuState.areg, cpuState.breg,
           cpuState.creg, cpuState.iptr);
 
   for (i = 0; i < cpuState.nWptr; i++) {
     if (i == 0) {
-      fprintf(outFp, "Wptr");
+      fprintf(stdout, "Wptr");
     }
 
     addrWptrWord(i, &address);
-    result = readBytes(address, 4, (unsigned long *)&value);
-    fprintf(outFp, " %2x=0x%08lx", i, value);
+    result = readBytes(address, 4, &value);
+    fprintf(stdout, " %2x=0x%08lx", i, value);
 
     if (i % WPTR_PRINT_COLS == WPTR_PRINT_COLS - 1) {
-      fprintf(outFp, "\n    ");
+      fprintf(stdout, "\n    ");
     }
   }
 
-  fprintf(outFp, "\n\n");
+  fprintf(stdout, "\n\n");
 
   return (result);
 }
@@ -325,71 +319,71 @@ int printCPUState(FILE *outFp) {
 /**************************
  * Print the values of the OMR
  */
-int printOMRState(FILE *outFp) {
+int printOMRState() {
   // show the OMR Enables register
-  fprintf(outFp, "OTHER MACHINE REGISTERS\n");
-  fprintf(outFp, "-----------------------\n");
-  fprintf(outFp, "Enables=0x%08lx\n", omrState.Enables);
-  fprintf(outFp, "ClockRegHP=0x%08lx ", omrState.ClockRegHP);
-  fprintf(outFp, "ClockRegLP=0x%08lx ", omrState.ClockRegLP);
-  fprintf(outFp, "ClockEnables=0x%02x \n", omrState.ClockEnables);
-  fprintf(outFp, "HP_ErrFlag=0x%02x ", omrState.HP_ErrorFlag);
-  fprintf(outFp, "LP_ErrFlag=0x%02x ", omrState.LP_ErrorFlag);
-  fprintf(outFp, "HaltOnError=0x%02x\n", omrState.HaltOnErrorFlag);
+  fprintf(stdout, "OTHER MACHINE REGISTERS\n");
+  fprintf(stdout, "-----------------------\n");
+  fprintf(stdout, "Enables=0x%08lx\n", omrState.Enables);
+  fprintf(stdout, "ClockRegHP=0x%08lx ", omrState.ClockRegHP);
+  fprintf(stdout, "ClockRegLP=0x%08lx ", omrState.ClockRegLP);
+  fprintf(stdout, "ClockEnables=0x%02x \n", omrState.ClockEnables);
+  fprintf(stdout, "HP_ErrFlag=0x%02x ", omrState.HP_ErrorFlag);
+  fprintf(stdout, "LP_ErrFlag=0x%02x ", omrState.LP_ErrorFlag);
+  fprintf(stdout, "HaltOnError=0x%02x\n", omrState.HaltOnErrorFlag);
   return (0);
 }
 /**************************
  * Print the values in the Enables Register
  */
-int printEnablesRegState(FILE *outFp) {
+int printEnablesRegState() {
 
-  fprintf(outFp, "Enables Register Value=0x%08lx\n", omrState.Enables);
-  // fprintf(outFp,"-GLOBAL INTERRUPTS ENABLES VALUES-\n");
+  fprintf(stdout, "Enables Register Value=0x%08lx\n", omrState.Enables);
+  // fprintf(stdout,"-GLOBAL INTERRUPTS ENABLES VALUES-\n");
   if (omrState.Enables & LP_PROCESS_INT_ENB)
-    fprintf(outFp, " LP_PROCESS_INT_ENB	is set\n");
+    fprintf(stdout, " LP_PROCESS_INT_ENB	is set\n");
   if (omrState.Enables & LP_TIMESLICE_ENB)
-    fprintf(outFp, " LP_TIMESLICE_ENB	is set\n");
+    fprintf(stdout, " LP_TIMESLICE_ENB	is set\n");
   if (omrState.Enables & LP_EXTERNALEVENT_ENB)
-    fprintf(outFp, " LP_EXTERNALEVENT_ENB	is set\n");
+    fprintf(stdout, " LP_EXTERNALEVENT_ENB	is set\n");
   if (omrState.Enables & LP_TIMER_ALRM_ENB)
-    fprintf(outFp, " LP_TIMER_ALRM_ENB	is set\n");
+    fprintf(stdout, " LP_TIMER_ALRM_ENB	is set\n");
   if (omrState.Enables & HP_PROCESS_INT_ENB)
-    fprintf(outFp, " HP_PROCESS_INT_ENB	is set\n");
+    fprintf(stdout, " HP_PROCESS_INT_ENB	is set\n");
   if (omrState.Enables & HP_TIMESLICE_ENB)
-    fprintf(outFp, " HP_TIMESLICE_ENB	is set\n");
+    fprintf(stdout, " HP_TIMESLICE_ENB	is set\n");
   if (omrState.Enables & HP_EXTERNALEVENT_ENB)
-    fprintf(outFp, " HP_EXTERNALEVENT_ENB	is set\n");
+    fprintf(stdout, " HP_EXTERNALEVENT_ENB	is set\n");
   if (omrState.Enables & HP_TIMER_ALRM_ENB)
-    fprintf(outFp, " HP_TIMER_ALRM_ENB	is set\n");
-  // fprintf(outFp,"-TRAP ENABLES VALUES-\n");
+    fprintf(stdout, " HP_TIMER_ALRM_ENB	is set\n");
+  // fprintf(stdout,"-TRAP ENABLES VALUES-\n");
   if (omrState.Enables & BREAKPOINT_TRAPENB)
-    fprintf(outFp, " BREAKPOINT_TRAPENB	is set\n");
+    fprintf(stdout, " BREAKPOINT_TRAPENB	is set\n");
   if (omrState.Enables & INTEGER_ERR_TRAPENB)
-    fprintf(outFp, " INTEGER_ERR_TRAPENB	is set\n");
+    fprintf(stdout, " INTEGER_ERR_TRAPENB	is set\n");
   if (omrState.Enables & INTEGER_OVF_TRAPENB)
-    fprintf(outFp, " INTEGER_OVF_TRAPENB	is set\n");
+    fprintf(stdout, " INTEGER_OVF_TRAPENB	is set\n");
   if (omrState.Enables & ILL_OPCODE_TRAPENB)
-    fprintf(outFp, " ILL_OPCODE_TRAPENB	is set\n");
+    fprintf(stdout, " ILL_OPCODE_TRAPENB	is set\n");
   if (omrState.Enables & LOADTRAP_TRAPENB)
-    fprintf(outFp, " LOADTRAP_TRAPENB	is set\n");
+    fprintf(stdout, " LOADTRAP_TRAPENB	is set\n");
   if (omrState.Enables & STORETRAP_TRAPENB)
-    fprintf(outFp, " STORETRAP_TRAPENB	is set\n");
+    fprintf(stdout, " STORETRAP_TRAPENB	is set\n");
   if (omrState.Enables & INTERNALCH_TRAPENB)
-    fprintf(outFp, " INTERNALCH_TRAPENB	is set\n");
+    fprintf(stdout, " INTERNALCH_TRAPENB	is set\n");
   if (omrState.Enables & EXTERNALCH_TRAPENB)
-    fprintf(outFp, " EXTERNALCH_TRAPENB	is set\n");
+    fprintf(stdout, " EXTERNALCH_TRAPENB	is set\n");
   if (omrState.Enables & TIMER_TRAPENB)
-    fprintf(outFp, " TIMER_TRAPENB	is set\n");
+    fprintf(stdout, " TIMER_TRAPENB	is set\n");
   if (omrState.Enables & TIMESLICE_TRAPENB)
-    fprintf(outFp, " TIMESLICE_TRAPENB	is set\n");
+    fprintf(stdout, " TIMESLICE_TRAPENB	is set\n");
   if (omrState.Enables & RUN_TRAPENB)
-    fprintf(outFp, " RUN_TRAPENB	is set\n");
+    fprintf(stdout, " RUN_TRAPENB	is set\n");
   if (omrState.Enables & SIGNAL_TRAPENB)
-    fprintf(outFp, " SIGNAL_TRAPENB	is set\n");
+    fprintf(stdout, " SIGNAL_TRAPENB	is set\n");
   if (omrState.Enables & PROCESS_TRAPENB)
-    fprintf(outFp, " PROCESS_TRAPENB	is set\n");
+    fprintf(stdout, " PROCESS_TRAPENB	is set\n");
   if (omrState.Enables & QUEUE_EMPTY_TRAPENB)
-    fprintf(outFp, " QUEUE_EMPTY_TRAPENB	is set\n");
+    fprintf(stdout, " QUEUE_EMPTY_TRAPENB	is set\n");
 
   return (0);
 }
@@ -398,10 +392,10 @@ int printEnablesRegState(FILE *outFp) {
  * Get the bytes for the next instruction and determine what the instruction
  * code and operand are
  */
-int decodeNextInstr(FILE *outFp) {
-  int foundInstr = FALSE;
-  unsigned long cByte;
-  int result;
+int decodeNextInstr() {
+  bool foundInstr = false;
+  unsigned long cByte = 0;
+  int result = 0;
 
   instrCode = 0;
   operand = 0;
@@ -413,14 +407,14 @@ int decodeNextInstr(FILE *outFp) {
     /* read the next byte of the current instruction */
     result = readBytes(cpuState.iptr + instrLength, 1, &cByte);
     if (result) {
-      fprintf(outFp, "%s\n", memoryError(result));
-      fprintf(outFp, "Error occurred when reading instruction at %8lx, offset %2x\n", cpuState.iptr,
-              instrLength);
+      fprintf(stdout, "%s\n", memoryError(result));
+      fprintf(stdout, "Error occurred when reading instruction at %8lx, offset %2x\n",
+              cpuState.iptr, instrLength);
       return (-1);
     }
 
     /* save the bytes that comprise the current instruction */
-    instrBytes[instrLength++] = (char)(cByte & 0xFF);
+    instrBytes[instrLength++] = static_cast<unsigned char>(cByte & 0xFF);
 
     /* extract the data part of the current instruction byte */
     operand <<= 4;
@@ -438,12 +432,12 @@ int decodeNextInstr(FILE *outFp) {
      */
     switch (instrCode) {
     case 0x02:
-      foundInstr = FALSE;
+      foundInstr = false;
       break;
 
     case 0x06:
       operand = ~operand;
-      foundInstr = FALSE;
+      foundInstr = false;
       break;
 
     /*
@@ -462,13 +456,13 @@ int decodeNextInstr(FILE *outFp) {
         instrCode = (operand & 0x1FF) + 0x10;
       }
 
-      foundInstr = TRUE;
+      foundInstr = true;
 
       break;
 
     /* all of the non-Fx single byte instructions are handled here */
     default:
-      foundInstr = TRUE;
+      foundInstr = true;
       break;
     }
   }
@@ -479,14 +473,14 @@ int decodeNextInstr(FILE *outFp) {
 /**************************
  * Print out the address, bytes and decoded instruction to be executed next
  */
-int printNextInstr(FILE *outFp) {
+int printNextInstr() {
   int i;
   char operandCh[100];
 
-  fprintf(outFp, "%08lx  ", cpuState.iptr);
+  fprintf(stdout, "%08lx  ", cpuState.iptr);
 
   for (i = 0; i < instrLength; i++) {
-    fprintf(outFp, "%2x ", instrBytes[i]);
+    fprintf(stdout, "%2x ", instrBytes[i]);
   }
 
   /*
@@ -494,16 +488,22 @@ int printNextInstr(FILE *outFp) {
    * the address (i.e. iptr + operand) rather than the operand
    */
   if (instrCode == 0x00 || instrCode == 0x0A) {
-    sprintf(operandCh, " loc_%08lx", (cpuState.iptr + instrLength + operand) & 0xFFFFFFFF);
+    sprintf(operandCh, " loc_%08lx",
+            (static_cast<unsigned long>(cpuState.iptr) + static_cast<unsigned long>(instrLength) +
+             operand) &
+                0xFFFFFFFF);
   } else if (instrCode == 0x09) {
-    sprintf(operandCh, " sub_%08lx", (cpuState.iptr + instrLength + operand) & 0xFFFFFFFF);
+    sprintf(operandCh, " sub_%08lx",
+            (static_cast<unsigned long>(cpuState.iptr) + static_cast<unsigned long>(instrLength) +
+             operand) &
+                0xFFFFFFFF);
   } else if (instrCode > 0x0F) {
     operandCh[0] = '\0';
   } else {
     sprintf(operandCh, " %-8lx", operand & 0xFFFFFFFF);
   }
 
-  fprintf(outFp, " %s%s\n", instrEntry[instrCode].mnemonic, operandCh);
+  fprintf(stdout, " %s%s\n", instrEntry[instrCode].mnemonic, operandCh);
 
   return (0);
 }
@@ -512,7 +512,7 @@ int printNextInstr(FILE *outFp) {
 //					EXEC DECODED INSTRUCTION
 //				(Here the we tick the timers too)
 //////////////////////////////////////////////////////////////////////////
-int execInstr(FILE *outFp, int *breakFlag) {
+int execInstr(int *breakFlag) {
   int result = 0;
 
   cpuState.iptr += instrLength; // update iptr
@@ -536,7 +536,7 @@ int execInstr(FILE *outFp, int *breakFlag) {
     }
   }
 
-  result = instrEntry[instrCode].function(outFp, operand);
+  result = instrEntry[instrCode].function(static_cast<long>(operand));
 
   *breakFlag = checkWatch();
 
@@ -551,19 +551,22 @@ int readWptrWord(long index, long *value) {
 
   if (index >= cpuState.nWptr) {
     *value = 0;
-    return (BAD_WPTR);
+    return BAD_WPTR;
   }
+
   /*  if (!cpuState.wptrUsed[cpuState.nWptr - index - 1]) {
-     *value = 0;
-     return (WPTR_UNUSED);
+      *value = 0;
+      return WPTR_UNUSED;
     }
 
     *value = cpuState.wptr[cpuState.nWptr - index - 1];
   */
-  addrWptrWord(index, &address);
-  result = readBytes(address, 4, (unsigned long *)value);
 
-  return (result);
+  addrWptrWord(index, &address);
+
+  result = readBytes(address, 4, reinterpret_cast<unsigned long *>(value));
+
+  return result;
 }
 
 /**************************
@@ -571,12 +574,13 @@ int readWptrWord(long index, long *value) {
 int addrWptrWord(long index, long *address) {
   if (index >= cpuState.nWptr) {
     *address = 0;
-    return (BAD_WPTR);
+    return BAD_WPTR;
   }
 
-  *address = (long)(wptrEndAddr + 1 - (cpuState.nWptr - index) * 4) & 0xFFFFFFFF;
+  // Use static_cast and ensure the bitmask is applied before casting back to long
+  *address = static_cast<long>((wptrEndAddr + 1 - (cpuState.nWptr - index) * 4) & 0xFFFFFFFF);
 
-  return (0);
+  return 0;
 }
 
 /**************************
@@ -604,18 +608,18 @@ int wptrPopState() {
 
   readWptrWord(0, &cpuState.iptr);
 
-  if ((result = allocWptr((long)4))) {
-    return (result);
+  if ((result = allocWptr(4L))) {
+    return result;
   }
 
-  return (result);
+  return result;
 }
 
 int wptrPushState() {
   int result = 0;
 
-  if ((result = allocWptr((long)-4))) {
-    return (result);
+  if ((result = allocWptr(-4L))) {
+    return result;
   }
 
   storeWptrWord(3, cpuState.creg);
@@ -623,7 +627,7 @@ int wptrPushState() {
   storeWptrWord(1, cpuState.areg);
   storeWptrWord(0, cpuState.iptr);
 
-  return (result);
+  return result;
 }
 
 int allocWptr(long count) {
@@ -699,7 +703,7 @@ int setIptr(long value) {
   return (0);
 }
 
-char *st20Error(int error) {
+const char *st20Error(int error) {
   switch (error) {
 
   case BAD_WPTR:
@@ -730,7 +734,7 @@ char *st20Error(int error) {
   return (NULL);
 }
 
-int initTimer(FILE *outFp) {
+int initTimer() {
   // init the timer fields:
   omrState.ClockRegHP = TIMER_GUESS;
   omrState.ClockRegLP = TIMER_GUESS;
@@ -739,7 +743,7 @@ int initTimer(FILE *outFp) {
   omrState.Enables = 0xffffc000;         // the initial state, see omr.h
                                          // bit 14 and 15 are reserved but set to 1
   //'ticking' code is into execInstr() subroutine
-  fprintf(outFp, "CPU_CLOCK=%d Hz\n HPTimerTick=%ld cpucycles\n LPTimerTick=%ld cpucycles\n",
+  fprintf(stdout, "CPU_CLOCK=%d Hz\n HPTimerTick=%ld cpucycles\n LPTimerTick=%ld cpucycles\n",
           CPU_CLOCK, hp_timertick, lp_timertick);
 
   return (0);

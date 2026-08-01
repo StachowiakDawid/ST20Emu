@@ -14,11 +14,11 @@ CliError cmd_load(CliEngine & /*engine*/, std::span<const std::string_view> args
     return CliError::BadParameter;
 
   std::string file_path(args[0]);
-  int result = loadMemory(file_path.c_str(), stdout);
+  int result = loadMemory(file_path.c_str());
   if (result == 0)
-    result = loadCPUState(file_path.c_str(), stdout);
+    result = loadCPUState(file_path.c_str());
 
-  printCPUState(stdout);
+  printCPUState();
   return result == 0 ? CliError::Success : CliError::InputError;
 }
 
@@ -47,9 +47,9 @@ CliError cmd_save(CliEngine & /*engine*/, std::span<const std::string_view> args
     return CliError::BadParameter;
 
   std::string file_path(args[0]);
-  int result = saveMemory(file_path.c_str(), stdout);
+  int result = saveMemory(file_path.c_str());
   if (result == 0) {
-    result = saveCPUState(file_path.c_str(), stdout);
+    result = saveCPUState(file_path.c_str());
   }
 
   return result == 0 ? CliError::Success : CliError::InputError;

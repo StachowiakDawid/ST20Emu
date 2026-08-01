@@ -6,8 +6,7 @@
 // #include "../../soc/sti5518/STi5518_SearchDB.h"
 #include "../memory/memory.h"
 
-#include <stdint.h>
-#include <stdio.h>
+#include <cstdint>
 
 extern OMRSTATE omrState;
 extern CPUSTATE cpuState;
@@ -28,41 +27,41 @@ extern INSTRENTRY instrEntry[];
  * that will emulate the instruction.
  */
 
-int adc_(FILE *outFp, long operand) {
+int adc_(long operand) {
   /* warning... I'm not checking for overflow */
   push(pop() + operand);
 
-  return (0);
+  return 0;
 }
 
-int add_(FILE *outFp, long unused) {
+int add_(long /*unused*/) {
   /* warning... I'm not checking for overflow */
   push(pop() + pop());
 
-  return (0);
+  return 0;
 }
 
-int ajw_(FILE *outFp, long value) {
+int ajw_(long value) {
   int result;
 
   result = allocWptr(value);
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
-  return (0);
+  return 0;
 }
 
-int and_(FILE *outFp, long unused) {
+int and_(long /*unused*/) {
   push(pop() & pop());
 
-  return (0);
+  return 0;
 }
 
-int bcnt_(FILE *outFp, long unused) {
+int bcnt_(long /*unused*/) {
   push(pop() * 4);
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -75,10 +74,10 @@ Definition:
   Creg' <- undefined
 Error signals: none
 */
-int bitcnt_(FILE *outFp, long unused) {
-  unsigned long oldAreg = pop();
-  unsigned long oldBreg = pop();
-  int count = 0;
+int bitcnt_(long /*unused*/) {
+  unsigned long oldAreg = static_cast<unsigned long>(pop());
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
+  unsigned long count = 0;
 
   while (oldAreg) {
     if (oldAreg & 0x8000)
@@ -86,25 +85,25 @@ int bitcnt_(FILE *outFp, long unused) {
     oldAreg <<= 1;
   }
 
-  push(oldBreg + count);
+  push(static_cast<long>(oldBreg + count));
 
-  return (0);
+  return 0;
 }
 
-int bsub_(FILE *outFp, long unused) {
+int bsub_(long /*unused*/) {
   push(pop() + pop());
 
-  return (0);
+  return 0;
 }
 
-int call_(FILE *outFp, long offset) {
+int call_(long offset) {
   int result;
-  unsigned long addr;
-  addr = cpuState.iptr;
+  long addr = cpuState.iptr;
+
   result = wptrPushState();
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
   cpuState.areg = cpuState.iptr;
@@ -112,18 +111,18 @@ int call_(FILE *outFp, long offset) {
   cpuState.creg = UNDEFINED_WORD_OLD;
   cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
 
-  fprintf(outFp, "Call to %8lx ,return to %8lx\n", cpuState.iptr, addr);
-  return (0);
+  fprintf(stdout, "Call to %8lx ,return to %8lx\n", cpuState.iptr, addr);
+  return 0;
 }
 
-int cj_(FILE *outFp, long offset) {
+int cj_(long offset) {
   if (cpuState.areg) { /* don't jump */
     pop();
   } else {
     cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -132,34 +131,34 @@ Code: 2F F0
 Description: Perform a device read from memory, a memory-mapped device or a
 peripheral. The byte addressed by Areg is read into Areg as an unsigned value.
 */
-int devlb_(FILE *outFp, long unused) {
+int devlb_(long /*unused*/) {
   int result;
   long oldAreg, newAreg;
-  unsigned long addr;
+  long addr;
 
   // current address
   addr = get_iptr();
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 1, (unsigned long *)&newAreg);
+  result = readBytes(oldAreg, 1, reinterpret_cast<unsigned long *>(&newAreg));
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-          addr - instrLength, oldAreg, newAreg);
-  fprintf(outFp, "Value of A register is questionable\n");
+  fprintf(stdout, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
+          addr - static_cast<long>(instrLength), oldAreg, newAreg);
+  fprintf(stdout, "Value of A register is questionable\n");
 
-  // SearchForReg(outFp, oldAreg);
+  // SearchForReg(stdout, oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing devlb instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing devlb instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -169,35 +168,35 @@ Description: Perform a device read from memory, a memory-mapped device or a
 peripheral. The 16-bit object addressed by Areg is read into Areg as an unsigned
 value.
 */
-int devls_(FILE *outFp, long unused) {
+int devls_(long /*unused*/) {
   int result;
   long oldAreg, newAreg;
-  unsigned long addr;
+  long addr;
 
   // current address
   addr = get_iptr();
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 2, (unsigned long *)&newAreg);
+  result = readBytes(oldAreg, 2, reinterpret_cast<unsigned long *>(&newAreg));
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-          addr - instrLength, oldAreg, newAreg);
-  fprintf(outFp, "Value of A register is questionable\n");
+  fprintf(stdout, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
+          addr - static_cast<long>(instrLength), oldAreg, newAreg);
+  fprintf(stdout, "Value of A register is questionable\n");
 
   // if (showRegs())
-  //   SearchForReg(outFp, oldAreg);
+  //   SearchForReg(stdout, oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing devls instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing devls instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -206,35 +205,35 @@ Code: 2F F4
 Description: Perform a device read from memory, a memory-mapped device or a
 peripheral. The word addressed by Areg is read into Areg.
 */
-int devlw_(FILE *outFp, long unused) {
+int devlw_(long /*unused*/) {
   int result;
   long oldAreg, newAreg;
-  unsigned long addr;
+  long addr;
 
   // current address
   addr = get_iptr();
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 4, (unsigned long *)&newAreg);
+  result = readBytes(oldAreg, 4, reinterpret_cast<unsigned long *>(&newAreg));
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(outFp, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-          addr - instrLength, oldAreg, newAreg);
-  fprintf(outFp, "Value of A register is questionable\n");
+  fprintf(stdout, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
+          addr - static_cast<long>(instrLength), oldAreg, newAreg);
+  fprintf(stdout, "Value of A register is questionable\n");
 
   //   if (showRegs())
-  //     SearchForReg(outFp, oldAreg);
+  //     SearchForReg(stdout, oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing devlw instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing devlw instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -243,33 +242,33 @@ Code: 2F F1
 Description: Perform a device write from memory, a memory-mapped device or a
 peripheral. Store the least significant byte of Breg into the byte addressed by Areg.
 */
-int devsb_(FILE *outFp, long value) {
+int devsb_(long /*value*/) {
   int result;
   long value1, value2;
-  unsigned long addr;
+  long addr;
 
   // current address
   addr = get_iptr();
 
   value1 = pop();
   value2 = pop();
-  result = storeBytes(value1, 1, (unsigned char)(value2 & 0xFF));
+  result = storeBytes(value1, 1, static_cast<unsigned char>(value2 & 0xFF));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-          addr - instrLength, value1, (unsigned char)value2 & 0xFF);
+  fprintf(stdout, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
+          addr - static_cast<long>(instrLength), value1, static_cast<unsigned char>(value2) & 0xFF);
   //   if (showRegs())
-  //     SearchForReg(outFp, value1);
+  //     SearchForReg(stdout, value1);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    fprintf(outFp, "  Error occurred when executing devsb instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    fprintf(stdout, "  Error occurred when executing devsb instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -278,33 +277,34 @@ Code: 2F F3
 Description: Perform a device write from memory, a memory-mapped device or a
 peripheral. Store bits 0..5 of Breg into the sixteen bits addressed by Areg.
 */
-int devss_(FILE *outFp, long value) {
+int devss_(long /*value*/) {
   int result;
   long value1, value2;
-  unsigned long addr;
+  long addr;
   // current address
   addr = get_iptr();
 
   value1 = pop();
   value2 = pop();
-  result = storeBytes(value1, 2, (unsigned int)(value2 & 0xFFFF));
+  result = storeBytes(value1, 2, static_cast<unsigned int>(value2 & 0xFFFF));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-          addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
+  fprintf(stdout, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
+          addr - static_cast<long>(instrLength), value1,
+          static_cast<unsigned int>(value2) & 0xFFFF);
 
   //   // Search description in register database
   //   if (showRegs())
-  //     SearchForReg(outFp, value1);
+  //     SearchForReg(stdout, value1);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -313,96 +313,93 @@ Code: 2F F5
 Description: Perform a device write from memory, a memory-mapped device or a
 peripheral. Store Breg into the word of memory addressed by Areg.
 */
-int devsw_(FILE *outFp, long value) {
+int devsw_(long /*value*/) {
   int result;
   long value1, value2;
-  unsigned long addr;
+  long addr;
 
   // current address
   addr = get_iptr();
 
   value1 = pop();
   value2 = pop();
-  result = storeBytes(value1, 4, (unsigned long)(value2 & 0xFFFFFFFF));
+  result = storeBytes(value1, 4, static_cast<long>(value2 & 0xFFFFFFFF));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(outFp, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-          addr - instrLength, value1, (unsigned int)value2 & 0xFFFF);
+  fprintf(stdout, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
+          addr - static_cast<long>(instrLength), value1,
+          static_cast<unsigned int>(value2) & 0xFFFF);
 
   //   // Search description in register database
   //   if (showRegs())
-  //     SearchForReg(outFp, value1);
+  //     SearchForReg(stdout, value1);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /* Code: F4
   Description: Subtract Areg from Breg, without checking for overflow.
 */
-int diff_(FILE *outFp, long unused) {
-  uint32_t Areg, Breg;
-
-  Areg = (uint32_t)pop();
-  Breg = (uint32_t)pop();
+int diff_(long /*unused*/) {
+  uint32_t Areg = static_cast<uint32_t>(pop());
+  uint32_t Breg = static_cast<uint32_t>(pop());
 
   // We need to use uint to omit runtime integer overflow errors
-  // It's safer than to depend on C undefined behaviors
-  push((long)(int32_t)(Breg - Areg));
+  // It's safer than to depend on C undefined behaviors.
+  push(static_cast<long>(static_cast<int32_t>(Breg - Areg)));
 
-  return (0);
+  return 0;
 }
+
 /* Code: 22 FC
   Description: Divide Breg by Areg, with checking for overflow. The result when not
   exact is rounded towards zero.
 */
-int div_(FILE *outFp, long unused) {
-  int32_t Areg, Breg;
-
-  Areg = (int32_t)pop();
-  Breg = (int32_t)pop();
+int div_(long /*unused*/) {
+  int32_t Areg = static_cast<int32_t>(pop());
+  int32_t Breg = static_cast<int32_t>(pop());
 
   if ((Areg == 0) || ((Breg == -2147483648LL) && (Areg == -1))) {
     (void)pop(); // Areg' <- undefined
     // TODO: Signal IntegerOverflow per documentation
-    return (0);
+    return 0;
   }
 
-  push((long)(Breg / Areg));
+  push(static_cast<long>(Breg / Areg));
 
-  return (0);
+  return 0;
 }
 
-int dup_(FILE *outFp, long unused) {
+int dup_(long /*unused*/) {
   long value;
 
   value = pop();
   push(value);
   push(value);
 
-  return (0);
+  return 0;
 }
 
-int eqc_(FILE *outFp, long value) {
-  long oldAreg;
+int eqc_(long value) {
+  long oldAreg = pop();
 
-  oldAreg = pop();
   if (oldAreg == (value & 0xFFFFFFFF)) {
-    push((long)TRUE);
+    push(1L);
   } else {
-    push((long)FALSE);
+    push(0L);
   }
 
-  return (0);
+  return 0;
 }
 
-int gajw_(FILE *outFp, long unused) {
+int gajw_(long /*unused*/) {
   int result;
   long oldAreg;
   long newAreg;
@@ -411,20 +408,20 @@ int gajw_(FILE *outFp, long unused) {
 
   oldAreg = pop();
   if (oldAreg & 0x03) {
-    fprintf(outFp, "WARNING: Value in A register does not point to a word boundary\n");
+    fprintf(stdout, "WARNING: Value in A register does not point to a word boundary\n");
   }
 
   result = addrWptrWord(0, &newAreg);
   push(newAreg);
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
   wptrEndAddr = oldAreg + 3;
   cpuState.nWptr = 1;
   cpuState.wptrUsed[0] = TRUE;
 
-  addrWptrWord((int)0, &address);
+  addrWptrWord(0, &address);
   result = allocBytes(address, 4);
   /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
 
@@ -434,24 +431,24 @@ int gajw_(FILE *outFp, long unused) {
   /*
     result = storeWptrWord (0, oldAreg);
     if (result) {
-     fprintf (outFp, "ERROR: %s\n", st20Error(result));
-     return (-1);
+     fprintf (stdout, "ERROR: %s\n", st20Error(result));
+     return -1;
     }
   */
-  return (0);
+  return 0;
 }
 
-int gcall_(FILE *outFp, long unused) {
+int gcall_(long /*unused*/) {
   long oldAreg;
 
   oldAreg = pop();
   push(cpuState.iptr);
   cpuState.iptr = oldAreg;
 
-  return (0);
+  return 0;
 }
 
-int gt_(FILE *outFp, long unused) {
+int gt_(long /*unused*/) {
   long value1, value2;
 
   value1 = pop();
@@ -459,105 +456,105 @@ int gt_(FILE *outFp, long unused) {
 
   push(value2 > value1);
 
-  return (0);
+  return 0;
 }
 
-int gtu_(FILE *outFp, long unused) {
+int gtu_(long /*unused*/) {
   long value1, value2;
 
   value1 = pop();
   value2 = pop();
 
-  push((unsigned long)value2 > (unsigned long)value1);
+  push(static_cast<unsigned long>(value2) > static_cast<unsigned long>(value1));
 
-  return (0);
+  return 0;
 }
 
-int invalidOp_(FILE *outFp, long unused) {
-  fprintf(outFp, "This instruction (%s) has not been implemented yet\n",
+int invalidOp_(long /*unused*/) {
+  fprintf(stdout, "This instruction (%s) has not been implemented yet\n",
           instrEntry[instrCode].mnemonic);
-  return (-1);
+  return -1;
 }
 
 /*	Code: Function 0
   Description: Unconditional relative jump. The destination of the jump is expressed as
   a byte offset from the first byte after the current instruction. j 0 causes a breakpoint.
 */
-int j_(FILE *outFp, long offset) {
+int j_(long offset) {
   pop();
   pop();
   pop();
 
   if (offset == 0) {
-    fprintf(outFp, "Breakpoint signalled by jump instruction\n");
+    fprintf(stdout, "Breakpoint signalled by jump instruction\n");
   } else {
     cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
   }
 
-  return (0);
+  return 0;
 }
 
 /* Code: 21 F6
   Description: Add with carry in and check for overflow. The result of the operation is
   the sum of Areg, Breg and bit 0 of Creg.
 */
-int ladd_(FILE *outFp, long unused) {
+int ladd_(long /*unused*/) {
   int64_t Areg, Breg, Creg, sum;
 
-  Areg = (int32_t)pop(); // Areg
-  Breg = (int32_t)pop(); // Breg
-  Creg = (int32_t)pop(); // Creg
+  Areg = static_cast<int32_t>(pop()); // Areg
+  Breg = static_cast<int32_t>(pop()); // Breg
+  Creg = static_cast<int32_t>(pop()); // Creg
 
   sum = Areg + Breg + (Creg & 0x01);
 
   if (sum > 0x7FFFFFFFLL) {
-    push((long)(sum - 0x100000000LL));
+    push(static_cast<long>(sum - 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
   } else if (sum < -2147483648LL) {
-    push((long)(sum + 0x100000000LL));
+    push(static_cast<long>(sum + 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
   } else {
-    push((long)sum);
+    push(static_cast<long>(sum));
   }
 
-  return (0);
+  return 0;
 }
 
 /*	Code: F1
   Description: Load the unsigned byte addressed by Areg into Areg.
 */
-int lb_(FILE *outFp, long unused) {
+int lb_(long /*unused*/) {
   int result;
   long oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 1, (unsigned long *)&newAreg);
+  result = readBytes(oldAreg, 1, reinterpret_cast<unsigned long *>(&newAreg));
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
   // TODO: CPU module should not have a knowledge about CLI
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing lb instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing lb instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*	Code: 2B F9
   Description: Load the byte addressed by Areg into Areg and sign extend to a word.
 */
-int lbx_(FILE *outFp, long unused) {
+int lbx_(long /*unused*/) {
   int result;
   long oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 1, (unsigned long *)&newAreg);
+  result = readBytes(oldAreg, 1, reinterpret_cast<unsigned long *>(&newAreg));
   if ((newAreg & 0x80) == 0x80) {
     newAreg = newAreg | 0xffffff00;
   }
@@ -565,38 +562,38 @@ int lbx_(FILE *outFp, long unused) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing lbx instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing lbx instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*	Code: Function 4
   Description: Load constant into Areg.
 */
-int ldc_(FILE *outFp, long operand) {
+int ldc_(long operand) {
   push(operand);
 
-  return (0);
+  return 0;
 }
 
 /*	Code: 21 27 FC
   Description: See ldprodid. This instruction may be removed in future so ldprodid
   should be used instead.
 */
-int lddevid_(FILE *outFp, long unused) {
-  /*  fprintf (outFp, "Product ID is unknown.  Setting A register to %x\n",
+int lddevid_(long /*unused*/) {
+  /*  fprintf (stdout, "Product ID is unknown.  Setting A register to %x\n",
           st20ProductId); */
 
-  push((long)st20ProductId);
+  push(st20ProductId);
 
-  return (0);
+  return 0;
 }
 
 /*	Code: 24 FF
@@ -604,59 +601,58 @@ int lddevid_(FILE *outFp, long unused) {
   minus borrow in from Creg, producing difference in Areg and borrow out in Breg,
   without checking for overflow.
 */
-int ldiff_(FILE *outFp, long unused) {
-  unsigned long value1, value2, value3;
-  unsigned long carry, temp;
-  value1 = pop();
-  value2 = pop();
-  value3 = pop();
-  carry = N_Add(value1, value3 & 0x01, &temp);
-  value3 = value2 - temp;
-  if ((temp > value2) || (carry == 1)) {
-    push(1);
-  } else {
-    push(0);
-  }
-  push(value3);
+int ldiff_(long /*unused*/) {
+  unsigned long temp;
 
-  return (0);
+  unsigned long value1 = static_cast<unsigned long>(pop());
+  unsigned long value2 = static_cast<unsigned long>(pop());
+  unsigned long value3 = static_cast<unsigned long>(pop());
+
+  unsigned long carry = N_Add(value1, value3 & 0x01, &temp);
+  value3 = value2 - temp;
+
+  if ((temp > value2) || (carry == 1)) {
+    push(1L);
+  } else {
+    push(0L);
+  }
+
+  push(static_cast<long>(value3));
+
+  return 0;
 }
 
-int ldiv_(FILE *outFp, long operand) {
-  unsigned long oldAreg, oldBreg, oldCreg;
-  unsigned long bl, bh;
-  unsigned long hval, lval, temp;
-  unsigned long rem;
-
-  oldAreg = pop();
-  oldBreg = pop();
-  oldCreg = pop();
+int ldiv_(long /*operand*/) {
+  unsigned long oldAreg = static_cast<unsigned long>(pop());
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
+  unsigned long oldCreg = static_cast<unsigned long>(pop());
 
   if (oldCreg >= oldAreg) {
     /* Overflow */
     return -1;
   }
 
-  bl = oldBreg & MAX_INT;
-  bh = oldBreg >> NBITS;
+  unsigned long bl = oldBreg & MAX_INT;
+  unsigned long bh = oldBreg >> NBITS;
 
-  temp = (oldCreg % oldAreg) * (1 << NBITS) + bh;
+  // using 1UL ensures the shifted '1' is treated as an unsigned long
+  unsigned long temp = (oldCreg % oldAreg) * (1UL << NBITS) + bh;
 
-  hval = temp / oldAreg;
+  unsigned long hval = temp / oldAreg;
 
-  temp = (temp % oldAreg) * (1 << NBITS) + bl;
+  temp = (temp % oldAreg) * (1UL << NBITS) + bl;
 
-  lval = temp / oldAreg;
+  unsigned long lval = temp / oldAreg;
 
-  rem = temp % oldAreg;
+  unsigned long rem = temp % oldAreg;
 
-  push(rem);
-  push((hval << NBITS) + lval);
+  push(static_cast<long>(rem));
+  push(static_cast<long>((hval << NBITS) + lval));
 
   return 0;
 }
 
-int ldl_(FILE *outFp, long index) {
+int ldl_(long index) {
   int result;
   long value;
 
@@ -664,14 +660,14 @@ int ldl_(FILE *outFp, long index) {
   push(value);
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int ldlp_(FILE *outFp, long index) {
+int ldlp_(long index) {
   int result;
   long value;
 
@@ -679,76 +675,72 @@ int ldlp_(FILE *outFp, long index) {
   push(value);
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int ldmemstartval_(FILE *outFp, long unused) {
-  push((long)memStartVal);
-  return (0);
+int ldmemstartval_(long /*unused*/) {
+  push(memStartVal);
+  return 0;
 }
 
-int ldnl_(FILE *outFp, long offset) {
-  int result;
-  uint32_t oldAreg;
-  uint32_t address;
+int ldnl_(long offset) {
+  uint32_t oldAreg = static_cast<uint32_t>(pop());
   unsigned long cWord = 0;
 
-  oldAreg = (uint32_t)pop();
-
   if (oldAreg & 0x03) {
-    fprintf(outFp, "WARNING: Attempt to access a word that is not on a word boundary\n");
+    fprintf(stdout, "WARNING: Attempt to access a word that is not on a word boundary\n");
   }
 
-  address = oldAreg + (uint32_t)(offset * 4);
+  uint32_t address = oldAreg + static_cast<uint32_t>(offset * 4);
 
-  result = readBytes((long)address, 4, &cWord);
-  push((long)cWord);
+  int result = readBytes(static_cast<long>(address), 4, &cWord);
+  push(static_cast<long>(cWord));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Read of memory address %08x, value=0x%08lx\n", address, cWord);
+  fprintf(stdout, "NOTE: Read of memory address %08x, value=0x%08lx\n", address, cWord);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing ldnl %08x  iptr=%08lx\n", address,
-            (long)get_iptr());
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing ldnl %08x  iptr=%08lx\n", address,
+            static_cast<long>(get_iptr()));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int ldnlp_(FILE *outFp, long offset) {
+int ldnlp_(long offset) {
   push(pop() + offset * 4);
-  return (0);
+  return 0;
 }
 
-int ldpi_(FILE *outFp, long unused) {
+int ldpi_(long /*unused*/) {
   push(cpuState.iptr + pop());
 
-  return (0);
+  return 0;
 }
 
-int ldpri_(FILE *outFp, long unused) {
-  fprintf(outFp, "Priority is unknown.  Setting A register to %x\n", LOW_PRIORITY);
+int ldpri_(long /*unused*/) {
+  fprintf(stdout, "Priority is unknown.  Setting A register to %x\n", LOW_PRIORITY);
 
-  push((long)LOW_PRIORITY);
+  push(static_cast<long>(LOW_PRIORITY));
 
-  return (0);
+  return 0;
 }
 
-int ldprodid_(FILE *outFp, long unused) {
-  /*  fprintf (outFp, "Product ID is unknown.  Setting A register to %x\n",
+int ldprodid_(long /*unused*/) {
+  /*  fprintf (stdout, "Product ID is unknown.  Setting A register to %x\n",
           st20ProductId); */
 
-  push((long)st20ProductId);
+  push(st20ProductId);
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -762,24 +754,24 @@ Definition:
 Error signals: none
 */
 
-// int ldtimer_ (FILE *outFp, long unused) {
+// int ldtimer_ (long /*unused*/) {
 //   push(timerGuess);
-//   fprintf (outFp, "Read of timer.  Assuming timer value is %x\n", timerGuess);
+//   fprintf (stdout, "Read of timer.  Assuming timer value is %x\n", timerGuess);
 //
-//   return (0);
+//   return 0;
 // }
 
-int ldtraph_(FILE *outFp, long unused) {
-  unsigned long oldAreg, oldBreg, oldCreg;
+int ldtraph_(long /*unused*/) {
   unsigned long trapbase = 0x80000000;
   unsigned long value;
   // int result;
   // result was not used but could be for info
-  oldAreg = pop();
-  oldBreg = pop();
-  oldCreg = pop();
 
-  fprintf(outFp, "ldtraph: Group, &TrapHandler, priority: %lx, %lx,  %lx\n", oldAreg, oldBreg,
+  unsigned long oldAreg = static_cast<unsigned long>(pop());
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
+  unsigned long oldCreg = static_cast<unsigned long>(pop());
+
+  fprintf(stdout, "ldtraph: Group, &TrapHandler, priority: %lx, %lx,  %lx\n", oldAreg, oldBreg,
           oldCreg);
 
   trapbase = trapbase + 0x40 + 0x80 * oldCreg + 0x20 * oldAreg;
@@ -788,7 +780,7 @@ int ldtraph_(FILE *outFp, long unused) {
   // this reads 4 bytes from Breg and writes them into value variable
 
   // result =
-  readBytes(oldBreg, 4, &value);
+  readBytes(static_cast<long>(oldBreg), 4, &value);
 
   // but
   // this reads 16 (sic!) bytes from Breg and writes them into trapbase
@@ -797,45 +789,46 @@ int ldtraph_(FILE *outFp, long unused) {
   // commented by: Omikorin
 
   // result =
-  storeByteRange(oldBreg, trapbase, 0x10);
-  return (0);
-}
-
-int lmul_(FILE *outFp, long operand) {
-  unsigned long oldAreg, oldBreg, oldCreg;
-  unsigned long bl, bh;
-  unsigned long al, ah;
-  unsigned long hval, lval, temp1, temp2, temp12;
-  unsigned long carry;
-
-  oldAreg = pop();
-  oldBreg = pop();
-  oldCreg = pop();
-
-  al = oldAreg & 0xffff;
-  ah = (oldAreg >> 16) & 0xffff;
-
-  bl = oldBreg & 0xffff;
-  bh = (oldBreg >> 16) & 0xffff;
-
-  hval = ah * bh;
-  lval = al * bl;
-  temp1 = ah * bl;
-  temp2 = al * bh;
-
-  carry = N_Add(lval, oldCreg, &bl);
-  hval = hval + carry;
-  carry = N_Add(temp1, temp2, &temp12);
-  hval = hval + (carry << 16);
-  carry = N_Add((temp12 << 16) & 0xffff0000, bl, &al);
-  hval = hval + carry;
-  ah = ((temp12 >> 16) & 0xffff) + hval;
-
-  push(ah);
-  push(al);
+  storeByteRange(static_cast<long>(oldBreg), static_cast<long>(trapbase), 0x10);
 
   return 0;
 }
+
+int lmul_(long /*operand*/) {
+  unsigned long oldAreg = static_cast<unsigned long>(pop());
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
+  unsigned long oldCreg = static_cast<unsigned long>(pop());
+
+  unsigned long al = oldAreg & 0xffff;
+  unsigned long ah = (oldAreg >> 16) & 0xffff;
+
+  unsigned long bl = oldBreg & 0xffff;
+  unsigned long bh = (oldBreg >> 16) & 0xffff;
+
+  unsigned long hval = ah * bh;
+  unsigned long lval = al * bl;
+  unsigned long temp1 = ah * bl;
+  unsigned long temp2 = al * bh;
+
+  unsigned long temp12;
+
+  unsigned long carry = N_Add(lval, oldCreg, &bl);
+  hval = hval + carry;
+
+  carry = N_Add(temp1, temp2, &temp12);
+  hval = hval + (carry << 16);
+
+  carry = N_Add((temp12 << 16) & 0xffff0000, bl, &al);
+  hval = hval + carry;
+
+  ah = ((temp12 >> 16) & 0xffff) + hval;
+
+  push(static_cast<long>(ah));
+  push(static_cast<long>(al));
+
+  return 0;
+}
+
 // C= A+B with carry set if overflow
 unsigned long N_Add(unsigned long A, unsigned long B, unsigned long *C) {
   int bit0_A, bit0_B;
@@ -868,224 +861,206 @@ unsigned long N_Add(unsigned long A, unsigned long B, unsigned long *C) {
   return (carry);
 }
 
-int ls_(FILE *outFp, long unused) {
+int ls_(long /*unused*/) {
   int result;
   long oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 2, (unsigned long *)&newAreg);
+  result = readBytes(oldAreg, 2, reinterpret_cast<unsigned long *>(&newAreg));
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing ls instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing ls instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int lshl_(FILE *outFp, long unused) {
-
-  unsigned long oldBreg;
-  unsigned long oldCreg;
-  // double  value1;
-  unsigned short oldAreg;
-
-  oldAreg = (unsigned short)pop();
-  oldBreg = pop();
-  oldCreg = pop();
+int lshl_(long /*unused*/) {
+  unsigned short oldAreg = static_cast<unsigned short>(pop());
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
+  unsigned long oldCreg = static_cast<unsigned long>(pop());
 
   if (oldAreg >= 32) {
-    push((oldBreg << (oldAreg - 32)) & 0xffffffff);
-    push(0);
+    push(static_cast<long>((oldBreg << (oldAreg - 32)) & 0xffffffff));
+    push(0L);
   } else {
-    push(((oldBreg >> (32 - oldAreg)) | (oldCreg << oldAreg)) & 0xffffffff);
-    push((oldBreg << oldAreg) & 0xffffffff);
+    push(static_cast<long>(((oldBreg >> (32 - oldAreg)) | (oldCreg << oldAreg)) & 0xffffffff));
+    push(static_cast<long>((oldBreg << oldAreg) & 0xffffffff));
   }
 
-  return (0);
+  return 0;
 }
 
-int lshr_(FILE *outFp, long unused) {
-  unsigned long oldBreg;
-  unsigned long oldCreg;
-  // double  value1;
-  unsigned short oldAreg;
+int lshr_(long /*unused*/) {
+  unsigned short oldAreg = static_cast<unsigned short>(pop());
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
+  unsigned long oldCreg = static_cast<unsigned long>(pop());
 
-  oldAreg = (unsigned short)pop();
-  oldBreg = pop();
-  oldCreg = pop();
   if (oldAreg >= 32) {
-    push(0);
-    push((oldCreg >> (oldAreg - 32)) & 0xffffffff);
+    push(0L);
+    push(static_cast<long>((oldCreg >> (oldAreg - 32)) & 0xffffffff));
   } else {
-    push(oldCreg >> oldAreg);
-    push((oldCreg << (32 - oldAreg)) | (oldBreg >> oldAreg));
+    push(static_cast<long>(oldCreg >> oldAreg));
+    push(static_cast<long>((oldCreg << (32 - oldAreg)) | (oldBreg >> oldAreg)));
   }
 
-  return (0);
+  return 0;
 }
 
 /* Code: 23 F8
   Description: Subtract with borrow in and check for overflow. The result of the
   operation, put into Areg, is Breg minus Areg, minus bit 0 of Creg.
 */
-int lsub_(FILE *outFp, long unused) {
-  int64_t Areg, Breg, Creg, diff;
+int lsub_(long /*unused*/) {
+  int64_t Areg = static_cast<int32_t>(pop());
+  int64_t Breg = static_cast<int32_t>(pop());
+  int64_t Creg = static_cast<int32_t>(pop());
 
-  Areg = (int32_t)pop();
-  Breg = (int32_t)pop();
-  Creg = (int32_t)pop();
-
-  diff = Breg - Areg - (Creg & 0x01);
+  int64_t diff = Breg - Areg - (Creg & 0x01);
 
   if (diff > 0x7FFFFFFFLL) {
-    push((long)(diff - 0x100000000LL));
+    push(static_cast<long>(diff - 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
   } else if (diff < -2147483648LL) {
-    push((long)(diff + 0x100000000LL));
+    push(static_cast<long>(diff + 0x100000000LL));
     // TODO: Signal IntegerOverflow per documentation
   } else {
-    push((long)diff);
+    push(static_cast<long>(diff));
   }
 
-  return (0);
+  return 0;
 }
 
-int lsum_(FILE *outFp, long unused) {
-  unsigned long value1, value2, value3;
-  unsigned long carry, temp;
+int lsum_(long /*unused*/) {
+  unsigned long temp;
 
-  value1 = pop();
-  value2 = pop();
-  value3 = pop();
-  carry = N_Add(value1, (value3 & 0x01), &temp);
+  unsigned long value1 = static_cast<unsigned long>(pop());
+  unsigned long value2 = static_cast<unsigned long>(pop());
+  unsigned long value3 = static_cast<unsigned long>(pop());
+
+  unsigned long carry = N_Add(value1, (value3 & 0x01), &temp);
   carry = carry + N_Add(value2, temp, &value3);
+
   if (carry > 0) {
-    push(1);
-    push(value3 - 0xffffffff - 1);
+    push(1L);
+    push(static_cast<long>(value3 - 0xffffffff - 1));
+  } else {
+    push(0L);
+    push(static_cast<long>(value3));
   }
 
-  else {
-    push(0);
-    push(value3);
-  }
-
-  return (0);
+  return 0;
 }
 
-int mint_(FILE *outFp, long unused) {
+int mint_(long /*unused*/) {
   push(MINIMUM_INTEGER);
 
-  return (0);
+  return 0;
 }
 
-int move_(FILE *outFp, long unused) {
-  int result;
-  int oldAreg, oldBreg, oldCreg;
+int move_(long /*unused*/) {
+  long oldAreg = pop();
+  long oldBreg = pop();
+  long oldCreg = pop();
 
-  oldAreg = pop();
-  oldBreg = pop();
-  oldCreg = pop();
+  int result = storeByteRange(oldCreg, oldBreg, static_cast<int>(oldAreg));
 
-  result = storeByteRange(oldCreg, oldBreg, (int)oldAreg);
-
-  fprintf(outFp, "NOTE: Copy of %x bytes from address %08x to address %08x\n", oldAreg, oldCreg,
+  fprintf(stdout, "NOTE: Copy of %lx bytes from address %08lx to address %08lx\n", oldAreg, oldCreg,
           oldBreg);
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", memoryError(result));
-    fprintf(outFp, "  Error occurred when executing move instruction\n");
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", memoryError(result));
+    fprintf(stdout, "  Error occurred when executing move instruction\n");
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int mul_(FILE *outFp, long unused) {
+int mul_(long /*unused*/) {
   /* WARNING: no checking for overflow */
   push(pop() * pop());
 
-  return (0);
+  return 0;
 }
 
-int nop_(FILE *outFp, long unused) {
-  return (0);
+int nop_(long /*unused*/) {
+  return 0;
 }
 
-int not_(FILE *outFp, long unused) {
+int not_(long /*unused*/) {
   push(~pop());
 
-  return (0);
+  return 0;
 }
 
-int or_(FILE *outFp, long unused) {
+int or_(long /*unused*/) {
   push(pop() | pop());
 
-  return (0);
+  return 0;
 }
 
-int pop_(FILE *outFp, long unused) {
+int pop_(long /*unused*/) {
   pop();
 
-  return (0);
+  return 0;
 }
 
-int prod_(FILE *outFp, long unused) {
+int prod_(long /*unused*/) {
   push(pop() * pop());
 
-  return (0);
+  return 0;
 }
 
-int resetch_(FILE *outFp, long unused) {
-  int result = 0;
-  long oldAreg, newAreg;
-
-  oldAreg = pop();
+int resetch_(long /*unused*/) {
+  long oldAreg = pop();
+  long newAreg = 0;
 
   if (oldAreg & 0x03) {
-    fprintf(outFp, "WARNING: Attempt to access a word that is not on a word boundary\n");
+    fprintf(stdout, "WARNING: Attempt to access a word that is not on a word boundary\n");
   }
 
-  result = readBytes(oldAreg, 4, (unsigned long *)&newAreg);
+  int result = readBytes(oldAreg, 4, reinterpret_cast<unsigned long *>(&newAreg));
   push(newAreg);
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
   // }
 
-  result = storeBytes(oldAreg, 4, (long)NOT_PROCESS);
+  result = storeBytes(oldAreg, 4, static_cast<long>(NOT_PROCESS));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Write memory address %08lx, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
+  fprintf(stdout, "NOTE: Write memory address %08lx, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
   // }
 
-  fprintf(outFp, "Channel at address %08lx was reset\n", oldAreg);
+  fprintf(stdout, "Channel at address %08lx was reset\n", oldAreg);
 
-  return (result);
+  return result;
 }
 
-int ret_(FILE *outFp, long unused) {
+int ret_(long /*unused*/) {
   int result;
 
   result = wptrPopState();
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int rev_(FILE *outFp, long unused) {
+int rev_(long /*unused*/) {
   int result = 0;
   long oldAreg, oldBreg;
 
@@ -1098,7 +1073,7 @@ int rev_(FILE *outFp, long unused) {
   return (result);
 }
 
-int runp_(FILE *outFp, long unused) {
+int runp_(long /*unused*/) {
   int result = 0;
   long oldAreg;
 
@@ -1106,33 +1081,31 @@ int runp_(FILE *outFp, long unused) {
   pop();
   pop();
 
-  fprintf(outFp, "A new process was started.  Process descriptor =0x%08lx\n", oldAreg);
+  fprintf(stdout, "A new process was started.  Process descriptor =0x%08lx\n", oldAreg);
 
   return (result);
 }
 
-int sb_(FILE *outFp, long value) {
-  int result;
-  long value1, value2;
+int sb_(long /*value*/) {
+  long value1 = pop();
+  long value2 = pop();
 
-  value1 = pop();
-  value2 = pop();
-  result = storeBytes(value1, 1, (unsigned char)(value2 & 0xFF));
+  int result = storeBytes(value1, 1, static_cast<unsigned char>(value2 & 0xFF));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFF);
+  fprintf(stdout, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFF);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int shl_(FILE *outFp, long unused) {
+int shl_(long /*unused*/) {
   long value;
   long nbits;
 
@@ -1140,21 +1113,19 @@ int shl_(FILE *outFp, long unused) {
   value = pop();
   push(value << nbits);
 
-  return (0);
+  return 0;
 }
 
-int shr_(FILE *outFp, long unused) {
-  unsigned long value;
-  long nbits;
+int shr_(long /*unused*/) {
+  long nbits = pop();
+  unsigned long value = static_cast<unsigned long>(pop());
 
-  nbits = pop();
-  value = pop();
-  push(value >> nbits);
+  push(static_cast<long>(value >> nbits));
 
-  return (0);
+  return 0;
 }
 
-int signal_(FILE *outFp, long unused) {
+int signal_(long /*unused*/) {
   int result = 0;
   long oldAreg;
 
@@ -1164,34 +1135,32 @@ int signal_(FILE *outFp, long unused) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "A signal was received for address 0x%08lx\n", oldAreg);
+  fprintf(stdout, "A signal was received for address 0x%08lx\n", oldAreg);
   // }
 
   return (result);
 }
 
-int ss_(FILE *outFp, long value) {
-  int result;
-  long value1, value2;
+int ss_(long /*value*/) {
+  long value1 = pop();
+  long value2 = pop();
 
-  value1 = pop();
-  value2 = pop();
-  result = storeBytes(value1, 2, (unsigned)(value2 & 0xFFFF));
+  int result = storeBytes(value1, 2, static_cast<unsigned int>(value2 & 0xFFFF));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFFFF);
+  fprintf(stdout, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFFFF);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int ssub_(FILE *outFp, long unused) {
+int ssub_(long /*unused*/) {
   long oldAreg;
   long oldBreg;
 
@@ -1200,10 +1169,10 @@ int ssub_(FILE *outFp, long unused) {
 
   push(oldAreg + oldBreg * 2);
 
-  return (0);
+  return 0;
 }
 
-int startp_(FILE *outFp, long unused) {
+int startp_(long /*unused*/) {
   // int result;
   long oldAreg, oldBreg;
 
@@ -1211,10 +1180,10 @@ int startp_(FILE *outFp, long unused) {
   oldBreg = pop();
   pop();
 
-  fprintf(outFp, "A new process was started.  Workspace=0x%08lx, Iptr=0x%08lx\n", oldAreg,
+  fprintf(stdout, "A new process was started.  Workspace=0x%08lx, Iptr=0x%08lx\n", oldAreg,
           cpuState.iptr + oldBreg);
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1229,14 +1198,14 @@ Definition:
 Error signals: none
 */
 
-int stclock_(FILE *outFp, long unused) {
+int stclock_(long /*unused*/) {
   long oldAreg;
   long oldBreg;
 
   oldAreg = pop();
   oldBreg = pop();
 
-  fprintf(outFp, "0x%08lx stored in %s clock\n", oldBreg,
+  fprintf(stdout, "0x%08lx stored in %s clock\n", oldBreg,
           (oldAreg & 1) ? "low priority" : "high priority");
 
   if (oldAreg & 1)
@@ -1250,20 +1219,20 @@ int stclock_(FILE *outFp, long unused) {
   // AND NOW CLOCKS MUST START TICKING!!! But how can i do it?!
   // check 'Enables' flag....
 
-  return (0);
+  return 0;
 }
 
-int stl_(FILE *outFp, long index) {
+int stl_(long index) {
   int result;
 
   result = storeWptrWord(index, pop());
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1271,37 +1240,34 @@ Code: Function 0x0E
 Description: Store the contents of Breg into the non-local variable at the specified
        word offset from Areg.
 */
-int stnl_(FILE *outFp, long offset) {
-  int result;
-  unsigned int oldAreg, oldBreg;
+int stnl_(long offset) {
+  long oldAreg = pop();
+  unsigned long oldBreg = static_cast<unsigned long>(pop());
 
-  oldAreg = pop();
-  oldBreg = pop();
-
-  result = storeBytes(oldAreg + offset * 4, 4, oldBreg);
+  int result = storeBytes(oldAreg + offset * 4, 4, static_cast<long>(oldBreg));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "NOTE: Write to memory address %08lx, value=0x%08x\n", oldAreg + offset * 4,
+  fprintf(stdout, "NOTE: Write to memory address %08lx, value=0x%08lx\n", oldAreg + offset * 4,
           oldBreg);
   // }
 
   if (result) {
-    fprintf(outFp, "ERROR: %s\n", st20Error(result));
-    return (-1);
+    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    return -1;
   }
 
-  return (0);
+  return 0;
 }
 
-int stopp_(FILE *outFp, long unused) {
+int stopp_(long /*unused*/) {
   pop();
   pop();
   pop();
 
-  fprintf(outFp, "This process has been terminated\n");
+  fprintf(stdout, "This process has been terminated\n");
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1320,14 +1286,14 @@ Definition:
 Error signals: none
 */
 
-// int sttimer_ (FILE *outFp, long unused) {
-//   fprintf (outFp, "Low and high priority clock registers were set to 0x%08x\n",
+// int sttimer_ (long /*unused*/) {
+//   fprintf (stdout, "Low and high priority clock registers were set to 0x%08x\n",
 //						pop());
 //
-//   return (0);
+//   return 0;
 // }
 
-int sub_(FILE *outFp, long unused) {
+int sub_(long /*unused*/) {
   long value1;
   long value2;
 
@@ -1337,16 +1303,16 @@ int sub_(FILE *outFp, long unused) {
   /* warning... I'm not checking for overflow */
   push(value2 - value1);
 
-  return (0);
+  return 0;
 }
 
-int sum_(FILE *outFp, long unused) {
+int sum_(long /*unused*/) {
   push(pop() + pop());
 
-  return (0);
+  return 0;
 }
 
-int wait_(FILE *outFp, long unused) {
+int wait_(long /*unused*/) {
   long oldAreg;
 
   oldAreg = pop();
@@ -1355,13 +1321,13 @@ int wait_(FILE *outFp, long unused) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(outFp, "Wait on semaphore at 0x%08lx\n", oldAreg);
+  fprintf(stdout, "Wait on semaphore at 0x%08lx\n", oldAreg);
   // }
 
-  return (0);
+  return 0;
 }
 
-int wcnt_(FILE *outFp, long unused) {
+int wcnt_(long /*unused*/) {
   // long value1, value2;
   long value1;
 
@@ -1369,10 +1335,10 @@ int wcnt_(FILE *outFp, long unused) {
   push(value1 & 0x3);
   push((value1 & 0xfffffffc) / 4);
 
-  return (0);
+  return 0;
 }
 
-int wsub_(FILE *outFp, long unused) {
+int wsub_(long /*unused*/) {
   long value1, value2;
 
   value1 = pop();
@@ -1380,10 +1346,10 @@ int wsub_(FILE *outFp, long unused) {
 
   push(value1 + value2 * 4);
 
-  return (0);
+  return 0;
 }
 
-int wsubdb_(FILE *outFp, long unused) {
+int wsubdb_(long /*unused*/) {
   long value1, value2;
 
   value1 = pop();
@@ -1391,10 +1357,10 @@ int wsubdb_(FILE *outFp, long unused) {
 
   push(value1 + value2 * 8);
 
-  return (0);
+  return 0;
 }
 
-int xdble_(FILE *outFp, long unused) {
+int xdble_(long /*unused*/) {
   long value1;
 
   value1 = pop();
@@ -1405,16 +1371,16 @@ int xdble_(FILE *outFp, long unused) {
 
   push(value1);
 
-  return (0);
+  return 0;
 }
 
-int xor_(FILE *outFp, long unused) {
+int xor_(long /*unused*/) {
   push(pop() ^ pop());
 
-  return (0);
+  return 0;
 }
 
-int xsword_(FILE *outFp, long unused) {
+int xsword_(long /*unused*/) {
   long value1;
 
   value1 = pop();
@@ -1423,19 +1389,19 @@ int xsword_(FILE *outFp, long unused) {
 
   push(value1);
 
-  return (0);
+  return 0;
 }
 
 /*
-int _ (FILE *outFp, long value) {
+int _ (long value) {
   int result;
 
   if (result) {
-   fprintf (outFp, "ERROR: %s\n", st20Error(result));
-   return (-1);
+   fprintf (stdout, "ERROR: %s\n", st20Error(result));
+   return -1;
   }
 
-  return (0);
+  return 0;
 }
 */
 
@@ -1454,19 +1420,19 @@ Definition:
 Error signals: none
 */
 
-int ldtimer_(FILE *outFp, long unused) {
+int ldtimer_(long /*unused*/) {
   // Current Priority is obtained reading WDesc flag in the process descriptor
   // see #include OMR.h
 
   if (cpuState.nWptr & 0x01) { // HighPriority
     push(omrState.ClockRegHP);
-    fprintf(outFp, "Read of HIGH_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegHP);
+    fprintf(stdout, "Read of HIGH_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegHP);
   } else { // LowPriority
     push(omrState.ClockRegLP);
-    fprintf(outFp, "Read of LOW_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegLP);
+    fprintf(stdout, "Read of LOW_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegLP);
   }
   //'ticking' code is into execInstr() subroutine
-  return (0);
+  return 0;
 }
 
 /*
@@ -1485,10 +1451,10 @@ Definition:
 Error signals: none
 */
 
-int sttimer_(FILE *outFp, long unused) {
+int sttimer_(long /*unused*/) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
-  fprintf(outFp, "LOW and HIGH priority clock registers were set to 0x%08lx\n",
+  fprintf(stdout, "LOW and HIGH priority clock registers were set to 0x%08lx\n",
           omrState.ClockRegHP);
 
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
@@ -1496,7 +1462,7 @@ int sttimer_(FILE *outFp, long unused) {
 
   //'ticking' code is into execInstr() subroutine
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1512,7 +1478,7 @@ Definition:
 Error signals: none
 */
 
-int clockdis_(FILE *outFp, long unused) {
+int clockdis_(long /*unused*/) {
 
   long oldAreg = pop();
   long oldClockEnables = omrState.ClockEnables;
@@ -1524,7 +1490,7 @@ int clockdis_(FILE *outFp, long unused) {
 
   push(oldClockEnables &= 0x03); // bit 0.1 leaved unchanged. others are zero'ed
                                  //'ticking' code is into execInstr() subroutine
-  return (0);
+  return 0;
 }
 
 /*
@@ -1541,7 +1507,7 @@ Definition:
 Error signals: none
 */
 
-int clockenb_(FILE *outFp, long unused) {
+int clockenb_(long /*unused*/) {
 
   long oldAreg = pop();
   long oldClockEnables = omrState.ClockEnables;
@@ -1553,7 +1519,7 @@ int clockenb_(FILE *outFp, long unused) {
 
   push(oldClockEnables &= 0x03); // bit 0.1 leaved unchanged. others are zero'ed
                                  //'ticking' code is into execInstr() subroutine
-  return (0);
+  return 0;
 }
 
 /*
@@ -1565,12 +1531,12 @@ Definition:
   Areg' <- ClockReg[Areg]
 Error signals: none
  */
-int ldclock_(FILE *outFp, long unused) {
+int ldclock_(long /*unused*/) {
   long oldAreg;
 
   oldAreg = pop();
 
-  fprintf(outFp, "Areg loaded with %s clock\n", (oldAreg & 1) ? "LOW_PRIORITY" : "HIGH_PRIORITY");
+  fprintf(stdout, "Areg loaded with %s clock\n", (oldAreg & 1) ? "LOW_PRIORITY" : "HIGH_PRIORITY");
 
   if (oldAreg & 1)
     push(omrState.ClockRegLP);
@@ -1579,7 +1545,7 @@ int ldclock_(FILE *outFp, long unused) {
 
   //'ticking' code is into execInstr() subroutine
 
-  return (0);
+  return 0;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1599,16 +1565,19 @@ Definition:
   Creg' <- undefined
 Error signals: none
 */
-int trapdis_(FILE *outFp, long unused) {
+int trapdis_(long /*unused*/) {
   long Areg = pop();                  // traps mask
-  long Breg = pop();                  // priority
-  long oldEnables = omrState.Enables; // old Enables Status
+  [[maybe_unused]] long Breg = pop(); // priority (popped to maintain stack state)
+
+  long oldEnables = static_cast<long>(omrState.Enables);
 
   Areg &= 0x3fff; // consider only bit 0..13
-  omrState.Enables &= ~Areg;
+
+  omrState.Enables &= ~static_cast<unsigned long>(Areg);
+
   push(oldEnables & 0x3fff); // return old status in Areg
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1625,17 +1594,19 @@ Definition:
   Creg' <- undefined
 Error signals: none
 */
-int trapenb_(FILE *outFp, long unused) {
+int trapenb_(long /*unused*/) {
   long Areg = pop();                  // traps mask
-  long Breg = pop();                  // priority
-  long oldEnables = omrState.Enables; // old Enables Status
+  [[maybe_unused]] long Breg = pop(); // priority (popped to maintain stack state)
+
+  long oldEnables = static_cast<long>(omrState.Enables);
 
   Areg &= 0x3fff; // consider only bit 0..13
-  omrState.Enables |= Areg;
+
+  omrState.Enables |= static_cast<unsigned long>(Areg);
 
   push(oldEnables & 0x3fff); // return old status in Areg
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1651,17 +1622,19 @@ Definition:
   Areg'31..8 <- 0
 Error signals: none
 */
-int gintdis_(FILE *outFp, long unused) {
-  long Areg = pop();                  // global intr events mask
-  long oldEnables = omrState.Enables; // old Enables Status
+int gintdis_(long /*unused*/) {
+  long Areg = pop(); // global intr events mask
+
+  long oldEnables = static_cast<long>(omrState.Enables);
 
   Areg &= 0xff; // CONSIDER ONLY BIT 7..0
-  omrState.Enables &= ~Areg;
+
+  omrState.Enables &= ~static_cast<unsigned long>(Areg);
 
   oldEnables &= 0x3fc000; // consider only bit 16..23
   push(oldEnables << 16); // return old status in Areg
 
-  return (0);
+  return 0;
 }
 
 /*
@@ -1674,15 +1647,17 @@ Definition:
   Areg'8..31 <- 0
 Error signals: none
 */
-int gintenb_(FILE *outFp, long unused) {
-  long Areg = pop();                  // global intr events mask
-  long oldEnables = omrState.Enables; // old Enables Status
+int gintenb_(long /*unused*/) {
+  long Areg = pop(); // global intr events mask
+
+  long oldEnables = static_cast<long>(omrState.Enables);
 
   Areg &= 0xff; // CONSIDER ONLY BIT 7..0
-  omrState.Enables |= Areg;
+
+  omrState.Enables |= static_cast<unsigned long>(Areg);
 
   oldEnables &= 0x3fc000; // consider only bit 16..23
   push(oldEnables << 16); // return old status in Areg
 
-  return (0);
+  return 0;
 }

@@ -71,12 +71,12 @@ CliError cmd_query_db(CliEngine & /*engine*/, std::span<const std::string_view> 
 }
 
 CliError cmd_show_enbreg(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
-  printEnablesRegState(stdout);
+  printEnablesRegState();
   return CliError::Success;
 }
 
 CliError cmd_omr(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
-  printOMRState(stdout);
+  printOMRState();
   return CliError::Success;
 }
 
