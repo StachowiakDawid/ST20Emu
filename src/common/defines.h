@@ -1,10 +1,7 @@
 #ifndef DEFINES_H
 #define DEFINES_H
 
-#ifdef __cplusplus
-// #pragma once
-extern "C" {
-#endif
+#pragma once
 
 #define TRUE 1
 #define FALSE 0
@@ -23,11 +20,6 @@ typedef struct parm_struct {
   char parameter[PARM_SIZE][MAX_PARMS];
   char value[PARM_SIZE][MAX_PARMS];
 } PARMS;
-#endif
-
-
-#ifdef __cplusplus
-}
 #endif
 
 #endif

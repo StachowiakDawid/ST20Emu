@@ -1,10 +1,6 @@
 #ifndef ST20_H
 #define ST20_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "../../common/defines.h"
 
 /* this is the starting address for CPU execution */
@@ -220,9 +216,5 @@ int xor_(long);
 int xsword_(long);
 
 int _(long);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

@@ -1,17 +1,13 @@
 #ifndef MEMORY_H
 #define MEMORY_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "../../common/defines.h"
 
 #include <stdio.h>
 
-#define BLKSIZE 8 * 1024
-#define ADDR_IN_BLK_MASK ((long)(BLKSIZE - 1))
-#define ADDR_OF_BLK_MASK ((long)(0xFFFFFFFF - ADDR_IN_BLK_MASK))
+inline constexpr long BLKSIZE = 8 * 1024;
+inline constexpr long ADDR_IN_BLK_MASK = BLKSIZE - 1L;
+inline constexpr long ADDR_OF_BLK_MASK = static_cast<long>(0xFFFFFFFFU) - ADDR_IN_BLK_MASK;
 
 /* Error codes from memory.c */
 #define MEMORY_ERROR_START -1000
@@ -32,7 +28,7 @@ extern "C" {
 #define DONT_ALTER_BIT 3
 
 /* routines used to update the state of the memory */
-int memoryInit(PARMS *);
+int memoryInit();
 int readBytes(long, int, unsigned long *);
 int readInvBytes(long, int, long *);
 int storeBytes(long, int, long);
@@ -42,10 +38,6 @@ int bulkLoadBytes(long, const char *, char *, long *);
 /*int readBlockByte (MEMBLK *, int, unsigned char *);  NOT NEEDED */
 int saveMemory(const char *);
 int loadMemory(const char *);
-char *memoryError(int);
-
-#ifdef __cplusplus
-}
-#endif
+const char *memoryError(int);
 
 #endif

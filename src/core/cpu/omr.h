@@ -1,9 +1,7 @@
 #ifndef OMR_H
 #define OMR_H
 
-#ifdef __cplusplus
 #pragma once
-#endif
 
 /* OMR include file, contains #defines and structs */
 #define HIGH_PRIORITY 0

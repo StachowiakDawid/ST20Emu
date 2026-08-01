@@ -115,7 +115,7 @@ int main() {
 
   st20emuInit(&userParms);
   st20Init(&userParms);
-  memoryInit(&userParms);
+  memoryInit();
 
   compat::println("");
 
