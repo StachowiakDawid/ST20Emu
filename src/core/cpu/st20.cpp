@@ -150,39 +150,44 @@ int initWatch() {
 }
 
 int saveCPUState(const char *dirName) {
+  if (dirName == nullptr || *dirName == '\0') {
+    return INVALID_CPU_FILENAME;
+  }
+
   char cpuFileName[NAME_SIZE];
-  int cpuFileFd = -1;
+  if (snprintf(cpuFileName, sizeof(cpuFileName), "%s/cpu.bin", dirName) < 0) {
+    return INVALID_CPU_FILENAME;
+  }
 
-  if (sprintf(cpuFileName, "%s/cpu.bin", dirName) == EOF) {
-    return (INVALID_CPU_FILENAME);
-  }
-#if defined(S_IREAD) && defined(S_IWRITE)
-  if ((cpuFileFd = open(cpuFileName, O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE)) < 0) {
+  constexpr mode_t fileMode = S_IRUSR | S_IWUSR;
+  int cpuFileFd = open(cpuFileName, O_WRONLY | O_CREAT | O_TRUNC, fileMode);
+  if (cpuFileFd < 0) {
     perror("CPU state save file cannot be opened");
-    return (INVALID_CPU_FILE);
+    return INVALID_CPU_FILE;
   }
-#else
-  if ((cpuFileFd = open(cpuFileName, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
-    perror("CPU state save file cannot be opened");
-    return (INVALID_CPU_FILE);
-  }
-#endif
 
-  if (write(cpuFileFd, &cpuState, sizeof(CPUSTATE)) < 0) {
+  // helper lambda to ensure descriptor is closed on failure
+  auto cleanWrite = [cpuFileFd](const void *buf, size_t count) -> bool {
+    return write(cpuFileFd, buf, count) == static_cast<ssize_t>(count);
+  };
+
+  if (!cleanWrite(&cpuState, sizeof(CPUSTATE))) {
+    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
 
-  if (write(cpuFileFd, &wptrEndAddr, 4) < 0) {
+  if (!cleanWrite(&wptrEndAddr, sizeof(wptrEndAddr))) {
+    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
 
-  if (write(cpuFileFd, &watch, sizeof(WATCH)) < 0) {
+  if (!cleanWrite(&watch, sizeof(WATCH))) {
+    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
 
   close(cpuFileFd);
-
-  return (0);
+  return 0;
 }
 
 long get_iptr(void) {
@@ -190,38 +195,43 @@ long get_iptr(void) {
 }
 
 int loadCPUState(const char *dirName) {
+  if (dirName == nullptr || *dirName == '\0') {
+    return INVALID_CPU_FILENAME;
+  }
+
   char cpuFileName[NAME_SIZE];
-  int cpuFileFd = -1;
-
-  if (sprintf(cpuFileName, "%s/cpu.bin", dirName) == EOF) {
-    return (INVALID_CPU_FILENAME);
-  }
-#if defined(S_IREAD) && defined(S_IWRITE)
-  if ((cpuFileFd = open(cpuFileName, O_RDONLY, S_IREAD | S_IWRITE)) < 0) {
-    perror("CPU state save file cannot be opened");
-    return (INVALID_CPU_FILE);
-  }
-#else
-  if ((cpuFileFd = open(cpuFileName, O_RDONLY)) < 0) {
-    perror("CPU state save file cannot be opened");
-    return (INVALID_CPU_FILE);
-  }
-#endif
-
-  if (read(cpuFileFd, &cpuState, sizeof(CPUSTATE)) <= 0) {
-    return (INVALID_CPU_READ);
-  }
-  if (read(cpuFileFd, &wptrEndAddr, 4) <= 0) {
-    return (INVALID_CPU_READ);
+  if (snprintf(cpuFileName, sizeof(cpuFileName), "%s/cpu.bin", dirName) < 0) {
+    return INVALID_CPU_FILENAME;
   }
 
-  if (read(cpuFileFd, &watch, sizeof(WATCH)) <= 0) {
-    return (INVALID_CPU_READ);
+  int cpuFileFd = open(cpuFileName, O_RDONLY);
+  if (cpuFileFd < 0) {
+    perror("CPU state load file cannot be opened");
+    return INVALID_CPU_FILE;
+  }
+
+  /* helper lambda to check exact byte read counts and prevent FD leaks on failure */
+  auto cleanRead = [cpuFileFd](void *buf, size_t count) -> bool {
+    return read(cpuFileFd, buf, count) == static_cast<ssize_t>(count);
+  };
+
+  if (!cleanRead(&cpuState, sizeof(CPUSTATE))) {
+    close(cpuFileFd);
+    return INVALID_CPU_READ;
+  }
+
+  if (!cleanRead(&wptrEndAddr, sizeof(wptrEndAddr))) {
+    close(cpuFileFd);
+    return INVALID_CPU_READ;
+  }
+
+  if (!cleanRead(&watch, sizeof(WATCH))) {
+    close(cpuFileFd);
+    return INVALID_CPU_READ;
   }
 
   close(cpuFileFd);
-
-  return (0);
+  return 0;
 }
 
 int setWatch(const char *reg, const char *parm) {
