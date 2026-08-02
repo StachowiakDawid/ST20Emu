@@ -30,7 +30,7 @@
 /********************************************************************/
 
 #include "st20.h"
-
+#include "instrentry.h"
 #include "omr.h"
 
 #include "../../common/compat.h"

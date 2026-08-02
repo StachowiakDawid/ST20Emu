@@ -1,6 +1,8 @@
 #ifndef ST20_H
 #define ST20_H
 
+#pragma once
+
 #include "../../common/defines.h"
 
 /* this is the starting address for CPU execution */
@@ -80,12 +82,6 @@ typedef struct watch_struct {
   int nWptr;
 } WATCH;
 
-typedef struct instrEntry_struct {
-  const char *mnemonic;
-  int (*function)(long);
-  char cpucycles; // instruction cpu cycles
-} INSTRENTRY;
-
 int st20Init(PARMS *);
 int initCPUState(void);
 int loadCPUState(const char *);
@@ -113,100 +109,5 @@ int wptrPushState(void);
 int allocWptr(long);
 unsigned long N_Add(unsigned long A, unsigned long B, unsigned long *C);
 long get_iptr(void);
-
-// ST20 ISA instructions
-int adc_(long);
-int add_(long);
-int ajw_(long);
-int and_(long);
-int bcnt_(long);
-int bitcnt_(long);
-int bsub_(long);
-int call_(long);
-int cj_(long);
-int clockenb_(long);
-int clockdis_(long);
-int devlb_(long);
-int devls_(long);
-int devlw_(long);
-int devsb_(long);
-int devss_(long);
-int devsw_(long);
-int diff_(long);
-int div_(long);
-int dup_(long);
-int eqc_(long);
-int gajw_(long);
-int gcall_(long);
-int gintdis_(long);
-int gintenb_(long);
-int gt_(long);
-int gtu_(long);
-int invalidOp_(long);
-int j_(long);
-int ladd_(long);
-int lb_(long);
-int lbx_(long);
-int ldc_(long);
-int ldclock_(long);
-int lddevid_(long);
-int ldiff_(long);
-int ldiv_(long);
-int ldl_(long);
-int ldlp_(long);
-int ldmemstartval_(long);
-int ldnl_(long);
-int ldnlp_(long);
-int ldpi_(long);
-int ldpri_(long);
-int ldprodid_(long);
-int ldtimer_(long);
-int ldtraph_(long);
-int lmul_(long);
-int ls_(long);
-int lshl_(long);
-int lshr_(long);
-int lsub_(long);
-int lsum_(long);
-int mint_(long);
-int move_(long);
-int mul_(long);
-int nop_(long);
-int not_(long);
-int or_(long);
-/*********************/
-int outword_(long);
-/*********************/
-int pop_(long);
-int prod_(long);
-int resetch_(long);
-int ret_(long);
-int rev_(long);
-int runp_(long);
-int sb_(long);
-int shl_(long);
-int shr_(long);
-int signal_(long);
-int ss_(long);
-int ssub_(long);
-int startp_(long);
-int stclock_(long);
-int stl_(long);
-int stnl_(long);
-int stopp_(long);
-int sttimer_(long);
-int sub_(long);
-int sum_(long);
-int trapenb_(long);
-int trapdis_(long);
-int wait_(long);
-int wcnt_(long);
-int wsub_(long);
-int wsubdb_(long);
-int xdble_(long);
-int xor_(long);
-int xsword_(long);
-
-int _(long);
 
 #endif

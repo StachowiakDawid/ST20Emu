@@ -1,4 +1,5 @@
-#include "st20.h"
+#include "instrentry.h"
+#include "instructions.h"
 
 // cannot use static when sharing with other C objects
 INSTRENTRY instrEntry[] = {

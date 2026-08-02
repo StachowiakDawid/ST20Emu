@@ -1,5 +1,5 @@
+#include "instrentry.h"
 #include "st20.h"
-
 #include "omr.h"
 
 #include "../../common/compat.h"
@@ -975,8 +975,8 @@ int move_(long /*unused*/) {
 
   int result = storeByteRange(oldCreg, oldBreg, static_cast<int>(oldAreg));
 
-  compat::println("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg, oldCreg,
-                  oldBreg);
+  compat::println("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg,
+                  oldCreg, oldBreg);
 
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
@@ -1456,7 +1456,8 @@ Error signals: none
 int sttimer_(long /*unused*/) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
-  compat::println("LOW and HIGH priority clock registers were set to 0x{:08x}", omrState.ClockRegHP);
+  compat::println("LOW and HIGH priority clock registers were set to 0x{:08x}",
+                  omrState.ClockRegHP);
 
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
   omrState.ClockEnables |= LPTIMER_MASK; // set bit1
