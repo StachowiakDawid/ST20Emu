@@ -150,7 +150,7 @@ int devlb_(long /*unused*/) {
                   addr - static_cast<long>(instrLength), oldAreg, newAreg);
   compat::println("Value of A register is questionable");
 
-  // SearchForReg(stdout, oldAreg);
+  // search_for_reg(oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
@@ -188,7 +188,7 @@ int devls_(long /*unused*/) {
   compat::println("Value of A register is questionable");
 
   // if (showRegs())
-  //   SearchForReg(stdout, oldAreg);
+  //   search_for_reg(oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
@@ -225,7 +225,7 @@ int devlw_(long /*unused*/) {
   compat::println("Value of A register is questionable");
 
   //   if (showRegs())
-  //     SearchForReg(stdout, oldAreg);
+  //     search_for_reg(oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
@@ -261,7 +261,7 @@ int devsb_(long /*value*/) {
                   addr - static_cast<long>(instrLength), value1,
                   static_cast<unsigned char>(value2) & 0xFF);
   //   if (showRegs())
-  //     SearchForReg(stdout, value1);
+  //     search_for_reg(value1);
   // }
 
   if (result) {
@@ -298,7 +298,7 @@ int devss_(long /*value*/) {
 
   //   // Search description in register database
   //   if (showRegs())
-  //     SearchForReg(stdout, value1);
+  //     search_for_reg(value1);
   // }
 
   if (result) {
@@ -335,7 +335,7 @@ int devsw_(long /*value*/) {
 
   //   // Search description in register database
   //   if (showRegs())
-  //     SearchForReg(stdout, value1);
+  //     search_for_reg(value1);
   // }
 
   if (result) {
