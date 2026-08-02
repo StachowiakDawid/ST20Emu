@@ -56,22 +56,17 @@
 #define INVALID_CPU_WRITE -2012
 #define INVALID_CPU_READ -2013
 
-#ifndef CPUSTATE_STRUCT
-#define CPUSTATE_STRUCT
-typedef struct cpuState_struct {
-  long areg;
-  long breg;
-  long creg;
-  long iptr;
-  long status;
-  int nWptr;
+struct CPUSTATE {
+  long areg{0};
+  long breg{0};
+  long creg{0};
+  long iptr{0};
+  long status{0};
+  int nWptr{0};
   /*  long wptr[MAX_WPTR];*/
-  char wptrUsed[MAX_WPTR];
-} CPUSTATE;
-#endif
+  bool wptrUsed[MAX_WPTR]{false};
+};
 
-#ifndef WATCH_STRUCT
-#define WATCH_STRUCT
 typedef struct watch_struct {
   bool watchAreg;
   long areg;
@@ -84,16 +79,12 @@ typedef struct watch_struct {
   bool watchNWptr;
   int nWptr;
 } WATCH;
-#endif
 
-#ifndef INSTRENTRY_STRUCT
-#define INSTRENTRY_STRUCT
 typedef struct instrEntry_struct {
   const char *mnemonic;
   int (*function)(long);
   char cpucycles; // instruction cpu cycles
 } INSTRENTRY;
-#endif
 
 int st20Init(PARMS *);
 int initCPUState(void);
@@ -123,6 +114,7 @@ int allocWptr(long);
 unsigned long N_Add(unsigned long A, unsigned long B, unsigned long *C);
 long get_iptr(void);
 
+// ST20 ISA instructions
 int adc_(long);
 int add_(long);
 int ajw_(long);

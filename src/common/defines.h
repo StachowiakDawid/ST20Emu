@@ -3,23 +3,16 @@
 
 #pragma once
 
-#define TRUE 1
-#define FALSE 0
+inline constexpr unsigned long UNDEFINED_WORD_OLD = 0xCCCCCCCCU;
 
-// TODO: remove when constexpr can be moved
-#define UNDEFINED_WORD_OLD 0xCCCCCCCC
+inline constexpr int NAME_SIZE = 100;
+inline constexpr int PARM_SIZE = 30;
+inline constexpr int MAX_PARMS = 50;
 
-#define NAME_SIZE 100
-#define PARM_SIZE 30
-#define MAX_PARMS 50
-
-#ifndef PARMS_H
-#define PARMS_H
-typedef struct parm_struct {
-  int nParms;
-  char parameter[PARM_SIZE][MAX_PARMS];
-  char value[PARM_SIZE][MAX_PARMS];
-} PARMS;
-#endif
+struct PARMS {
+  int nParms{0};
+  char parameter[MAX_PARMS][PARM_SIZE]{};
+  char value[MAX_PARMS][PARM_SIZE]{};
+};
 
 #endif

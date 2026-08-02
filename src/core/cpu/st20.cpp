@@ -120,19 +120,19 @@ int initCPUState(void) {
 
   /* initialize the state of the processor */
   cpuState.nWptr = 7;
-  cpuState.wptrUsed[0] = TRUE;
-  cpuState.wptrUsed[1] = TRUE;
-  cpuState.wptrUsed[2] = TRUE;
-  cpuState.wptrUsed[3] = TRUE;
-  cpuState.wptrUsed[4] = TRUE;
-  cpuState.wptrUsed[5] = TRUE;
-  cpuState.wptrUsed[6] = TRUE;
+  cpuState.wptrUsed[0] = true;
+  cpuState.wptrUsed[1] = true;
+  cpuState.wptrUsed[2] = true;
+  cpuState.wptrUsed[3] = true;
+  cpuState.wptrUsed[4] = true;
+  cpuState.wptrUsed[5] = true;
+  cpuState.wptrUsed[6] = true;
   addrWptrWord(0, &address);
   result = allocBytes(address - 4 * 7, 4 * 7);
   /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
 
   for (i = 7; i < MAX_WPTR; i++) {
-    cpuState.wptrUsed[i] = FALSE;
+    cpuState.wptrUsed[i] = false;
   }
   cpuState.areg = cpuState.breg = cpuState.creg = UNDEFINED_WORD_OLD;
   cpuState.iptr = 0;
@@ -609,7 +609,7 @@ int storeWptrWord(long index, long value) {
   addrWptrWord(index, &address);
   result = storeBytes(address, 4, value);
   /*  cpuState.wptr[cpuState.nWptr - index - 1] = value;*/
-  cpuState.wptrUsed[cpuState.nWptr - index - 1] = TRUE;
+  cpuState.wptrUsed[cpuState.nWptr - index - 1] = true;
 
   return (result);
 }
@@ -668,7 +668,7 @@ int allocWptr(long count) {
       result = WPTR_UNDERFLOW;
     }
     for (i = 0; i < count; i++) {
-      cpuState.wptrUsed[--cpuState.nWptr] = FALSE;
+      cpuState.wptrUsed[--cpuState.nWptr] = false;
     }
   }
 

@@ -421,14 +421,14 @@ int gajw_(long /*unused*/) {
   }
   wptrEndAddr = oldAreg + 3;
   cpuState.nWptr = 1;
-  cpuState.wptrUsed[0] = TRUE;
+  cpuState.wptrUsed[0] = true;
 
   addrWptrWord(0, &address);
   result = allocBytes(address, 4);
   /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
 
   for (i = 1; i < MAX_WPTR; i++) {
-    cpuState.wptrUsed[i] = FALSE;
+    cpuState.wptrUsed[i] = false;
   }
   /*
     result = storeWptrWord (0, oldAreg);
