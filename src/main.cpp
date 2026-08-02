@@ -1,4 +1,5 @@
 #include "main.h"
+#include "terminal_util.h"
 
 #include "cli/cli_engine.h"
 #include "common/defines.h"
@@ -119,6 +120,9 @@ int main() {
 
   compat::println("");
 
+  // throttle how often we ask the OS for keyboard input
+  constexpr uint64_t KEY_POLL_INTERVAL = 1000;
+
   while (!cli.is_quit_requested()) {
     execInstr(&watchTripped);
 
@@ -137,10 +141,12 @@ int main() {
                         maxInstr, get_iptr());
       }
 
-      // TODO: add an option to leave the `g` command other than ncurses
-      // if (getch() == 'g') {
-      //   cli.set_need_prompt(true);
-      // }
+      if (instrCount % KEY_POLL_INTERVAL == 0) {
+        if (pollInterruptKey()) {
+          compat::println("\nExecution interrupted by user (pressed 'g').");
+          cli.set_need_prompt(true);
+        }
+      }
     }
 
     if (watchTripped) {
