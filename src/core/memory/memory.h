@@ -1,7 +1,6 @@
 #ifndef MEMORY_H
 #define MEMORY_H
 
-#include "../../common/compat.h"
 #include "../../common/defines.h"
 
 inline constexpr long BLKSIZE = 8 * 1024;

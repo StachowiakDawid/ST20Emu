@@ -1,78 +1,78 @@
 #include "memory.h"
 
+#include "../../common/compat.h"
 #include "../../common/defines.h"
 #include "../cpu/st20.h"
 
 // posix / linux
 #include <dirent.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <fnmatch.h>
 
 // std
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-/* this structure hold the state of the memory */
-typedef struct memblk_struct {
+/* this structure holds the state of the memory */
+struct MEMBLK {
   long startAddr;
   unsigned char data[BLKSIZE];
   unsigned char used[BLKSIZE / 8];
-  struct memblk_struct *next;
-} MEMBLK;
+  MEMBLK *next{nullptr};
+};
 
 /* this will hold the state of the memory */
-static MEMBLK *memoryMap = NULL;
+static MEMBLK *memoryMap = nullptr;
 
-MEMBLK *getMemBlk(long, bool);
-int byteUsedBit(MEMBLK *, int, int);
+MEMBLK *getMemBlk(long address, bool create_flag);
+int byteUsedBit(MEMBLK *blk, int offset, int set_flag);
 
 int memoryInit() {
-
   /* the emulator will get into an infinite loop if this initialization isn't done */
   storeBytes(0x3004L, 4, 0L);
   // below for sti5518 ASC1 20005000 base
   storeBytes(0x20005014L, 4, 0x00000000L);
   // below for sti5517
-  //   storeBytes(0x200130f8L, 4, 0x00000001L);
+  // storeBytes(0x200130f8L, 4, 0x00000001L);
 
-  return (0);
+  return 0;
 }
 
 /**************************
  * There is one bit to flag whether a byte in the data array
- * is used or not.  used[byte 0, bit 0] indicates whether data[0]
+ * is used or not. used[byte 0, bit 0] indicates whether data[0]
  * is used, used[byte 1, bit 0] indicates whether data[8] is used.
  *
  * returns true if the Used bit was set for the specified byte in
  * the specified memory block before this function was called
  */
 int byteUsedBit(MEMBLK *block, int offset, int usedOperation) {
-  int usedByteAddr = 0;
-  int usedBitAddr = 0;
-  int usedByte = 0;
-  int usedBit = 0;
+  if (block == nullptr) {
+    return 0;
+  }
 
   /* get the address of the byte's used bit */
-  usedByteAddr = (offset & ADDR_IN_BLK_MASK) >> 3;
-  usedBitAddr = (offset & 7);
+  int usedByteAddr = (offset & ADDR_IN_BLK_MASK) >> 3;
+  int usedBitAddr = offset & 7;
 
   /* get the state of the requested bit */
-  usedByte = block->used[usedByteAddr];
-  usedBit = usedByte & (1 << usedBitAddr);
+  unsigned char mask = static_cast<unsigned char>(1U << usedBitAddr);
+  unsigned char usedByte = block->used[usedByteAddr];
+  bool wasSet = (usedByte & mask) != 0;
 
   if (usedOperation == SET_BIT) {
     /* mark the bit as used */
-    block->used[usedByteAddr] |= (1 << usedBitAddr);
+    block->used[usedByteAddr] |= mask;
   } else if (usedOperation == CLEAR_BIT) {
     /* clear the used bit */
-    block->used[usedByteAddr] &= 0xFF - (1 << usedBitAddr);
+    block->used[usedByteAddr] &= static_cast<unsigned char>(~mask);
   }
 
   /* return 1 if the used bit was originally set */
-  return (usedBit != 0);
+  return wasSet ? 1 : 0;
 }
 
 /* THIS ROUTINE ISN'T NEEDED */
@@ -89,59 +89,21 @@ int byteUsedBit(MEMBLK *block, int offset, int usedOperation) {
   return (byteUsedBit(block, offset, (int) DONT_ALTER_BIT));
 }
 */
+
 /**************************
  * This function reads from one to four bytes from the proper memory block.
  *
- * Returns TRUE if the bytes were read properly.
+ * Returns 0 if the bytes were read properly.
  */
 
 int readBytes(long address, int nBytes, unsigned long *value) {
-  int i;
-  MEMBLK *cBlk;
-  unsigned char cByte;
-  unsigned long cWord = 0;
-  int offset = 0;
-
-  *value = UNDEFINED_WORD_OLD;
-
-  /* this routine won't work with anything longer than a double word */
-  if (nBytes > 4) {
-    return (READ_TOO_LARGE);
-  }
-
-  /* read each of the requested bytes */
-  for (i = 0; i < nBytes; i++) {
-
-    /* get the block that the current byte is in */
-    if ((cBlk = getMemBlk(address + i, false)) == NULL) {
-      return (READ_UNUSED_MEM);
-    }
-
-    /* get the offset of the byte in the block */
-    offset = (address + i) & ADDR_IN_BLK_MASK;
-
-    /* if the byte isn't defined, return error */
-    if (!byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
-      return (READ_UNUSED_MEM);
-    }
-
-    /* get the data byte */
-    cByte = cBlk->data[offset] & 0xFF;
-
-    /* build the return value from its component bytes */
-    cWord += static_cast<unsigned long>(cByte) << (8 * i);
-  }
-
-  *value = cWord;
-
-  return (0);
-}
-
-int readInvBytes(long address, int nBytes, long *value) {
   MEMBLK *cBlk = nullptr;
   unsigned char cByte = 0;
   unsigned long cWord = 0;
-  int offset = 0;
+
+  if (value == nullptr) {
+    return READ_UNUSED_MEM;
+  }
 
   *value = UNDEFINED_WORD_OLD;
 
@@ -154,12 +116,13 @@ int readInvBytes(long address, int nBytes, long *value) {
   for (int i = 0; i < nBytes; i++) {
 
     /* get the block that the current byte is in */
-    if ((cBlk = getMemBlk(address + i, false)) == nullptr) {
+    cBlk = getMemBlk(address + i, false);
+    if (cBlk == nullptr) {
       return READ_UNUSED_MEM;
     }
 
     /* get the offset of the byte in the block */
-    offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
+    int offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
 
     /* if the byte isn't defined, return error */
     if (!byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
@@ -167,10 +130,53 @@ int readInvBytes(long address, int nBytes, long *value) {
     }
 
     /* get the data byte */
-    cByte = cBlk->data[offset] & 0xFFU;
+    cByte = cBlk->data[offset];
 
     /* build the return value from its component bytes */
-    cWord += static_cast<unsigned long>(cByte) << (8 * (3 - i));
+    cWord |= (static_cast<unsigned long>(cByte) << (8U * static_cast<unsigned long>(i)));
+  }
+
+  *value = cWord;
+
+  return 0;
+}
+
+int readInvBytes(long address, int nBytes, long *value) {
+  if (value == nullptr) {
+    return READ_UNUSED_MEM;
+  }
+
+  *value = UNDEFINED_WORD_OLD;
+
+  /* this routine won't work with anything longer than a double word */
+  if (nBytes > 4) {
+    return READ_TOO_LARGE;
+  }
+
+  unsigned long cWord = 0;
+
+  /* read each of the requested bytes (big-endian order) */
+  for (int i = 0; i < nBytes; i++) {
+
+    /* get the block that the current byte is in */
+    MEMBLK *cBlk = getMemBlk(address + i, false);
+    if (cBlk == nullptr) {
+      return READ_UNUSED_MEM;
+    }
+
+    /* get the offset of the byte in the block */
+    int offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
+
+    /* if the byte isn't defined, return error */
+    if (!byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
+      return READ_UNUSED_MEM;
+    }
+
+    /* get the data byte */
+    unsigned char cByte = cBlk->data[offset];
+
+    /* build the return value from its component bytes (big-endian shift) */
+    cWord |= (static_cast<unsigned long>(cByte) << (8U * static_cast<unsigned long>(3 - i)));
   }
 
   *value = static_cast<long>(cWord);
@@ -181,33 +187,30 @@ int readInvBytes(long address, int nBytes, long *value) {
 /**************************
  * This function stores from one to four bytes in the proper memory block.
  *
- * Returns TRUE if the bytes were stored properly.
+ * Returns 0 if the bytes were stored properly.
  */
 int storeBytes(long address, int nBytes, long value) {
-  MEMBLK *cBlk = nullptr;
-  unsigned char cByte = 0;
-  unsigned long cWord = static_cast<unsigned long>(value);
-  int offset = 0;
-
   /* this routine won't work with anything longer than a double word */
   if (nBytes > 4) {
-    return 0;
+    return 0; // preferably the appropriate non-zero error code
   }
 
-  for (int i = 0; i < nBytes; i++) {
+  unsigned long cWord = static_cast<unsigned long>(value);
 
+  for (int i = 0; i < nBytes; i++) {
     /* get the block that the current byte is in */
     /* if the memory block can't be created, return an error */
-    if ((cBlk = getMemBlk(address + i, true)) == nullptr) {
+    MEMBLK *cBlk = getMemBlk(address + i, true);
+    if (cBlk == nullptr) {
       return READ_UNUSED_MEM;
     }
 
-    /* get each of the requested bytes */
-    cByte = static_cast<unsigned char>(cWord & 0xFFU);
-    cWord >>= 8;
+    /* get each of the requested bytes (little-endian order) */
+    unsigned char cByte = static_cast<unsigned char>(cWord & 0xFFU);
+    cWord >>= 8U;
 
     /* get the offset of the byte in the block */
-    offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
+    int offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
 
     /* save the byte in the memory block */
     cBlk->data[offset] = cByte;
@@ -220,25 +223,23 @@ int storeBytes(long address, int nBytes, long value) {
 }
 
 /**************************
- * This function stores from one to four bytes in the proper memory block.
+ * This function copies a range of bytes from srcAddr to destAddr.
  *
- * Returns TRUE if the bytes were stored properly.
+ * Returns 0 if all bytes were copied properly.
  */
 int storeByteRange(long srcAddr, long destAddr, int nBytes) {
-  int result = 0;
-  unsigned long cWord = 0;
-
   for (int i = 0; i < nBytes; i++) {
+    unsigned long cWord = 0;
 
-    /* get the block that the current byte is in */
-    /* if the memory block can't be created, return an error */
-    if ((result = readBytes(srcAddr + i, 1, &cWord)) != 0) {
+    /* read a single byte from the source address */
+    int result = readBytes(srcAddr + i, 1, &cWord);
+    if (result != 0) {
       return result;
     }
 
-    cWord &= 0xFFU;
-
-    if ((result = storeBytes(destAddr + i, 1, static_cast<long>(cWord))) != 0) {
+    /* store the byte to the destination address */
+    result = storeBytes(destAddr + i, 1, static_cast<long>(cWord & 0xFFU));
+    if (result != 0) {
       return result;
     }
   }
@@ -247,7 +248,7 @@ int storeByteRange(long srcAddr, long destAddr, int nBytes) {
 }
 
 int allocBytes(long address, int nBytes) {
-  return (storeBytes(address, nBytes, UNDEFINED_WORD_OLD));
+  return storeBytes(address, nBytes, UNDEFINED_WORD_OLD);
 }
 
 /**************************
@@ -512,99 +513,100 @@ int saveMemory(const char *dirName) {
 }
 
 int loadMemory(const char *dirName) {
-  DIR *dirBlk;
-  struct dirent *entry;
-  // int doneDir;
+  if (dirName == nullptr || *dirName == '\0') {
+    compat::println(stderr, "No directory specified for loadMemory");
+    return INVALID_BYTE_FILENAME;
+  }
+
   char fileMask[NAME_SIZE];
-  char byteFileName[NAME_SIZE];
-  char usedFileName[NAME_SIZE];
-  char *dotLoc;
-  char addressCh[NAME_SIZE];
-  long address;
-  long dataLength = 0;
-  int result = 0;
-
-  if (sprintf(fileMask, "%s/???????0.bin", dirName) == EOF) {
-    fprintf(stdout, "filemask failed\n");
-    return (INVALID_OUT_FILE);
+  if (snprintf(fileMask, sizeof(fileMask), "%s/???????0.bin", dirName) < 0) {
+    compat::println("filemask failed");
+    return INVALID_OUT_FILE;
   }
-  fprintf(stdout, "filemask: %s\n", fileMask);
+  compat::println("filemask: {}", fileMask);
 
-  // TODO: this will fail because file mask is not actually a mask, just a string
-  dirBlk = opendir(dirName);
-  if (dirBlk == NULL) {
-    fprintf(stdout, "opendir failed\n");
-    return (INVALID_OUT_FILE);
+  DIR *dirBlk = opendir(dirName);
+  if (dirBlk == nullptr) {
+    compat::println("opendir failed");
+    return INVALID_OUT_FILE;
   }
-  fprintf(stdout, "opendir successed\n");
+  compat::println("opendir succeeded");
 
-  while ((entry = readdir(dirBlk)) != NULL) { /* for each file */
+  struct dirent *entry = nullptr;
+  while ((entry = readdir(dirBlk)) != nullptr) { /* for each file */
     if (fnmatch("???????0.bin", entry->d_name, 0) != 0) {
       continue; // skip non-matching files
     }
-    /* the name contains the address to load the file at */
-    fprintf(stdout, "d_name: %s\n", entry->d_name);
-    strcpy(addressCh, entry->d_name);
-    fprintf(stdout, "address: %s\n", addressCh);
-    if (sscanf(addressCh, "%8lx.bin", &address) != 1) {
-      return (INVALID_OUT_FILE);
+
+    compat::println("d_name: {}", entry->d_name);
+
+    long address = 0;
+    if (sscanf(entry->d_name, "%8lx", &address) != 1) {
+      closedir(dirBlk);
+      return INVALID_OUT_FILE;
     }
-    // fprintf (stderr, "%s   \n",dirBlk.name);
-    /* add the directory name to the file name */
-    strcpy(byteFileName, dirName);
-    strcat(byteFileName, "/");
-    strcat(byteFileName, entry->d_name);
+
+    /* build the full byte filename */
+    char byteFileName[NAME_SIZE];
+    if (snprintf(byteFileName, sizeof(byteFileName), "%s/%s", dirName, entry->d_name) < 0) {
+      closedir(dirBlk);
+      return INVALID_OUT_FILE;
+    }
 
     /* build the used byte filename from the data file name */
-    strcpy(usedFileName, byteFileName);
-    dotLoc = strrchr(usedFileName, '.');
-    if (dotLoc == NULL) {
-      return (INVALID_OUT_FILE);
-    }
-    /* put a null at the location of the period in the filename */
-    *dotLoc = '\0';
-
-    /* add the suffix for the used filename */
-    strcat(usedFileName, ".use");
-    fprintf(stderr, "%s   %s\n", byteFileName, usedFileName);
-    result = bulkLoadBytes(address, byteFileName, usedFileName, &dataLength);
-    if (result) {
+    char usedFileName[NAME_SIZE];
+    if (snprintf(usedFileName, sizeof(usedFileName), "%s", byteFileName) < 0) {
       closedir(dirBlk);
-      return (result);
+      return INVALID_OUT_FILE;
     }
 
+    char *dotLoc = strrchr(usedFileName, '.');
+    if (dotLoc == nullptr) {
+      closedir(dirBlk);
+      return INVALID_OUT_FILE;
+    }
+
+    /* replace .bin extension with .use */
+    if (snprintf(dotLoc, sizeof(usedFileName) - static_cast<size_t>(dotLoc - usedFileName),
+                 ".use") < 0) {
+      closedir(dirBlk);
+      return INVALID_OUT_FILE;
+    }
+
+    compat::print(stderr, "{}", byteFileName);
+    compat::print(stderr, "   ");
+    compat::println(stderr, "{}", usedFileName);
+
+    long dataLength = 0;
+    int result = bulkLoadBytes(address, byteFileName, usedFileName, &dataLength);
+    if (result != 0) {
+      closedir(dirBlk);
+      return result;
+    }
   } /* end of for each data file */
+
   closedir(dirBlk);
-  return (0);
+  return 0;
 }
 
 const char *memoryError(int error) {
   switch (error) {
-
   case INVALID_BYTE_FILENAME:
-    return ("The byte filename is invalid");
-    break;
+    return "The byte filename is invalid";
 
   case INVALID_BYTE_FILE:
-    return ("Cannot open byte file");
-    break;
+    return "Cannot open byte file";
 
   case FAILED_MALLOC:
-    return ("Ran out of room allocating memory for byte file");
-    break;
+    return "Ran out of room allocating memory for byte file";
 
   case READ_TOO_LARGE:
-    return ("Cannot read more than four bytes at one time");
-    break;
+    return "Cannot read more than four bytes at one time";
 
   case READ_UNUSED_MEM:
-    return ("An uninit memory byte was accessed ");
-    break;
+    return "An uninit memory byte was accessed ";
 
   default:
-    return ("Unknown memory error");
-    break;
+    return "Unknown memory error";
   }
-
-  return (NULL);
 }
