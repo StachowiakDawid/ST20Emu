@@ -93,8 +93,7 @@ int st20Init(PARMS *userParms) {
     }
   }
 
-  compat::print("START_ADDR=0x{:08x}\nMEM_START_VAL=0x{:08x}\nST20_PRODUCT_ID=0x{:08x}\n\
-TIMER_GUESS=0x{:08x}\nWPTR_END_ADDR=0x{:08x}",
+  compat::print("START_ADDR=0x{:08x}\nMEM_START_VAL=0x{:08x}\nST20_PRODUCT_ID=0x{:08x}\nTIMER_GUESS=0x{:08x}\nWPTR_END_ADDR=0x{:08x}\n",
                 startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
 
   initCPUState();
