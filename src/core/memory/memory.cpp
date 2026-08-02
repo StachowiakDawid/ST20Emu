@@ -306,7 +306,7 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
   struct stat st{};
 
   if (byteFile == nullptr || *byteFile == '\0') {
-    fprintf(stderr, "No byte filename specified\n");
+    compat::println(stderr, "No byte filename specified");
     return INVALID_BYTE_FILENAME;
   }
 
@@ -320,7 +320,7 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
   if (address == 0) {
     address = 2147483647L - size + 1L;
   }
-  fprintf(stderr, "Loading %ld bytes from %s to 0x%08lx\n", size, byteFile, address);
+  compat::println(stderr, "Loading {:d} bytes from {} to 0x{:08x}", size, byteFile, address);
 
   long nextAddress = address;
   char data[BLKSIZE];
@@ -359,7 +359,7 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
       cBlk = getMemBlk(nextAddress, true);
 
       if (cBlk == nullptr) {
-        fprintf(stderr, "Cannot allocate memory for byte file\n");
+        compat::println(stderr, "Cannot allocate memory for byte file");
         close(byteFd);
         if (usedFd >= 0)
           close(usedFd);
@@ -414,7 +414,7 @@ int saveMemory(const char *dirName) {
 
   /* check the directory name */
   if (dirName == nullptr || *dirName == '\0') {
-    fprintf(stderr, "No output filename specified\n");
+    compat::println(stderr, "No output filename specified");
     return INVALID_BYTE_FILENAME;
   }
 

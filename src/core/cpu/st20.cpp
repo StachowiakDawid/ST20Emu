@@ -33,6 +33,7 @@
 
 #include "omr.h"
 
+#include "../../common/compat.h"
 #include "../../common/defines.h"
 // #include "../../soc/sti5518/STi5518_SearchDB.h"
 // #include "commands.h" // disabled until ported to C++
@@ -92,8 +93,8 @@ int st20Init(PARMS *userParms) {
     }
   }
 
-  fprintf(stdout, "START_ADDR=0x%08lx\nMEM_START_VAL=0x%08lx\nST20_PRODUCT_ID=0x%08lx\n\
-TIMER_GUESS=0x%08lx\nWPTR_END_ADDR=0x%08lx\n",
+  compat::print("START_ADDR=0x{:08x}\nMEM_START_VAL=0x{:08x}\nST20_PRODUCT_ID=0x{:08x}\n\
+TIMER_GUESS=0x{:08x}\nWPTR_END_ADDR=0x{:08x}",
           startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
 
   initCPUState();
@@ -304,24 +305,24 @@ int printCPUState() {
   long address = 0;
   unsigned long value = 0;
 
-  fprintf(stdout, "A=0x%08lx B=0x%08lx C=0x%08lx  Iptr=0x%08lx \n", cpuState.areg, cpuState.breg,
-          cpuState.creg, cpuState.iptr);
+  compat::println("A=0x{:08x} B=0x{:08x} C=0x{:08x}  Iptr=0x{:08x}", cpuState.areg, cpuState.breg,
+                  cpuState.creg, cpuState.iptr);
 
   for (i = 0; i < cpuState.nWptr; i++) {
     if (i == 0) {
-      fprintf(stdout, "Wptr");
+      compat::println("Wptr");
     }
 
     addrWptrWord(i, &address);
     result = readBytes(address, 4, &value);
-    fprintf(stdout, " %2x=0x%08lx", i, value);
+    compat::print(" {:02x}=0x{:08x}", i, value);
 
     if (i % WPTR_PRINT_COLS == WPTR_PRINT_COLS - 1) {
-      fprintf(stdout, "\n    ");
+      compat::println("    ");
     }
   }
 
-  fprintf(stdout, "\n\n");
+  compat::println("\n");
 
   return (result);
 }
@@ -331,15 +332,15 @@ int printCPUState() {
  */
 int printOMRState() {
   // show the OMR Enables register
-  fprintf(stdout, "OTHER MACHINE REGISTERS\n");
-  fprintf(stdout, "-----------------------\n");
-  fprintf(stdout, "Enables=0x%08lx\n", omrState.Enables);
-  fprintf(stdout, "ClockRegHP=0x%08lx ", omrState.ClockRegHP);
-  fprintf(stdout, "ClockRegLP=0x%08lx ", omrState.ClockRegLP);
-  fprintf(stdout, "ClockEnables=0x%02x \n", omrState.ClockEnables);
-  fprintf(stdout, "HP_ErrFlag=0x%02x ", omrState.HP_ErrorFlag);
-  fprintf(stdout, "LP_ErrFlag=0x%02x ", omrState.LP_ErrorFlag);
-  fprintf(stdout, "HaltOnError=0x%02x\n", omrState.HaltOnErrorFlag);
+  compat::println("OTHER MACHINE REGISTERS");
+  compat::println("-----------------------");
+  compat::println("Enables=0x{:08x}", omrState.Enables);
+  compat::print("ClockRegHP=0x{:08x} ", omrState.ClockRegHP);
+  compat::print("ClockRegLP=0x{:08x} ", omrState.ClockRegLP);
+  compat::println("ClockEnables=0x{:02x}", omrState.ClockEnables);
+  compat::print("HP_ErrFlag=0x{:02x} ", omrState.HP_ErrorFlag);
+  compat::print("LP_ErrFlag=0x{:02x} ", omrState.LP_ErrorFlag);
+  compat::println("HaltOnError=0x{:02x}", omrState.HaltOnErrorFlag);
   return (0);
 }
 /**************************
@@ -347,53 +348,53 @@ int printOMRState() {
  */
 int printEnablesRegState() {
 
-  fprintf(stdout, "Enables Register Value=0x%08lx\n", omrState.Enables);
-  // fprintf(stdout,"-GLOBAL INTERRUPTS ENABLES VALUES-\n");
+  compat::println("Enables Register Value=0x{:08x}", omrState.Enables);
+  // compat::println("-GLOBAL INTERRUPTS ENABLES VALUES-\n");
   if (omrState.Enables & LP_PROCESS_INT_ENB)
-    fprintf(stdout, " LP_PROCESS_INT_ENB	is set\n");
+    compat::println(" LP_PROCESS_INT_ENB	is set");
   if (omrState.Enables & LP_TIMESLICE_ENB)
-    fprintf(stdout, " LP_TIMESLICE_ENB	is set\n");
+    compat::println(" LP_TIMESLICE_ENB	is set");
   if (omrState.Enables & LP_EXTERNALEVENT_ENB)
-    fprintf(stdout, " LP_EXTERNALEVENT_ENB	is set\n");
+    compat::println(" LP_EXTERNALEVENT_ENB	is set");
   if (omrState.Enables & LP_TIMER_ALRM_ENB)
-    fprintf(stdout, " LP_TIMER_ALRM_ENB	is set\n");
+    compat::println(" LP_TIMER_ALRM_ENB	is set");
   if (omrState.Enables & HP_PROCESS_INT_ENB)
-    fprintf(stdout, " HP_PROCESS_INT_ENB	is set\n");
+    compat::println(" HP_PROCESS_INT_ENB	is set");
   if (omrState.Enables & HP_TIMESLICE_ENB)
-    fprintf(stdout, " HP_TIMESLICE_ENB	is set\n");
+    compat::println(" HP_TIMESLICE_ENB	is set");
   if (omrState.Enables & HP_EXTERNALEVENT_ENB)
-    fprintf(stdout, " HP_EXTERNALEVENT_ENB	is set\n");
+    compat::println(" HP_EXTERNALEVENT_ENB	is set");
   if (omrState.Enables & HP_TIMER_ALRM_ENB)
-    fprintf(stdout, " HP_TIMER_ALRM_ENB	is set\n");
-  // fprintf(stdout,"-TRAP ENABLES VALUES-\n");
+    compat::println(" HP_TIMER_ALRM_ENB	is set");
+  // compat::println("-TRAP ENABLES VALUES-");
   if (omrState.Enables & BREAKPOINT_TRAPENB)
-    fprintf(stdout, " BREAKPOINT_TRAPENB	is set\n");
+    compat::println(" BREAKPOINT_TRAPENB	is set");
   if (omrState.Enables & INTEGER_ERR_TRAPENB)
-    fprintf(stdout, " INTEGER_ERR_TRAPENB	is set\n");
+    compat::println(" INTEGER_ERR_TRAPENB	is set");
   if (omrState.Enables & INTEGER_OVF_TRAPENB)
-    fprintf(stdout, " INTEGER_OVF_TRAPENB	is set\n");
+    compat::println(" INTEGER_OVF_TRAPENB	is set");
   if (omrState.Enables & ILL_OPCODE_TRAPENB)
-    fprintf(stdout, " ILL_OPCODE_TRAPENB	is set\n");
+    compat::println(" ILL_OPCODE_TRAPENB	is set");
   if (omrState.Enables & LOADTRAP_TRAPENB)
-    fprintf(stdout, " LOADTRAP_TRAPENB	is set\n");
+    compat::println(" LOADTRAP_TRAPENB	is set");
   if (omrState.Enables & STORETRAP_TRAPENB)
-    fprintf(stdout, " STORETRAP_TRAPENB	is set\n");
+    compat::println(" STORETRAP_TRAPENB	is set");
   if (omrState.Enables & INTERNALCH_TRAPENB)
-    fprintf(stdout, " INTERNALCH_TRAPENB	is set\n");
+    compat::println(" INTERNALCH_TRAPENB	is set");
   if (omrState.Enables & EXTERNALCH_TRAPENB)
-    fprintf(stdout, " EXTERNALCH_TRAPENB	is set\n");
+    compat::println(" EXTERNALCH_TRAPENB	is set");
   if (omrState.Enables & TIMER_TRAPENB)
-    fprintf(stdout, " TIMER_TRAPENB	is set\n");
+    compat::println(" TIMER_TRAPENB	is set");
   if (omrState.Enables & TIMESLICE_TRAPENB)
-    fprintf(stdout, " TIMESLICE_TRAPENB	is set\n");
+    compat::println(" TIMESLICE_TRAPENB	is set");
   if (omrState.Enables & RUN_TRAPENB)
-    fprintf(stdout, " RUN_TRAPENB	is set\n");
+    compat::println(" RUN_TRAPENB	is set");
   if (omrState.Enables & SIGNAL_TRAPENB)
-    fprintf(stdout, " SIGNAL_TRAPENB	is set\n");
+    compat::println(" SIGNAL_TRAPENB	is set");
   if (omrState.Enables & PROCESS_TRAPENB)
-    fprintf(stdout, " PROCESS_TRAPENB	is set\n");
+    compat::println(" PROCESS_TRAPENB	is set");
   if (omrState.Enables & QUEUE_EMPTY_TRAPENB)
-    fprintf(stdout, " QUEUE_EMPTY_TRAPENB	is set\n");
+    compat::println(" QUEUE_EMPTY_TRAPENB	is set");
 
   return (0);
 }
@@ -417,9 +418,9 @@ int decodeNextInstr() {
     /* read the next byte of the current instruction */
     result = readBytes(cpuState.iptr + instrLength, 1, &cByte);
     if (result) {
-      fprintf(stdout, "%s\n", memoryError(result));
-      fprintf(stdout, "Error occurred when reading instruction at %8lx, offset %2x\n",
-              cpuState.iptr, instrLength);
+      compat::println("{}", memoryError(result));
+      compat::println("Error occurred when reading instruction at {:08x}, offset {:02x}",
+                      cpuState.iptr, instrLength);
       return (-1);
     }
 
@@ -487,10 +488,10 @@ int printNextInstr() {
   int i;
   char operandCh[100];
 
-  fprintf(stdout, "%08lx  ", cpuState.iptr);
+  compat::print("{:08x}  ", cpuState.iptr);
 
   for (i = 0; i < instrLength; i++) {
-    fprintf(stdout, "%2x ", instrBytes[i]);
+    compat::print("{:02x} ", instrBytes[i]);
   }
 
   /*
@@ -513,7 +514,7 @@ int printNextInstr() {
     sprintf(operandCh, " %-8lx", operand & 0xFFFFFFFF);
   }
 
-  fprintf(stdout, " %s%s\n", instrEntry[instrCode].mnemonic, operandCh);
+  compat::println(" {}{}", instrEntry[instrCode].mnemonic, operandCh);
 
   return (0);
 }
@@ -753,8 +754,8 @@ int initTimer() {
   omrState.Enables = 0xffffc000;         // the initial state, see omr.h
                                          // bit 14 and 15 are reserved but set to 1
   //'ticking' code is into execInstr() subroutine
-  fprintf(stdout, "CPU_CLOCK=%d Hz\n HPTimerTick=%ld cpucycles\n LPTimerTick=%ld cpucycles\n",
-          CPU_CLOCK, hp_timertick, lp_timertick);
+  compat::println("CPU_CLOCK={:d} Hz\n HPTimerTick={:d} cpucycles\n LPTimerTick={:d} cpucycles",
+                  CPU_CLOCK, hp_timertick, lp_timertick);
 
   return (0);
 }

@@ -2,6 +2,7 @@
 
 #include "omr.h"
 
+#include "../../common/compat.h"
 #include "../../common/defines.h"
 // #include "../../soc/sti5518/STi5518_SearchDB.h"
 #include "../memory/memory.h"
@@ -46,7 +47,7 @@ int ajw_(long value) {
 
   result = allocWptr(value);
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
   return 0;
@@ -97,12 +98,11 @@ int bsub_(long /*unused*/) {
 }
 
 int call_(long offset) {
-  int result;
   long addr = cpuState.iptr;
 
-  result = wptrPushState();
-  if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+  int result = wptrPushState();
+  if (result != 0) {
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -111,7 +111,8 @@ int call_(long offset) {
   cpuState.creg = UNDEFINED_WORD_OLD;
   cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
 
-  fprintf(stdout, "Call to %8lx ,return to %8lx\n", cpuState.iptr, addr);
+  compat::println("Call to {:08x} ,return to {:08x}", cpuState.iptr, addr);
+
   return 0;
 }
 
@@ -145,16 +146,16 @@ int devlb_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(stdout, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-          addr - static_cast<long>(instrLength), oldAreg, newAreg);
-  fprintf(stdout, "Value of A register is questionable\n");
+  compat::println("NOTE: At 0x{:08x} Read of device at address {:08x}, value=0x{:08x}",
+                  addr - static_cast<long>(instrLength), oldAreg, newAreg);
+  compat::println("Value of A register is questionable");
 
   // SearchForReg(stdout, oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing devlb instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing devlb instruction");
     return -1;
   }
 
@@ -182,17 +183,17 @@ int devls_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(stdout, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-          addr - static_cast<long>(instrLength), oldAreg, newAreg);
-  fprintf(stdout, "Value of A register is questionable\n");
+  compat::println("NOTE: At 0x{:08x} Read of device at address {:08x}, value=0x{:08x}",
+                  addr - static_cast<long>(instrLength), oldAreg, newAreg);
+  compat::println("Value of A register is questionable");
 
   // if (showRegs())
   //   SearchForReg(stdout, oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing devls instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing devls instruction");
     return -1;
   }
 
@@ -219,17 +220,17 @@ int devlw_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(stdout, "NOTE: At 0x%08lx Read of device at address %08lx, value=0x%08lx\n",
-          addr - static_cast<long>(instrLength), oldAreg, newAreg);
-  fprintf(stdout, "Value of A register is questionable\n");
+  compat::println("NOTE: At 0x{:08x} Read of device at address {:08x}, value=0x{:08x}",
+                  addr - static_cast<long>(instrLength), oldAreg, newAreg);
+  compat::println("Value of A register is questionable");
 
   //   if (showRegs())
   //     SearchForReg(stdout, oldAreg);
   // }
 
   if (result && result != READ_UNUSED_MEM) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing devlw instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing devlw instruction");
     return -1;
   }
 
@@ -256,15 +257,16 @@ int devsb_(long /*value*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(stdout, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-          addr - static_cast<long>(instrLength), value1, static_cast<unsigned char>(value2) & 0xFF);
+  compat::println("NOTE: At 0x{:08x} Write to device at address {:08x}, value=0x{:08x}",
+                  addr - static_cast<long>(instrLength), value1,
+                  static_cast<unsigned char>(value2) & 0xFF);
   //   if (showRegs())
   //     SearchForReg(stdout, value1);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
-    fprintf(stdout, "  Error occurred when executing devsb instruction\n");
+    compat::println("ERROR: {}", st20Error(result));
+    compat::println("  Error occurred when executing devsb instruction");
     return -1;
   }
 
@@ -290,9 +292,9 @@ int devss_(long /*value*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(stdout, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-          addr - static_cast<long>(instrLength), value1,
-          static_cast<unsigned int>(value2) & 0xFFFF);
+  compat::println("NOTE: At 0x{:08x} Write to device at address {:08x}, value=0x{:08x}",
+                  addr - static_cast<long>(instrLength), value1,
+                  static_cast<unsigned int>(value2) & 0xFFFF);
 
   //   // Search description in register database
   //   if (showRegs())
@@ -300,7 +302,7 @@ int devss_(long /*value*/) {
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -327,9 +329,9 @@ int devsw_(long /*value*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt() || showRegs()) {
-  fprintf(stdout, "NOTE: At 0x%08lx Write to device at address %08lx, value=0x%08x\n",
-          addr - static_cast<long>(instrLength), value1,
-          static_cast<unsigned int>(value2) & 0xFFFF);
+  compat::println("NOTE: At 0x{:08x} Write to device at address {:08x}, value=0x{:08x}",
+                  addr - static_cast<long>(instrLength), value1,
+                  static_cast<unsigned int>(value2) & 0xFFFF);
 
   //   // Search description in register database
   //   if (showRegs())
@@ -337,7 +339,7 @@ int devsw_(long /*value*/) {
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -408,13 +410,13 @@ int gajw_(long /*unused*/) {
 
   oldAreg = pop();
   if (oldAreg & 0x03) {
-    fprintf(stdout, "WARNING: Value in A register does not point to a word boundary\n");
+    compat::println("WARNING: Value in A register does not point to a word boundary");
   }
 
   result = addrWptrWord(0, &newAreg);
   push(newAreg);
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
   wptrEndAddr = oldAreg + 3;
@@ -431,7 +433,7 @@ int gajw_(long /*unused*/) {
   /*
     result = storeWptrWord (0, oldAreg);
     if (result) {
-     fprintf (stdout, "ERROR: %s\n", st20Error(result));
+     compat::println()"ERROR: {}", st20Error(result));
      return -1;
     }
   */
@@ -471,8 +473,8 @@ int gtu_(long /*unused*/) {
 }
 
 int invalidOp_(long /*unused*/) {
-  fprintf(stdout, "This instruction (%s) has not been implemented yet\n",
-          instrEntry[instrCode].mnemonic);
+  compat::println("This instruction ({}) has not been implemented yet",
+                  instrEntry[instrCode].mnemonic);
   return -1;
 }
 
@@ -486,7 +488,7 @@ int j_(long offset) {
   pop();
 
   if (offset == 0) {
-    fprintf(stdout, "Breakpoint signalled by jump instruction\n");
+    compat::println("Breakpoint signalled by jump instruction");
   } else {
     cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
   }
@@ -534,12 +536,12 @@ int lb_(long /*unused*/) {
   // TODO: rework with commands.cpp when possible
   // TODO: CPU module should not have a knowledge about CLI
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing lb instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing lb instruction");
     return -1;
   }
 
@@ -562,12 +564,12 @@ int lbx_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing lbx instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing lbx instruction");
     return -1;
   }
 
@@ -588,7 +590,7 @@ int ldc_(long operand) {
   should be used instead.
 */
 int lddevid_(long /*unused*/) {
-  /*  fprintf (stdout, "Product ID is unknown.  Setting A register to %x\n",
+  /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
           st20ProductId); */
 
   push(st20ProductId);
@@ -660,7 +662,7 @@ int ldl_(long index) {
   push(value);
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -675,7 +677,7 @@ int ldlp_(long index) {
   push(value);
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -692,7 +694,7 @@ int ldnl_(long offset) {
   unsigned long cWord = 0;
 
   if (oldAreg & 0x03) {
-    fprintf(stdout, "WARNING: Attempt to access a word that is not on a word boundary\n");
+    compat::println("WARNING: Attempt to access a word that is not on a word boundary");
   }
 
   uint32_t address = oldAreg + static_cast<uint32_t>(offset * 4);
@@ -702,13 +704,13 @@ int ldnl_(long offset) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Read of memory address %08x, value=0x%08lx\n", address, cWord);
+  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", address, cWord);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing ldnl %08x  iptr=%08lx\n", address,
-            static_cast<long>(get_iptr()));
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing ldnl {:08x}  iptr={:08x}", address,
+                    static_cast<long>(get_iptr()));
     return -1;
   }
 
@@ -727,7 +729,7 @@ int ldpi_(long /*unused*/) {
 }
 
 int ldpri_(long /*unused*/) {
-  fprintf(stdout, "Priority is unknown.  Setting A register to %x\n", LOW_PRIORITY);
+  compat::println("Priority is unknown.  Setting A register to {:0x}", LOW_PRIORITY);
 
   push(static_cast<long>(LOW_PRIORITY));
 
@@ -735,7 +737,7 @@ int ldpri_(long /*unused*/) {
 }
 
 int ldprodid_(long /*unused*/) {
-  /*  fprintf (stdout, "Product ID is unknown.  Setting A register to %x\n",
+  /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
           st20ProductId); */
 
   push(st20ProductId);
@@ -756,7 +758,7 @@ Error signals: none
 
 // int ldtimer_ (long /*unused*/) {
 //   push(timerGuess);
-//   fprintf (stdout, "Read of timer.  Assuming timer value is %x\n", timerGuess);
+//   compat::println("Read of timer.  Assuming timer value is {:0x}", timerGuess);
 //
 //   return 0;
 // }
@@ -771,8 +773,8 @@ int ldtraph_(long /*unused*/) {
   unsigned long oldBreg = static_cast<unsigned long>(pop());
   unsigned long oldCreg = static_cast<unsigned long>(pop());
 
-  fprintf(stdout, "ldtraph: Group, &TrapHandler, priority: %lx, %lx,  %lx\n", oldAreg, oldBreg,
-          oldCreg);
+  compat::println("ldtraph: Group, &TrapHandler, priority: {:0x}, {:0x},  {:0x}", oldAreg, oldBreg,
+                  oldCreg);
 
   trapbase = trapbase + 0x40 + 0x80 * oldCreg + 0x20 * oldAreg;
 
@@ -871,12 +873,12 @@ int ls_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing ls instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing ls instruction");
     return -1;
   }
 
@@ -973,12 +975,12 @@ int move_(long /*unused*/) {
 
   int result = storeByteRange(oldCreg, oldBreg, static_cast<int>(oldAreg));
 
-  fprintf(stdout, "NOTE: Copy of %lx bytes from address %08lx to address %08lx\n", oldAreg, oldCreg,
-          oldBreg);
+  compat::println("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg, oldCreg,
+                  oldBreg);
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", memoryError(result));
-    fprintf(stdout, "  Error occurred when executing move instruction\n");
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing move instruction");
     return -1;
   }
 
@@ -1025,7 +1027,7 @@ int resetch_(long /*unused*/) {
   long newAreg = 0;
 
   if (oldAreg & 0x03) {
-    fprintf(stdout, "WARNING: Attempt to access a word that is not on a word boundary\n");
+    compat::println("WARNING: Attempt to access a word that is not on a word boundary");
   }
 
   int result = readBytes(oldAreg, 4, reinterpret_cast<unsigned long *>(&newAreg));
@@ -1033,17 +1035,17 @@ int resetch_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Read of memory address %08lx, value=0x%08lx\n", oldAreg, newAreg);
+  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   result = storeBytes(oldAreg, 4, static_cast<long>(NOT_PROCESS));
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Write memory address %08lx, value=0x%08x\n", oldAreg, MINIMUM_INTEGER);
+  compat::println("NOTE: Write memory address {:08x}, value=0x{:08x}", oldAreg, MINIMUM_INTEGER);
   // }
 
-  fprintf(stdout, "Channel at address %08lx was reset\n", oldAreg);
+  compat::println("Channel at address {:08x} was reset", oldAreg);
 
   return result;
 }
@@ -1053,7 +1055,7 @@ int ret_(long /*unused*/) {
 
   result = wptrPopState();
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -1081,7 +1083,7 @@ int runp_(long /*unused*/) {
   pop();
   pop();
 
-  fprintf(stdout, "A new process was started.  Process descriptor =0x%08lx\n", oldAreg);
+  compat::println("A new process was started.  Process descriptor =0x{:08x}", oldAreg);
 
   return (result);
 }
@@ -1094,11 +1096,11 @@ int sb_(long /*value*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFF);
+  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFF);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -1135,7 +1137,7 @@ int signal_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "A signal was received for address 0x%08lx\n", oldAreg);
+  compat::println("A signal was received for address 0x{:08x}", oldAreg);
   // }
 
   return (result);
@@ -1149,11 +1151,11 @@ int ss_(long /*value*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Write to memory address %08lx, value=0x%08lx\n", value1, value2 & 0xFFFF);
+  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFFFF);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -1180,8 +1182,8 @@ int startp_(long /*unused*/) {
   oldBreg = pop();
   pop();
 
-  fprintf(stdout, "A new process was started.  Workspace=0x%08lx, Iptr=0x%08lx\n", oldAreg,
-          cpuState.iptr + oldBreg);
+  compat::println("A new process was started.  Workspace=0x{:08x}, Iptr=0x{:08x}", oldAreg,
+                  cpuState.iptr + oldBreg);
 
   return 0;
 }
@@ -1205,8 +1207,8 @@ int stclock_(long /*unused*/) {
   oldAreg = pop();
   oldBreg = pop();
 
-  fprintf(stdout, "0x%08lx stored in %s clock\n", oldBreg,
-          (oldAreg & 1) ? "low priority" : "high priority");
+  compat::println("0x{:08x} stored in {} clock", oldBreg,
+                  (oldAreg & 1) ? "low priority" : "high priority");
 
   if (oldAreg & 1)
     omrState.ClockRegLP = oldBreg;
@@ -1228,7 +1230,7 @@ int stl_(long index) {
   result = storeWptrWord(index, pop());
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -1248,12 +1250,12 @@ int stnl_(long offset) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "NOTE: Write to memory address %08lx, value=0x%08lx\n", oldAreg + offset * 4,
-          oldBreg);
+  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", oldAreg + offset * 4,
+                  oldBreg);
   // }
 
   if (result) {
-    fprintf(stdout, "ERROR: %s\n", st20Error(result));
+    compat::println("ERROR: {}", st20Error(result));
     return -1;
   }
 
@@ -1265,7 +1267,7 @@ int stopp_(long /*unused*/) {
   pop();
   pop();
 
-  fprintf(stdout, "This process has been terminated\n");
+  compat::println("This process has been terminated");
 
   return 0;
 }
@@ -1287,7 +1289,7 @@ Error signals: none
 */
 
 // int sttimer_ (long /*unused*/) {
-//   fprintf (stdout, "Low and high priority clock registers were set to 0x%08x\n",
+//   compat::println("Low and high priority clock registers were set to 0x{:08x}",
 //						pop());
 //
 //   return 0;
@@ -1321,7 +1323,7 @@ int wait_(long /*unused*/) {
 
   // TODO: rework with commands.cpp when possible
   // if (needPrompt()) {
-  fprintf(stdout, "Wait on semaphore at 0x%08lx\n", oldAreg);
+  compat::println("Wait on semaphore at 0x{:08x}", oldAreg);
   // }
 
   return 0;
@@ -1397,7 +1399,7 @@ int _ (long value) {
   int result;
 
   if (result) {
-   fprintf (stdout, "ERROR: %s\n", st20Error(result));
+   compat::println("ERROR: {}", st20Error(result));
    return -1;
   }
 
@@ -1426,10 +1428,10 @@ int ldtimer_(long /*unused*/) {
 
   if (cpuState.nWptr & 0x01) { // HighPriority
     push(omrState.ClockRegHP);
-    fprintf(stdout, "Read of HIGH_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegHP);
+    compat::println("Read of HIGH_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegHP);
   } else { // LowPriority
     push(omrState.ClockRegLP);
-    fprintf(stdout, "Read of LOW_PRIORITY timer. Value is 0x%08lx\n", omrState.ClockRegLP);
+    compat::println("Read of LOW_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegLP);
   }
   //'ticking' code is into execInstr() subroutine
   return 0;
@@ -1454,8 +1456,7 @@ Error signals: none
 int sttimer_(long /*unused*/) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
-  fprintf(stdout, "LOW and HIGH priority clock registers were set to 0x%08lx\n",
-          omrState.ClockRegHP);
+  compat::println("LOW and HIGH priority clock registers were set to 0x{:08x}", omrState.ClockRegHP);
 
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
   omrState.ClockEnables |= LPTIMER_MASK; // set bit1
@@ -1536,7 +1537,7 @@ int ldclock_(long /*unused*/) {
 
   oldAreg = pop();
 
-  fprintf(stdout, "Areg loaded with %s clock\n", (oldAreg & 1) ? "LOW_PRIORITY" : "HIGH_PRIORITY");
+  compat::println("Areg loaded with {} clock", (oldAreg & 1) ? "LOW_PRIORITY" : "HIGH_PRIORITY");
 
   if (oldAreg & 1)
     push(omrState.ClockRegLP);
