@@ -7,17 +7,6 @@
 
 #include <cstdint>
 
-#define ST20_ERROR_START -2000
-#define ST20_ERROR_END -2999
-#define MEMORY_ERROR_START -1000
-#define MEMORY_ERROR_END -1999
-
-// TODO: replace macros with this later
-// constexpr int ST20_ERROR_START{-2000};
-// constexpr int ST20_ERROR_END{-2999};
-// constexpr int MEMORY_ERROR_START{-1000};
-// constexpr int MEMORY_ERROR_END{-1999};
-
 constexpr const char *INI_FILE{"st20emu.ini"};
 constexpr const char COMMENT_CHAR{'#'};
 
