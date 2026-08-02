@@ -2,7 +2,6 @@
 #define ST20_H
 
 #include "../../common/defines.h"
-#include <cstdio>
 
 /* this is the starting address for CPU execution */
 #define START_ADDR 0x7FFFFFFE
