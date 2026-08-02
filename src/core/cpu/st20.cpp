@@ -95,7 +95,7 @@ int st20Init(PARMS *userParms) {
 
   compat::print("START_ADDR=0x{:08x}\nMEM_START_VAL=0x{:08x}\nST20_PRODUCT_ID=0x{:08x}\n\
 TIMER_GUESS=0x{:08x}\nWPTR_END_ADDR=0x{:08x}",
-          startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
+                startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
 
   initCPUState();
   initWatch();
@@ -716,33 +716,24 @@ int setIptr(long value) {
 
 const char *st20Error(int error) {
   switch (error) {
-
   case BAD_WPTR:
-    return ("Invalid Wptr word referenced");
-    break;
+    return "Invalid Wptr word referenced";
 
   case WPTR_UNUSED:
-    return ("An uninitialized Wptr word was accessed");
-    break;
+    return "An uninitialized Wptr word was accessed";
 
   case WPTR_UNDERFLOW:
-    return ("Too many Wptr words deallocated");
-    break;
+    return "Too many Wptr words deallocated";
 
   case WPTR_OVERFLOW:
-    return ("Ran out of room for more Wptr words");
-    break;
+    return "Ran out of room for more Wptr words";
 
   case BAD_WATCH_CONDITION:
-    return ("Parameters to the watch condition were invalid");
-    break;
+    return "Parameters to the watch condition were invalid";
 
   default:
-    return ("Unknown st20 error");
-    break;
+    return "Unknown st20 error";
   }
-
-  return (NULL);
 }
 
 int initTimer() {
