@@ -1269,7 +1269,8 @@ int returnFromTrap() {
                                     : frame.caller.priority;
   if (priority > LOW_PRIORITY || (saved[2] & 3U)) return INVALID_TRAP_RETURN;
   if (priority != frame.caller.priority) return INVALID_TRAP_RETURN;
-  omrState.Enables = (omrState.Enables & ~0x00ff3fffU) | (saved[0] & 0x00ff3fffU);
+  uint32_t enablesMask = portableInstructionAbiEnabled() ? 0x00ff3fffU : 0xffff3fffU;
+  omrState.Enables = (omrState.Enables & ~enablesMask) | (saved[0] & enablesMask);
   omrState.TrapEnables[frame.priority] = saved[0] & 0x3fffU;
   selectPriority(priority);
   if (priority != frame.priority) cpuState = frame.caller;
@@ -1703,7 +1704,8 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
   auto selectedWord = [selection](std::size_t index) {
     return (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
   };
-  constexpr uint32_t enablesMask = 0x00ff3fffU;
+  const uint32_t enablesMask = portable ? 0x00ff3fffU : 0xffff3fffU;
+  const uint32_t globalMask = enablesMask & 0xffff0000U;
   std::array<uint32_t, 12> words{};
   if (load) {
     for (std::size_t index = 0; index < words.size(); ++index) {
@@ -1766,7 +1768,7 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
       }
     }
     if (selection & 1U) {
-      omrState.Enables = (omrState.Enables & ~0x00ff0000U) | (words[0] & 0x00ff0000U);
+      omrState.Enables = (omrState.Enables & ~globalMask) | (words[0] & globalMask);
       omrState.TrapEnables[priority] = words[0] & 0x3fffU;
     }
     if (selection & 14U) {
@@ -1783,12 +1785,15 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
   if (!valid) {
     source = {undefinedWord, undefinedWord,
               undefinedWord, undefinedWord, 0,
-              static_cast<unsigned char>(priority), NO_PROCESS, false, 0, 0, 0, 0};
+              static_cast<unsigned char>(priority), NO_PROCESS, false, 0, 0, 0,
+              portable ? 0U : source.status & ~STATUS_VALID};
   }
   if (selection & 1U) {
-    int result = readProcessWord(buffer, 0, words[0]);
-    if (result && (result != READ_UNUSED_MEM || isMemoryDeviceAddress(buffer))) return result;
-    words[0] = (words[0] & ~enablesMask) | (static_cast<uint32_t>(omrState.Enables) & 0x00ff0000U) |
+    if (portable) {
+      int result = readProcessWord(buffer, 0, words[0]);
+      if (result && (result != READ_UNUSED_MEM || isMemoryDeviceAddress(buffer))) return result;
+    }
+    words[0] = (words[0] & ~enablesMask) | (omrState.Enables & globalMask) |
                trapEnableMask(static_cast<unsigned char>(priority));
   }
   words[1] = valid ? source.status | STATUS_VALID : source.status & ~STATUS_VALID;
@@ -1833,7 +1838,8 @@ int restartProcess(uint32_t record) {
       words[1], portable && (words[1] & STATUS_PORTABLE_INTDIS) != 0,
       0, portable ? words[7] : 0U, portable ? words[11] : 0U};
   if (!validPendingOperation(updated)) return INVALID_PORTABLE_STATE;
-  omrState.Enables = (omrState.Enables & ~0x00ff3fffU) | (words[0] & 0x00ff3fffU);
+  uint32_t enablesMask = portable ? 0x00ff3fffU : 0xffff3fffU;
+  omrState.Enables = (omrState.Enables & ~enablesMask) | (words[0] & enablesMask);
   omrState.TrapEnables[cpuState.priority] = words[0] & 0x3fffU;
   trapFrames.clear();
   cpuState = updated;

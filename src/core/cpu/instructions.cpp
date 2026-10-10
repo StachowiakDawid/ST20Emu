@@ -152,19 +152,19 @@ int savel_(uint32_t /*unused*/) {
 }
 
 int sthb_(uint32_t /*unused*/) {
-  return setReadyQueue(HIGH_PRIORITY, omrState.ProcQueueFPtr[HIGH_PRIORITY], cpuState.areg);
+  return setReadyQueue(HIGH_PRIORITY, omrState.ProcQueueFPtr[HIGH_PRIORITY], pop());
 }
 
 int sthf_(uint32_t /*unused*/) {
-  return setReadyQueue(HIGH_PRIORITY, cpuState.areg, omrState.ProcQueueBPtr[HIGH_PRIORITY]);
+  return setReadyQueue(HIGH_PRIORITY, pop(), omrState.ProcQueueBPtr[HIGH_PRIORITY]);
 }
 
 int stlb_(uint32_t /*unused*/) {
-  return setReadyQueue(LOW_PRIORITY, omrState.ProcQueueFPtr[LOW_PRIORITY], cpuState.areg);
+  return setReadyQueue(LOW_PRIORITY, omrState.ProcQueueFPtr[LOW_PRIORITY], pop());
 }
 
 int stlf_(uint32_t /*unused*/) {
-  return setReadyQueue(LOW_PRIORITY, cpuState.areg, omrState.ProcQueueBPtr[LOW_PRIORITY]);
+  return setReadyQueue(LOW_PRIORITY, pop(), omrState.ProcQueueBPtr[LOW_PRIORITY]);
 }
 
 int swapqueue_(uint32_t /*unused*/) {
@@ -223,8 +223,9 @@ int unpacksn_(uint32_t /*unused*/) {
   uint32_t exponent = (packed >> 23) & 0xffU;
   uint32_t type = exponent == 0xffU ? (fraction == 0 ? 2U : 3U)
                                  : (exponent == 0 && fraction == 0 ? 0U : 1U);
-  cpuState.areg = fraction;
-  cpuState.breg = exponent;
+  cpuState.areg = exponent == 0xffU ? undefinedWord
+      : (fraction << 8) | (exponent != 0 ? WordSignBit : 0U);
+  cpuState.breg = exponent == 0 && fraction != 0 ? 1U : exponent;
   cpuState.creg = static_cast<uint32_t>((oldBreg << 2) + type);
   return 0;
 }
@@ -350,7 +351,10 @@ int csu_(uint32_t /*unused*/) {
 
 int csngl_(uint32_t /*unused*/) {
   uint32_t sign = static_cast<int32_t>(cpuState.areg) < 0 ? WordMask : 0;
-  return cpuState.breg != sign ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+  uint32_t high = cpuState.breg;
+  cpuState.breg = cpuState.creg;
+  cpuState.creg = undefinedWord;
+  return high != sign ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
 }
 
 int cflerr_(uint32_t /*unused*/) {
@@ -923,15 +927,12 @@ int lend_(uint32_t /*unused*/) {
   uint32_t count = 0;
   uint32_t index = 0;
   int result = readBytes(countAddress, BytesPerWord, &count);
-  if (!result && static_cast<int32_t>(count) > 1) {
-    result = readBytes(indexAddress, BytesPerWord, &index);
-    if (!result) {
-      result = storeBytes(countAddress, BytesPerWord, count - 1U);
-      if (!result)
-        result = storeBytes(indexAddress, BytesPerWord, index + 1U);
-      if (!result)
-        cpuState.iptr = cpuState.iptr - offset;
-    }
+  bool repeats = static_cast<int32_t>(count) > 1;
+  if (!result && repeats) result = readBytes(indexAddress, BytesPerWord, &index);
+  if (!result) result = storeBytes(countAddress, BytesPerWord, count - 1U);
+  if (!result && repeats) {
+    result = storeBytes(indexAddress, BytesPerWord, index + 1U);
+    if (!result) cpuState.iptr -= offset;
   }
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
@@ -1456,7 +1457,7 @@ int seterr_(uint32_t /*unused*/) {
 
 int testerr_(uint32_t /*unused*/) {
   unsigned char &error = cpuState.priority == HIGH_PRIORITY ? omrState.HP_ErrorFlag : omrState.LP_ErrorFlag;
-  cpuState.areg = error == 0 ? 1U : 0U;
+  push(error == 0 ? 1U : 0U);
   error = 0;
   return 0;
 }
@@ -1677,7 +1678,7 @@ int wcnt_(uint32_t /*unused*/) {
 
   value1 = pop();
   push(value1 & ByteSelectMask);
-  push((value1 & WordSelectMask) / BytesPerWord);
+  push(static_cast<int32_t>(value1 & WordSelectMask) / BytesPerWord);
 
   return 0;
 }
@@ -1985,14 +1986,14 @@ This allows parts of the built-in scheduler, such as response to external events
 timeslicing etc., to be disabled by software. The original value of the global interrupt
 enable register is returned in Areg.
 Definition:
-  GlobalInterruptEnables' <- GlobalInterruptEnables ^ ~Areg7..0
-  Areg'7..0 <- GlobalInterruptEnables
-  Areg'31..8 <- 0
+  GlobalInterruptEnables' <- GlobalInterruptEnables ^ ~Areg15..0
+  Areg'15..0 <- GlobalInterruptEnables
+  Areg'31..16 <- 0
 Error signals: none
 */
 int gintdis_(uint32_t /*unused*/) {
-  uint32_t mask = (pop() & 0xffU) << 16;
-  uint32_t oldEnables = (omrState.Enables >> 16) & 0xffU;
+  uint32_t mask = (pop() & 0xffffU) << 16;
+  uint32_t oldEnables = omrState.Enables >> 16;
   omrState.Enables &= ~static_cast<uint32_t>(mask);
   push(oldEnables);
 
@@ -2004,14 +2005,14 @@ GINTENB (global interrupt enable)
 Code: 2C FE
 Description: Enable the global interrupt events specified in the bit mask in Areg.
 Definition:
-  GlobalInterruptEnables' <- GlobalInterruptEnables ! Areg7..0
-  Areg'7..0 <- GlobalInterruptEnables
-  Areg'8..31 <- 0
+  GlobalInterruptEnables' <- GlobalInterruptEnables ! Areg15..0
+  Areg'15..0 <- GlobalInterruptEnables
+  Areg'16..31 <- 0
 Error signals: none
 */
 int gintenb_(uint32_t /*unused*/) {
-  uint32_t mask = (pop() & 0xffU) << 16;
-  uint32_t oldEnables = (omrState.Enables >> 16) & 0xffU;
+  uint32_t mask = (pop() & 0xffffU) << 16;
+  uint32_t oldEnables = omrState.Enables >> 16;
   omrState.Enables |= static_cast<uint32_t>(mask);
   push(oldEnables);
 

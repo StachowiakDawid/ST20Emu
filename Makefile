@@ -40,6 +40,9 @@ all: $(TARGET)
 test: $(CPU_TEST)
 	./$(CPU_TEST)
 
+test-st20sim: $(CPU_TEST)
+	node tests/st20sim_differential.js $(ST20SIM_ARGS)
+
 $(CPU_TEST): $(CPU_TEST_SRCS) $(CPU_TEST_HEADERS) Makefile
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(CPU_TEST_SRCS) -o $@ $(LDFLAGS)
@@ -67,4 +70,4 @@ clean:
 	@echo "Cleaning up build artifacts..."
 	rm -rf $(OBJ_DIR) $(TARGET)
 
-.PHONY: all clean test
+.PHONY: all clean test test-st20sim

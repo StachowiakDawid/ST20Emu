@@ -1,6 +1,6 @@
 # ST20 instruction implementation status
 
-Updated: 2026-10-07.
+Updated: 2026-10-10.
 
 Instruction list: [ST20 C2/C4 reference manual JSON](../manuals/ST20/ST20_C2_C4-Core-Instruction-Set-Reference-Manual--72-TRN-273-01.json).
 Implementation: [instruction handlers](../src/core/cpu/instructions.cpp), [dispatch table](../src/core/cpu/instrentry.cpp), and [CPU helpers and decoder](../src/core/cpu/st20.cpp).
@@ -56,189 +56,254 @@ Limitations in the table describe native mode unless explicitly labeled portable
 Portable-mode continuations and event models are specified above; a Partial label
 does not mean those portable implementations are absent.
 
-| Instruction | Status | Remaining work / notes |
-| --- | --- | --- |
-| `adc` | Implemented | Checked signed 32-bit immediate addition with overflow trap/error fallback. |
-| `add` | Implemented | Checked signed 32-bit addition with overflow trap/error fallback. |
-| `ajw` | Implemented | Adjusts the real 32-bit workspace pointer with wrapping word-offset arithmetic. |
-| `alt` | Implemented | Begins alternative enabling without changing the integer stack. |
-| `altend` | Implemented | Branches by the selected workspace offset from the following instruction. |
-| `altwt` | Implemented | Initializes selection state and blocks only if no guard is ready. |
-| `and` | Implemented | - |
-| `bcnt` | Implemented | - |
-| `bitcnt` | Implemented | Counts all 32 bits and wraps the sum. |
-| `bitrevnbits` | Implemented | Reverses the selected low 0-32 bits; clears the other result bits. |
-| `bitrevword` | Implemented | Reverses all 32 bits, preserving B and C. |
-| `bsub` | Implemented | - |
-| `call` | Implemented | Saves the call frame in guest memory and adjusts Wptr without allocation bounds. |
-| `causeerror` | Implemented | Delivers enabled user-generated causes and records the causeerror Status flag. |
-| `cb` | Implemented | Checks signed eight-bit range without changing the stack; IntegerError trap/error fallback. |
-| `cbu` | Implemented | Checks unsigned eight-bit range without changing the stack; IntegerError trap/error fallback. |
-| `ccnt1` | Implemented | Checks unsigned B in 1..A inclusive, pops the bound, and signals IntegerError on failure. |
-| `cflerr` | Implemented | Detects IEEE single-precision infinity/NaN bit patterns, preserves the stack, and signals IntegerError. |
-| `cir` | Implemented | Checks signed C in A..B inclusive, retaining C in A; IntegerError trap/error fallback. |
-| `ciru` | Implemented | Checks unsigned C in A..B inclusive, retaining C in A; IntegerError trap/error fallback. |
-| `cj` | Implemented | - |
-| `clockdis` | Implemented | Clock-enable register update. |
-| `clockenb` | Implemented | Clock-enable register update. |
-| `clrhalterr` | Implemented | Clears the halt-on-error mode flag without changing stack or error flags. |
-| `crcbyte` | Implemented | Updates the checksum from A's most significant byte using the polynomial in C. |
-| `crcword` | Implemented | Updates the checksum from all 32 bits of A using the polynomial in C. |
-| `cs` | Implemented | Checks signed sixteen-bit range without changing the stack; IntegerError trap/error fallback. |
-| `csngl` | Implemented | Checks that B is A's signed extension word without changing the stack; IntegerError trap/error fallback. |
-| `csu` | Implemented | Checks unsigned sixteen-bit range without changing the stack; IntegerError trap/error fallback. |
-| `csub0` | Implemented | Checks unsigned B in 0..(A-1), pops the bound, and signals IntegerError on failure. |
-| `cword` | Implemented | Checks signed B in -A..(A-1) using A's power-of-two sign-bit magnitude, including 0x80000000; pops the bound. |
-| `devlb` | Implemented | Ordered unsigned byte load from RAM or a registered MMIO device; device side effects and errors supported. |
-| `devls` | Implemented | Ordered unsigned sixteen-bit load from RAM or a registered MMIO device; one width-preserving device transaction. |
-| `devlw` | Implemented | Ordered word load from RAM or a registered MMIO device; one width-preserving device transaction. |
-| `devmove` | Partial | Ordered RAM/external-MMIO copying in four-byte chunks with exact tails; on-chip peripherals excluded. Interruptible restart and target-specific bus cycles remain unsupported. |
-| `devsb` | Implemented | Ordered byte store to RAM or a registered MMIO device; masks B to eight bits and consumes two stack words. |
-| `devss` | Implemented | Ordered sixteen-bit store to RAM or a registered MMIO device; masks B to sixteen bits and consumes two stack words. |
-| `devsw` | Implemented | Ordered word store to RAM or a registered MMIO device; one width-preserving device transaction. |
-| `diff` | Implemented | Unchecked 32-bit subtraction. |
-| `disc` | Partial | Disables software-channel registration and selects the first ready guard; external guards unsupported. |
-| `diss` | Implemented | First enabled skip guard selects, following the description rather than the reversed printed branch. |
-| `dist` | Partial | Selects a ready timer and removes outstanding timer-list membership; microcode restart unsupported. |
-| `div` | Implemented | Signed division, defined stack effects, overflow trap/error flag, and halt fallback. |
-| `dup` | Implemented | - |
-| `enbc` | Partial | Enables software-channel guards and detects waiting senders; external guards unsupported. |
-| `enbs` | Implemented | Marks an enabled skip guard ready without changing registers. |
-| `enbt` | Implemented | Records the earliest enabled timer guard with wrapping time comparisons. |
-| `endp` | Implemented | Retires non-final parallel branches; the final branch enters the successor directly at the current priority. |
-| `eqc` | Implemented | - |
-| `fmul` | Implemented | Signed Q1.31 fractional multiplication with nearest-even rounding; -1 times -1 signals IntegerOverflow with an undefined-word result. |
-| `fptesterr` | Implemented | Pushes true for the modeled CPU without an FPU; leaves integer error flags unchanged. |
-| `gajw` | Implemented | Exchanges A and Wptr without overwriting workspace memory. |
-| `gcall` | Implemented | - |
-| `gintdis` | Implemented | Updates global-enable bits 16-23 and returns the previous field. |
-| `gintenb` | Implemented | Updates global-enable bits 16-23 and returns the previous field. |
-| `gt` | Implemented | Signed 32-bit comparison. |
-| `gtu` | Implemented | Unsigned comparison. |
-| `in` | Partial | Internal rendezvous, selected ALT input, and trap delivery implemented; external channels and microcode restart unsupported. |
-| `insertqueue` | Implemented | Prepends the selected priority's list, joins its tail to the old front, and preserves the old back; empty input is a no-op. |
-| `intdis` | Implemented | Suppresses high-priority process preemption and pending high-priority timer kernels until reenabling or descheduling; preserves the stack and global mask. |
-| `intenb` | Implemented | Clears the low-priority interruption-disable state; pending high-priority work can run at the next scheduler boundary. |
-| `iret` | Partial | Restores saved high-priority state or low shadow/idle state and notifies a registered controller observer; interrupted microcode restart and full external IRQ integration remain unsupported. |
-| `j` | Implemented | Relative jump and periodic timeslicing point; enabled `j 0` delivers a breakpoint trap. |
-| `ladd` | Implemented | Checked signed carry-in addition with overflow delivery. |
-| `lb` | Implemented | - |
-| `lbx` | Implemented | - |
-| `ldc` | Implemented | - |
-| `ldclock` | Implemented | Reads the explicitly selected clock register. |
-| `lddevid` | Implemented | Product-ID alias; decoder remap reaches its handler. |
-| `ldiff` | Implemented | Unsigned difference and borrow. |
-| `ldinf` | Implemented | Pushes the IEEE single-precision positive-infinity bit pattern, 0x7f800000. |
-| `ldiv` | Implemented | Unsigned double-word division and overflow delivery; A/B remain unchanged on overflow. |
-| `ldl` | Implemented | Reads guest memory at a wrapping word offset from Wptr. |
-| `ldlp` | Implemented | Computes a wrapping word-offset address without allocation bounds. |
-| `ldmemstartval` | Implemented | Loads the configured memory-start value. |
-| `ldnl` | Implemented | - |
-| `ldnlp` | Implemented | - |
-| `ldpi` | Implemented | - |
-| `ldpri` | Implemented | Loads the explicit current-process priority. |
-| `ldprodid` | Implemented | Loads the configured product ID. |
-| `ldshadow` | Partial | Loads selected enables, ordinary low-shadow context, integer-stack groups, and idle native block records; interrupted native operations and inactive state banks inside traps remain unsupported. |
-| `ldtimer` | Implemented | Selects the current process priority's clock independently of workspace bookkeeping. |
-| `ldtraph` | Implemented | Installs four descriptor words or enters the enabled LoadTrap monitor without copying. |
-| `ldtrapped` | Implemented | Installs four trapped-process words using the reference's group/priority selectors; LoadTrap monitoring supported. |
-| `lend` | Implemented | Signed count > 1 decrements count, increments index, and branches backward from the next instruction, with 32-bit wraparound. Follows the formal definition: terminal count remains unchanged despite the description implying a final decrement. |
-| `lmul` | Implemented | Unsigned double-word product with addend. |
-| `ls` | Implemented | - |
-| `lshl` | Implemented | Defined counts supported; out-of-range result uses the undefined-word marker. |
-| `lshr` | Implemented | Defined counts supported; out-of-range result uses the undefined-word marker. |
-| `lsub` | Implemented | Checked signed borrow-in subtraction with overflow delivery. |
-| `lsum` | Implemented | Unsigned sum and carry. |
-| `lsx` | Implemented | Loads a sixteen-bit memory value and sign-extends it to 32 bits. |
-| `mint` | Implemented | - |
-| `move` | Partial | Byte copying present; interruptible/restartable transfer state is not modeled. |
-| `move2dall` | Partial | Strided RAM copy with wrapping addresses; interruptible restart and exact bus/timing behavior unsupported. |
-| `move2dinit` | Implemented | Sets row count and byte strides in process state, preserved by shadowing and snapshots. |
-| `move2dnonzero` | Partial | Copies only nonzero bytes and preserves skipped destination bytes; interruptible restart and exact bus behavior unsupported. |
-| `move2dzero` | Partial | Copies only zero bytes and preserves skipped destination bytes; interruptible restart and exact bus behavior unsupported. |
-| `mul` | Implemented | Checked signed product with overflow delivery and safe host arithmetic. |
-| `nop` | Implemented | - |
-| `norm` | Implemented | Normalizes B:A as an unsigned double word; returns leading-zero count in C. |
-| `not` | Implemented | - |
-| `or` | Implemented | - |
-| `out` | Partial | Internal rendezvous, ALT notification, and trap delivery implemented; external channels and microcode restart unsupported. |
-| `outbyte` | Partial | Internal buffered byte output, ALT notification, and trap delivery implemented; hardware channels and restart unsupported. |
-| `outword` | Partial | Internal buffered word output, ALT notification, and trap delivery implemented; hardware channels and restart unsupported. |
-| `pop` | Implemented | - |
-| `postnormsn` | Partial | Opt-in portable exponent correction and signed-zero handling; native intermediate format remains unverified. |
-| `prod` | Implemented | Unchecked wrapped product without host signed overflow. |
-| `reboot` | Not implemented | - |
-| `rem` | Implemented | Signed B modulo A; division by zero signals overflow. Follows the description rather than the reversed printed formula. |
-| `resetch` | Partial | Initializes/resets software channel words and returns the previous descriptor without rescheduling it; hardware reset unsupported. |
-| `restart` | Partial | Restores native records with no interrupted operation, or complete tagged portable records including pending operations; native interrupted-operation format remains unverified. |
-| `ret` | Implemented | Restores Iptr from the call frame and advances the real workspace pointer. |
-| `rev` | Implemented | - |
-| `roundsn` | Partial | Opt-in portable integer nearest-even IEEE packing, gradual underflow and overflow; native intermediate format remains unverified. |
-| `runp` | Implemented | Enqueues normally or passes the descriptor to the selected priority's Run trap kernel. |
-| `satadd` | Implemented | Signed addition clipped to the 32-bit integer range, without overflow traps. |
-| `satmul` | Implemented | Signed multiplication clipped to the 32-bit integer range, without overflow traps. |
-| `satsub` | Implemented | Signed subtraction clipped to the 32-bit integer range, without overflow traps. |
-| `saveh` | Implemented | Saves high-priority front/back pointers to two guest words and pops A; second-word address wraps at 32 bits. |
-| `savel` | Implemented | Saves low-priority front/back pointers to two guest words and pops A; second-word address wraps at 32 bits. |
-| `sb` | Implemented | - |
-| `seterr` | Implemented | Sets the current priority's error flag and honors halt-on-error mode. |
-| `sethalterr` | Implemented | Sets halt-on-error mode and halts if the current priority already has an error. |
-| `settimeslice` | Implemented | Updates low-priority Status bit 20 from boolean A and returns the previous enable state; controls periodic slicing at j. |
-| `shl` | Implemented | Defined counts supported; out-of-range result uses the undefined-word marker. |
-| `shr` | Implemented | Defined counts supported; out-of-range result uses the undefined-word marker. |
-| `signal` | Implemented | Unchecked permit increment or FIFO waiter release, with enabled Signal trap delivery. |
-| `slmul` | Implemented | Signed A times signed B plus unsigned C; returns raw double-word high/low bits. |
-| `ss` | Implemented | - |
-| `ssub` | Implemented | - |
-| `startp` | Implemented | Saves the new process entry address and enqueues it at the current priority. |
-| `stclock` | Implemented | Writes the explicitly selected clock register. |
-| `sthb` | Implemented | Sets the high-priority queue back pointer from A, preserving the integer stack. |
-| `sthf` | Implemented | Sets the high-priority queue front pointer from A, preserving the integer stack. |
-| `stl` | Implemented | Writes guest memory at a wrapping word offset from Wptr. |
-| `stlb` | Implemented | Sets the low-priority queue back pointer from A, preserving the integer stack. |
-| `stlf` | Implemented | Sets the low-priority queue front pointer from A, preserving the integer stack. |
-| `stnl` | Implemented | - |
-| `stoperr` | Implemented | Saves Iptr and deschedules only when the current error flag is set. |
-| `stopp` | Implemented | Saves Iptr and deschedules, dispatching a ready process or restoring low-priority shadow state. |
-| `stshadow` | Partial | Stores selected enable/context/stack groups and idle native block records, preserving unselected words and reserved enable bits; native interrupted operations and inactive trap-bank transfers remain unsupported. |
-| `sttimer` | Implemented | Initializes and enables both clocks and services due timer alarms and ready processes. |
-| `sttraph` | Implemented | Exports four handler words or enters the enabled StoreTrap monitor without copying. |
-| `sttrapped` | Implemented | Exports four trapped-process words; StoreTrap monitoring supported. |
-| `sub` | Implemented | Checked signed subtraction with overflow delivery. |
-| `sulmul` | Implemented | Signed A times unsigned B plus unsigned C; returns raw double-word high/low bits. |
-| `sum` | Implemented | - |
-| `swapqueue` | Implemented | Exchanges the selected priority's queue with B/C, returning the old front/back in A/B. |
-| `swaptimer` | Implemented | Exchanges the selected timer-list front and updates its alarm from the new list. |
-| `talt` | Implemented | Initializes alternative state and the TimeNotSet marker. |
-| `taltwt` | Partial | Waits for channels/skip/timers and installs the earliest deadline; restart unsupported. Uses TP2-corroborated `25 F1` despite printed `25 FI`. |
-| `testerr` | Implemented | Replaces A with inverted error state, clears the flag, and preserves B/C. |
-| `testhalterr` | Implemented | Pushes the halt-on-error mode as a boolean, shifting the stack. |
-| `testpranal` | Implemented | Pushes the latched analyse-on-reset input; ordinary resets latch false, explicit analysed resets latch true. |
-| `timeslice` | Implemented | Explicit FIFO rotation at either priority, or scheduler trap delivery with caller descriptor in B; unaffected by process disable controls. |
-| `tin` | Partial | Timer waits, idle advancement, wakeups, and timer-kernel delivery implemented; interruptible microcode restart unsupported. |
-| `trapdis` | Implemented | Changes the selected priority's mask and returns its previous value. |
-| `trapenb` | Implemented | Changes the selected priority's mask and returns its previous value. |
-| `tret` | Implemented | Restores the saved trapped-process record, masks, Status, Wptr, Iptr, and original return bank. |
-| `unpacksn` | Implemented | Extracts the raw 23-bit fraction and 8-bit exponent, and returns wrapped 4*old-B plus the zero/finite/infinity/NaN type code in C. |
-| `wait` | Implemented | Consumes a permit or appends the current descriptor to the semaphore FIFO and suspends. |
-| `wcnt` | Implemented | - |
-| `wsub` | Implemented | - |
-| `wsubdb` | Implemented | - |
-| `xbword` | Implemented | Sign-extends the least significant byte, clearing stale upper bits. |
-| `xdble` | Implemented | Signed double-word extension. |
-| `xor` | Implemented | - |
-| `xsword` | Implemented | Sixteen-bit sign extension, including clearing stale upper bits. |
-| `xword` | Implemented | Sign-extends B using the power-of-two sign-bit mask in A. |
+The **st20sim verification** column records the 2026-10-10 differential run against
+ST's simulator version 6.8: two rounds, seeds 2147012/2147013, 49 planned
+cases per selected instruction per round. The complete sweep finished 15,876 cases
+and 933,790 defined-value comparisons with no remaining divergences in the tested
+scopes. The 588 planned cases in blocked batches are not counted as completed.
+
+- **Passed**: all tested architecturally defined register, workspace readback and error-result checkpoints agreed within the fixture scope below.
+- **Diverged**: at least one tested checkpoint disagreed; this does not establish which model matches silicon.
+- **Blocked**: a fixture was attempted but one engine could not complete it; no equivalence claim is made.
+- **Indirect**: exercised by setup, workspace readback or instruction encoding, not isolated test cases.
+- **Not tested**: not covered by this differential run.
+
+Of the 171 instructions, **162 passed**, **0 diverged**, **6 were blocked** and
+**3 were exercised indirectly**; none remain unattempted. A pass is not complete
+instruction or silicon certification. Native mode is used throughout. The driver
+propagates reference-defined register and RAM definedness, excluding undefined
+outputs even when the simulator prints concrete stale values. Simulator undefined
+markers are also excluded. Timing and peripheral fidelity are not verified.
+
+Set `ST20SIM_HOST` and `ST20SIM_ROOT` (the Windows toolset path) explicitly and
+authenticate SSH in the terminal before running the tests. The
+[differential driver](../tests/st20sim_differential.js) defaults to isolated
+instruction batches, records fixture scopes and retains ROMs, manifests, traces
+and reports under `obj/tests/st20sim-*`. Separate HP and LP runs are required:
+
+```bash
+make test-st20sim
+make test-st20sim ST20SIM_ARGS='--priority 1'
+```
+
+Exit codes are 0 for agreement, 1 for divergences and 2 for blocked/infrastructure
+failures. Isolated batches continue after a blocker. `--isolate 0` retains the
+faster combined mode for compatible operations. The full default HP sweep currently
+returns 2 because it includes unresolved native operations; the LP controls passed.
+
+### Fixture Scope
+
+| Instruction family | Tested scope / exclusions |
+| --- | --- |
+| Arithmetic, stack, pointer and flag operations | Boundary and seeded operands; architecture-defined results only, not every legal input or trap path. |
+| Loads, stores and device accesses | Initialized RAM, supported alignments and short offsets; no MMIO callbacks or peripheral side effects. |
+| Native moves and 2D moves | Atomic RAM copies of 0-16 bytes, two rows/stride 20 for 2D, filtered writes and untouched-byte readback; no interrupted operations. |
+| Clock operations | Register data and enable masks with automatic HP/LP ticks frozen in both engines; no cycle or clock-rate certification. |
+| Queue operations | Initialized RAM queues and readback, no preemption; `timeslice` uses empty queues only. `stlf` is checked from an initialized LP caller: simulator 6.8 does not expose the same LP-front mutation in the HP fixture. Our C2 LP-bank update is retained for both caller priorities. |
+| Semaphores | `wait` with nonzero count; `signal` with an empty waiter queue, including count wrap; no blocking/wakeup sequence. |
+| Channels | Matched software peer, 0-16-byte transfers or scalar output, peer enqueue and reset; no unmatched blocking or external channels. |
+| ALT | Ready/skip/channel guard paths and disabling order; no blocking wait or timer expiry; `altend` uses offset 0. |
+| Timer lists | `swaptimer` front swap/timestamp read; `tin` with an already-expired deadline; no alarm expiry or blocking. |
+| LP interruption controls | `intdis`/`intenb` stack behavior with no pending HP work; `settimeslice` boolean readback, not periodic slicing. LP entry uses a real `runp`/`stopp` handoff. |
+| Control flow and process changes | Resolved branches, call/return frames and ready-process handoff; `lend` uses boundary/seeded word counts with zero branch distance; `endp` final branch/count 1 only. |
+| Trap records and return | Four-word records for all groups/both priorities; breakpoint handler/`tret` return with aligned handler inputs; no nested traps or full monitor behavior. |
+| Shadow and restart records | Inactive LP bank/selectors 0-15, idle native block group and valid restart without a pending operation; native interrupted-state layout is not verified. |
+| Identification | `ldprodid` uses an isolated, identity-aligned local configuration and checks its full stack contract; the production STi5518 ID is unchanged. `lddevid` is locally tested as the documented product-ID alias, but the simulator prints `???` and ignores its positive encoding. |
+
+### Blocked Verification
+
+| Instruction | Observed blocker |
+| --- | --- |
+| `causeerror` | Enabled group-handler scenario leaves the planned execution path and reaches an unimplemented opcode in our core; fixture/core cause remains unresolved. |
+| `iret` | Simulator accesses controller state at `0x1ffffffc` outside the standalone memory map; a controller-backed interrupt-entry fixture is needed. |
+| `lddevid` | Simulator 6.8 prints `???` for `21 27 FC` and leaves A/B/C unchanged; it is not an oracle for this alias. The native alias remains implemented and locally regression-tested. |
+| `postnormsn` | Simulator completes the zero probe, but the emulator rejects native mode with `PORTABLE_ABI_DISABLED`; native intermediate format remains unsupported. |
+| `roundsn` | Simulator completes the zero probe, but the emulator rejects native mode with `PORTABLE_ABI_DISABLED`; native intermediate format remains unsupported. |
+| `reboot` | Bounded simulator reset probe does not complete; the emulator deliberately excludes this instruction. |
+
+| Instruction | Status | st20sim verification | Remaining work / notes |
+| --- | --- | --- | --- |
+| `adc` | Implemented | Passed | Checked signed 32-bit immediate addition with overflow trap/error fallback. |
+| `add` | Implemented | Passed | Checked signed 32-bit addition with overflow trap/error fallback. |
+| `ajw` | Implemented | Passed | Adjusts the real 32-bit workspace pointer with wrapping word-offset arithmetic. |
+| `alt` | Implemented | Passed | Begins alternative enabling without changing the integer stack. |
+| `altend` | Implemented | Passed | Branches by the selected workspace offset from the following instruction. |
+| `altwt` | Implemented | Passed | Initializes selection state and blocks only if no guard is ready. |
+| `and` | Implemented | Passed | - |
+| `bcnt` | Implemented | Passed | - |
+| `bitcnt` | Implemented | Passed | Counts all 32 bits and wraps the sum. |
+| `bitrevnbits` | Implemented | Passed | Reverses the selected low 0-32 bits; clears the other result bits. |
+| `bitrevword` | Implemented | Passed | Reverses all 32 bits, preserving B and C. |
+| `bsub` | Implemented | Passed | - |
+| `call` | Implemented | Passed | Saves the call frame in guest memory and adjusts Wptr without allocation bounds. |
+| `causeerror` | Implemented | Blocked | Delivers enabled user-generated causes and records the causeerror Status flag. |
+| `cb` | Implemented | Passed | Checks signed eight-bit range without changing the stack; IntegerError trap/error fallback. |
+| `cbu` | Implemented | Passed | Checks unsigned eight-bit range without changing the stack; IntegerError trap/error fallback. |
+| `ccnt1` | Implemented | Passed | Checks unsigned B in 1..A inclusive, pops the bound, and signals IntegerError on failure. |
+| `cflerr` | Implemented | Passed | Detects IEEE single-precision infinity/NaN bit patterns, preserves the stack, and signals IntegerError. |
+| `cir` | Implemented | Passed | Checks signed C in A..B inclusive, retaining C in A; IntegerError trap/error fallback. |
+| `ciru` | Implemented | Passed | Checks unsigned C in A..B inclusive, retaining C in A; IntegerError trap/error fallback. |
+| `cj` | Implemented | Passed | - |
+| `clockdis` | Implemented | Passed | Clock-enable register update. |
+| `clockenb` | Implemented | Passed | Clock-enable register update. |
+| `clrhalterr` | Implemented | Passed | Clears the halt-on-error mode flag without changing stack or error flags. |
+| `crcbyte` | Implemented | Passed | Updates the checksum from A's most significant byte using the polynomial in C. |
+| `crcword` | Implemented | Passed | Updates the checksum from all 32 bits of A using the polynomial in C. |
+| `cs` | Implemented | Passed | Checks signed sixteen-bit range without changing the stack; IntegerError trap/error fallback. |
+| `csngl` | Implemented | Passed | Checks that B is A's signed extension word, retains A and consumes B (old C moves into B); IntegerError trap/error fallback. |
+| `csu` | Implemented | Passed | Checks unsigned sixteen-bit range without changing the stack; IntegerError trap/error fallback. |
+| `csub0` | Implemented | Passed | Checks unsigned B in 0..(A-1), pops the bound, and signals IntegerError on failure. |
+| `cword` | Implemented | Passed | Checks signed B in -A..(A-1) using A's power-of-two sign-bit magnitude, including 0x80000000; pops the bound. |
+| `devlb` | Implemented | Passed | Ordered unsigned byte load from RAM or a registered MMIO device; device side effects and errors supported. |
+| `devls` | Implemented | Passed | Ordered unsigned sixteen-bit load from RAM or a registered MMIO device; one width-preserving device transaction. |
+| `devlw` | Implemented | Passed | Ordered word load from RAM or a registered MMIO device; one width-preserving device transaction. |
+| `devmove` | Partial | Passed | Ordered RAM/external-MMIO copying in four-byte chunks with exact tails; on-chip peripherals excluded. Interruptible restart and target-specific bus cycles remain unsupported. |
+| `devsb` | Implemented | Passed | Ordered byte store to RAM or a registered MMIO device; masks B to eight bits and consumes two stack words. |
+| `devss` | Implemented | Passed | Ordered sixteen-bit store to RAM or a registered MMIO device; masks B to sixteen bits and consumes two stack words. |
+| `devsw` | Implemented | Passed | Ordered word store to RAM or a registered MMIO device; one width-preserving device transaction. |
+| `diff` | Implemented | Passed | Unchecked 32-bit subtraction. |
+| `disc` | Partial | Passed | Disables software-channel registration and selects the first ready guard; external guards unsupported. |
+| `diss` | Implemented | Passed | First enabled skip guard selects, following the description rather than the reversed printed branch. |
+| `dist` | Partial | Passed | Selects a ready timer and removes outstanding timer-list membership; microcode restart unsupported. |
+| `div` | Implemented | Passed | Signed division, defined stack effects, overflow trap/error flag, and halt fallback. |
+| `dup` | Implemented | Passed | - |
+| `enbc` | Partial | Passed | Enables software-channel guards and detects waiting senders; external guards unsupported. |
+| `enbs` | Implemented | Passed | Marks an enabled skip guard ready without changing registers. |
+| `enbt` | Implemented | Passed | Records the earliest enabled timer guard with wrapping time comparisons. |
+| `endp` | Implemented | Passed | Retires non-final parallel branches; the final branch enters the successor directly at the current priority. |
+| `eqc` | Implemented | Passed | - |
+| `fmul` | Implemented | Passed | Signed Q1.31 fractional multiplication with nearest-even rounding; -1 times -1 signals IntegerOverflow with an undefined-word result. |
+| `fptesterr` | Implemented | Passed | Pushes true for the modeled CPU without an FPU; leaves integer error flags unchanged. |
+| `gajw` | Implemented | Passed | Exchanges A and Wptr without overwriting workspace memory. |
+| `gcall` | Implemented | Passed | - |
+| `gintdis` | Implemented | Passed | Clears selected bits in the 16-bit global-enable field and returns its previous value; only the documented low eight event bits currently affect execution. |
+| `gintenb` | Implemented | Passed | Sets selected bits in the 16-bit global-enable field and returns its previous value; only the documented low eight event bits currently affect execution. |
+| `gt` | Implemented | Passed | Signed 32-bit comparison. |
+| `gtu` | Implemented | Passed | Unsigned comparison. |
+| `in` | Partial | Passed | Internal rendezvous, selected ALT input, and trap delivery implemented; external channels and microcode restart unsupported. |
+| `insertqueue` | Implemented | Passed | Prepends the selected priority's list, joins its tail to the old front, and preserves the old back; empty input is a no-op. |
+| `intdis` | Implemented | Passed | Suppresses high-priority process preemption and pending high-priority timer kernels until reenabling or descheduling; preserves the stack and global mask. |
+| `intenb` | Implemented | Passed | Clears the low-priority interruption-disable state; pending high-priority work can run at the next scheduler boundary. |
+| `iret` | Partial | Blocked | Restores saved high-priority state or low shadow/idle state and notifies a registered controller observer; interrupted microcode restart and full external IRQ integration remain unsupported. |
+| `j` | Implemented | Passed | Relative jump and periodic timeslicing point; enabled `j 0` delivers a breakpoint trap. |
+| `ladd` | Implemented | Passed | Checked signed carry-in addition with overflow delivery. |
+| `lb` | Implemented | Passed | - |
+| `lbx` | Implemented | Passed | - |
+| `ldc` | Implemented | Indirect | - |
+| `ldclock` | Implemented | Passed | Reads the explicitly selected clock register. |
+| `lddevid` | Implemented | Blocked | Product-ID alias; decoder remap reaches its handler. |
+| `ldiff` | Implemented | Passed | Unsigned difference and borrow. |
+| `ldinf` | Implemented | Passed | Pushes the IEEE single-precision positive-infinity bit pattern, 0x7f800000. |
+| `ldiv` | Implemented | Passed | Unsigned double-word division and overflow delivery; A/B remain unchanged on overflow. |
+| `ldl` | Implemented | Indirect | Reads guest memory at a wrapping word offset from Wptr. |
+| `ldlp` | Implemented | Passed | Computes a wrapping word-offset address without allocation bounds. |
+| `ldmemstartval` | Implemented | Passed | Loads the configured memory-start value. |
+| `ldnl` | Implemented | Passed | - |
+| `ldnlp` | Implemented | Passed | - |
+| `ldpi` | Implemented | Passed | - |
+| `ldpri` | Implemented | Passed | Loads the explicit current-process priority. |
+| `ldprodid` | Implemented | Passed | Loads the configured product ID. |
+| `ldshadow` | Partial | Passed | Loads selected enables, ordinary low-shadow context, integer-stack groups, and idle native block records; interrupted native operations and inactive state banks inside traps remain unsupported. |
+| `ldtimer` | Implemented | Passed | Selects the current process priority's clock independently of workspace bookkeeping. |
+| `ldtraph` | Implemented | Passed | Installs four descriptor words or enters the enabled LoadTrap monitor without copying. |
+| `ldtrapped` | Implemented | Passed | Installs four trapped-process words using the reference's group/priority selectors; LoadTrap monitoring supported. |
+| `lend` | Implemented | Passed | Always decrements the wrapping word count; old signed count > 1 additionally increments index and branches backward from the next instruction. Follows the description and simulator rather than the printed terminal-count omission. |
+| `lmul` | Implemented | Passed | Unsigned double-word product with addend. |
+| `ls` | Implemented | Passed | - |
+| `lshl` | Implemented | Passed | Defined counts supported; out-of-range result uses the undefined-word marker. |
+| `lshr` | Implemented | Passed | Defined counts supported; out-of-range result uses the undefined-word marker. |
+| `lsub` | Implemented | Passed | Checked signed borrow-in subtraction with overflow delivery. |
+| `lsum` | Implemented | Passed | Unsigned sum and carry. |
+| `lsx` | Implemented | Passed | Loads a sixteen-bit memory value and sign-extends it to 32 bits. |
+| `mint` | Implemented | Passed | - |
+| `move` | Partial | Passed | Byte copying present; interruptible/restartable transfer state is not modeled. |
+| `move2dall` | Partial | Passed | Strided RAM copy with wrapping addresses; interruptible restart and exact bus/timing behavior unsupported. |
+| `move2dinit` | Implemented | Passed | Sets row count and byte strides in process state, preserved by shadowing and snapshots. |
+| `move2dnonzero` | Partial | Passed | Copies only nonzero bytes and preserves skipped destination bytes; interruptible restart and exact bus behavior unsupported. |
+| `move2dzero` | Partial | Passed | Copies only zero bytes and preserves skipped destination bytes; interruptible restart and exact bus behavior unsupported. |
+| `mul` | Implemented | Passed | Checked signed product with overflow delivery and safe host arithmetic. |
+| `nop` | Implemented | Passed | - |
+| `norm` | Implemented | Passed | Normalizes B:A as an unsigned double word; returns leading-zero count in C. |
+| `not` | Implemented | Passed | - |
+| `or` | Implemented | Passed | - |
+| `out` | Partial | Passed | Internal rendezvous, ALT notification, and trap delivery implemented; external channels and microcode restart unsupported. |
+| `outbyte` | Partial | Passed | Internal buffered byte output, ALT notification, and trap delivery implemented; hardware channels and restart unsupported. |
+| `outword` | Partial | Passed | Internal buffered word output, ALT notification, and trap delivery implemented; hardware channels and restart unsupported. |
+| `pop` | Implemented | Passed | - |
+| `postnormsn` | Partial | Blocked | Opt-in portable exponent correction and signed-zero handling; native intermediate format remains unverified. |
+| `prod` | Implemented | Passed | Unchecked wrapped product without host signed overflow. |
+| `reboot` | Not implemented | Blocked | - |
+| `rem` | Implemented | Passed | Signed B modulo A; division by zero signals overflow. Follows the description rather than the reversed printed formula. |
+| `resetch` | Partial | Passed | Initializes/resets software channel words and returns the previous descriptor without rescheduling it; hardware reset unsupported. |
+| `restart` | Partial | Passed | Restores native records with no interrupted operation, or complete tagged portable records including pending operations; native interrupted-operation format remains unverified. |
+| `ret` | Implemented | Passed | Restores Iptr from the call frame and advances the real workspace pointer. |
+| `rev` | Implemented | Passed | - |
+| `roundsn` | Partial | Blocked | Opt-in portable integer nearest-even IEEE packing, gradual underflow and overflow; native intermediate format remains unverified. |
+| `runp` | Implemented | Passed | Enqueues normally or passes the descriptor to the selected priority's Run trap kernel. |
+| `satadd` | Implemented | Passed | Signed addition clipped to the 32-bit integer range, without overflow traps. |
+| `satmul` | Implemented | Passed | Signed multiplication clipped to the 32-bit integer range, without overflow traps. |
+| `satsub` | Implemented | Passed | Signed subtraction clipped to the 32-bit integer range, without overflow traps. |
+| `saveh` | Implemented | Passed | Saves high-priority front/back pointers to two guest words and pops A; second-word address wraps at 32 bits. |
+| `savel` | Implemented | Passed | Saves low-priority front/back pointers to two guest words and pops A; second-word address wraps at 32 bits. |
+| `sb` | Implemented | Passed | - |
+| `seterr` | Implemented | Passed | Sets the current priority's error flag and honors halt-on-error mode. |
+| `sethalterr` | Implemented | Passed | Sets halt-on-error mode and halts if the current priority already has an error. |
+| `settimeslice` | Implemented | Passed | Updates low-priority Status bit 20 from boolean A and returns the previous enable state; controls periodic slicing at j. |
+| `shl` | Implemented | Passed | Defined counts supported; out-of-range result uses the undefined-word marker. |
+| `shr` | Implemented | Passed | Defined counts supported; out-of-range result uses the undefined-word marker. |
+| `signal` | Implemented | Passed | Unchecked permit increment or FIFO waiter release, with enabled Signal trap delivery. |
+| `slmul` | Implemented | Passed | Signed A times signed B plus unsigned C; returns raw double-word high/low bits. |
+| `ss` | Implemented | Passed | - |
+| `ssub` | Implemented | Passed | - |
+| `startp` | Implemented | Passed | Saves the new process entry address and enqueues it at the current priority. |
+| `stclock` | Implemented | Passed | Writes the explicitly selected clock register. |
+| `sthb` | Implemented | Passed | Sets the high-priority queue back pointer from A and pops A. |
+| `sthf` | Implemented | Passed | Sets the high-priority queue front pointer from A and pops A. |
+| `stl` | Implemented | Indirect | Writes guest memory at a wrapping word offset from Wptr. |
+| `stlb` | Implemented | Passed | Sets the low-priority queue back pointer from A and pops A. |
+| `stlf` | Implemented | Passed | Sets the low-priority queue front pointer from A and pops A; simulator verification requires an initialized LP caller. |
+| `stnl` | Implemented | Passed | - |
+| `stoperr` | Implemented | Passed | Saves Iptr and deschedules only when the current error flag is set. |
+| `stopp` | Implemented | Passed | Saves Iptr and deschedules, dispatching a ready process or restoring low-priority shadow state. |
+| `stshadow` | Partial | Passed | Stores selected enable/context/stack groups and idle native block records, preserving unselected words; native enable word is fully written, while portable mode preserves reserved destination bits. Native interrupted operations remain unsupported. |
+| `sttimer` | Implemented | Passed | Initializes and enables both clocks and services due timer alarms and ready processes. |
+| `sttraph` | Implemented | Passed | Exports four handler words or enters the enabled StoreTrap monitor without copying. |
+| `sttrapped` | Implemented | Passed | Exports four trapped-process words; StoreTrap monitoring supported. |
+| `sub` | Implemented | Passed | Checked signed subtraction with overflow delivery. |
+| `sulmul` | Implemented | Passed | Signed A times unsigned B plus unsigned C; returns raw double-word high/low bits. |
+| `sum` | Implemented | Passed | - |
+| `swapqueue` | Implemented | Passed | Exchanges the selected priority's queue with B/C, returning the old front/back in A/B. |
+| `swaptimer` | Implemented | Passed | Exchanges the selected timer-list front and updates its alarm from the new list. |
+| `talt` | Implemented | Passed | Initializes alternative state and the TimeNotSet marker. |
+| `taltwt` | Partial | Passed | Waits for channels/skip/timers and installs the earliest deadline; restart unsupported. Uses TP2-corroborated `25 F1` despite printed `25 FI`. |
+| `testerr` | Implemented | Passed | Pushes inverted error state and clears the flag at the current priority; old A/B move into B/C. |
+| `testhalterr` | Implemented | Passed | Pushes the halt-on-error mode as a boolean, shifting the stack. |
+| `testpranal` | Implemented | Passed | Pushes the latched analyse-on-reset input; ordinary resets latch false, explicit analysed resets latch true. |
+| `timeslice` | Implemented | Passed | Explicit FIFO rotation at either priority, or scheduler trap delivery with caller descriptor in B; unaffected by process disable controls. |
+| `tin` | Partial | Passed | Timer waits, idle advancement, wakeups, and timer-kernel delivery implemented; interruptible microcode restart unsupported. |
+| `trapdis` | Implemented | Passed | Changes the selected priority's mask and returns its previous value. |
+| `trapenb` | Implemented | Passed | Changes the selected priority's mask and returns its previous value. |
+| `tret` | Implemented | Passed | Restores the saved trapped-process record, masks, Status, Wptr, Iptr, and original return bank. |
+| `unpacksn` | Implemented | Passed | Returns a left-aligned significand including the normal hidden bit; denormals use exponent 1, non-finite significands are undefined, and C holds wrapped 4*old-B plus the type code. |
+| `wait` | Implemented | Passed | Consumes a permit or appends the current descriptor to the semaphore FIFO and suspends. |
+| `wcnt` | Implemented | Passed | Converts a signed byte offset to its signed word offset and low two-bit byte selector. |
+| `wsub` | Implemented | Passed | - |
+| `wsubdb` | Implemented | Passed | - |
+| `xbword` | Implemented | Passed | Sign-extends the least significant byte, clearing stale upper bits. |
+| `xdble` | Implemented | Passed | Signed double-word extension. |
+| `xor` | Implemented | Passed | - |
+| `xsword` | Implemented | Passed | Sixteen-bit sign extension, including clearing stale upper bits. |
+| `xword` | Implemented | Passed | Sign-extends B using the power-of-two sign-bit mask in A. |
 
 ## Encoding components
 
 These three components are handled inside `decodeNextInstr()`, not by standalone instruction handlers. They are additional to the 171 entries above.
 
-| Component | Status | Implementation |
-| --- | --- | --- |
-| `pfix` | Implemented | Accumulates positive operand prefixes in the decoder. |
-| `nfix` | Implemented | Complements the accumulated operand for a negative prefix. |
-| `opr` | Implemented | Decodes the secondary operand and selects its dispatch entry, including the `lddevid` remap. Unsupported secondary instructions remain unimplemented. |
+| Component | Status | st20sim verification | Implementation |
+| --- | --- | --- | --- |
+| `pfix` | Implemented | Indirect | Accumulates positive operand prefixes in the decoder. |
+| `nfix` | Implemented | Indirect | Complements the accumulated operand for a negative prefix. |
+| `opr` | Implemented | Indirect | Decodes the secondary operand and selects its dispatch entry, including the `lddevid` remap. Unsupported secondary instructions remain unimplemented. |
 
 ## Timer and process model
 
@@ -255,9 +320,9 @@ Current snapshots use version 11 as specified in the portable ABI section, using
 This section describes native-mode transfers. Portable mode additionally supports
 the tagged twelve-word records and selector groups described above.
 
-`ldshadow` and `stshadow` use A as a selector, B as priority 0/1, and C as a guest record address. Selector bit 0 transfers global interrupt enables (bits 16-23) and the selected priority's trap enables (bits 0-13) in record word 0. Bit 1 transfers Status/Wptr/Iptr in words 1-3; bit 2 transfers A/B/C in words 4-6. Successful instructions leave the current integer stack undefined. Addresses wrap at 32 bits. Empty selections perform no memory access; selector bits above bit 3 are ignored.
+`ldshadow` and `stshadow` use A as a selector, B as priority 0/1, and C as a guest record address. Native selector bit 0 transfers the full global-enable field (bits 16-31) and the selected priority's trap enables (bits 0-13) in record word 0. Portable mode retains its documented eight-bit global field (bits 16-23). Bit 1 transfers Status/Wptr/Iptr in words 1-3; bit 2 transfers A/B/C in words 4-6. Successful instructions leave the current integer stack undefined. Addresses wrap at 32 bits. Empty selections perform no memory access; selector bits above bit 3 are ignored.
 
-Enable-group transfers work in either direction between priorities without replacing the active bank's trap mask. Ordinary state-group loads support the inactive low-priority bank from high priority; stores also support the current bank. Loads read and validate every selected word before committing masks or shadow state. Stores preserve unselected words and the reserved bits of word 0; if that RAM word is uninitialized, its reserved bits use the existing undefined-word marker. Mapped-device errors propagate. Store failures may leave earlier destination words written, but do not consume the caller's argument registers.
+Enable-group transfers work in either direction between priorities without replacing the active bank's trap mask. Ordinary state-group loads support the inactive low-priority bank from high priority; stores also support the current bank. Loads read and validate every selected word before committing masks or shadow state. Stores preserve unselected words. Native word 0 is written completely without a destination read; bits 14-15 are zero. Portable stores retain their read/modify/write reserved-bit preservation and uninitialized-word policy. Native invalid-bank exports retain control status with bit 31 cleared. Mapped-device errors propagate. Store failures may leave earlier destination words written, but do not consume the caller's argument registers.
 
 The engine tracks process validity separately from raw Status, so exported Status bit 31 is derived from running/shadow-valid metadata. Loading bit 31 activates or invalidates the low shadow; a context loaded as valid must have an aligned Wptr. An absent inactive bank exports invalid Status, `NotProcess.p` as Wptr, and undefined register values. Stack and context groups can be loaded separately before activation. Updated low shadows and enable masks survive current version-11 snapshots.
 

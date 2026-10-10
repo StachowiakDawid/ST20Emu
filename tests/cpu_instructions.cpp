@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,6 +26,7 @@ extern INSTRENTRY instrEntry[];
 extern uint32_t instrCode;
 extern uint32_t operand;
 extern uint32_t wptrEndAddr;
+extern uint32_t st20ProductId;
 extern WATCH watch;
 
 static_assert(std::is_same_v<decltype(CPUSTATE{}.areg), uint32_t>);
@@ -189,6 +192,17 @@ static void testRegisterOperations() {
   bitcnt_(0);
   expect("bitcnt wraps", cpuState.areg, 31);
 
+  struct WordOffsetCase { uint32_t offset; uint32_t words; };
+  for (const WordOffsetCase &entry : {WordOffsetCase{0, 0}, {3, 0}, {4, 1},
+      {0x7fffffff, 0x1fffffff}, {0x80000000, 0xe0000000},
+      {0x80000003, 0xe0000000}, {0xfffffffc, 0xffffffff}, {0xffffffff, 0xffffffff}}) {
+    reset(entry.offset, 0x1234, 0x5678);
+    expect("wcnt succeeds", wcnt_(0) != 0, 0);
+    expect("wcnt signed word offset", cpuState.areg, entry.words);
+    expect("wcnt byte selector", cpuState.breg, entry.offset & ByteSelectMask);
+    expect("wcnt retains old B in C", cpuState.creg, 0x1234);
+  }
+
   for (uint32_t low = 0; low <= 0xffff; ++low) {
     reset(0xdead0000U | low, 0x1234, 0x5678);
     xsword_(0);
@@ -257,9 +271,9 @@ static void testCheckInstructions() {
       expect("check instruction A", cpuState.areg,
         entry.pops == 0 ? areg : entry.pops == 1 ? breg : creg);
       expect("check instruction B", cpuState.breg,
-        entry.pops == 0 ? breg : entry.pops == 1 ? creg : undefinedWord);
+        entry.handler == csngl_ ? creg : entry.pops == 0 ? breg : entry.pops == 1 ? creg : undefinedWord);
       expect("check instruction C", cpuState.creg,
-        entry.pops == 0 ? creg : undefinedWord);
+        entry.handler == csngl_ ? undefinedWord : entry.pops == 0 ? creg : undefinedWord);
     }
   }
   for (uint32_t bit = 0; bit < 32; ++bit) {
@@ -282,15 +296,27 @@ static void testGlobalInterrupts() {
     reset(0xdead0000U | mask, 0x1234, 0x5678);
     omrState.Enables = 0xffa5cdef;
     gintenb_(0);
-    expect("gintenb old byte", cpuState.areg, 0xa5);
+    expect("gintenb old field", cpuState.areg, 0xffa5);
     expect("gintenb packed register", omrState.Enables, 0xffa5cdefU | (mask << 16));
     expect("gintenb preserves B", cpuState.breg, 0x1234);
     expect("gintenb preserves C", cpuState.creg, 0x5678);
     reset(mask, 0x1234, 0x5678);
     omrState.Enables = 0xffa5cdef;
     gintdis_(0);
-    expect("gintdis old byte", cpuState.areg, 0xa5);
+    expect("gintdis old field", cpuState.areg, 0xffa5);
     expect("gintdis packed register", omrState.Enables, 0xffa5cdefU & ~(mask << 16));
+  }
+  for (uint32_t mask : {0x100U, 0x8000U, 0xffffU, 0x10000U, 0xffffffffU}) {
+    reset(mask, 0x1234, 0x5678);
+    omrState.Enables = 0xa55acdef;
+    expect("gintenb full field succeeds", gintenb_(0) != 0, 0);
+    expect("gintenb full previous field", cpuState.areg, 0xa55a);
+    expect("gintenb full field mask", omrState.Enables, 0xa55acdefU | ((mask & 0xffffU) << 16));
+    reset(mask, 0x1234, 0x5678);
+    omrState.Enables = 0xa55acdef;
+    expect("gintdis full field succeeds", gintdis_(0) != 0, 0);
+    expect("gintdis full previous field", cpuState.areg, 0xa55a);
+    expect("gintdis full field mask", omrState.Enables, 0xa55acdefU & ~((mask & 0xffffU) << 16));
   }
 }
 
@@ -306,6 +332,18 @@ static void testProductIdDispatch() {
   storeBytes(0x4004, 2, 0xfc68);
   expect("ldprodid decode", static_cast<uint32_t>(decodeNextInstr()), 0);
   expect("ldprodid handler", instrEntry[instrCode].function == ldprodid_, 1);
+  uint32_t savedProduct = st20ProductId;
+  for (uint32_t product : {0U, 0x05200011U, 0x80000001U, 0xffffffffU}) {
+    st20ProductId = product;
+    for (auto handler : {ldprodid_, lddevid_}) {
+      reset(0x1234, 0x5678, 0x9abc);
+      expect("configured ID getter succeeds", handler(0) != 0, 0);
+      expect("configured ID getter value", cpuState.areg, product);
+      expect("configured ID getter pushes old A", cpuState.breg, 0x1234);
+      expect("configured ID getter pushes old B", cpuState.creg, 0x5678);
+    }
+  }
+  st20ProductId = savedProduct;
 }
 
 static void testMultiplyAndShifts() {
@@ -684,8 +722,10 @@ static void testUnpackSingle() {
           if (exponent == 255) type = fraction == 0 ? 2U : 3U;
           reset(packed, oldBreg, 0x12345678);
           expect("unpacksn executes", unpacksn_(0) != 0, 0);
-          expect("unpacksn fraction without hidden bit", cpuState.areg, fraction);
-          expect("unpacksn raw exponent", cpuState.breg, exponent);
+            expect("unpacksn aligned significand", cpuState.areg, exponent == 255 ? undefinedWord
+              : (fraction << 8) | (exponent != 0 ? WordSignBit : 0U));
+            expect("unpacksn exponent with denormal minimum", cpuState.breg,
+               exponent == 0 && fraction != 0 ? 1U : exponent);
           expect("unpacksn tagged previous B", cpuState.creg,
                  static_cast<uint32_t>(static_cast<uint64_t>(oldBreg) * 4 + type));
           expect("unpacksn has no integer error", omrState.HP_ErrorFlag | omrState.LP_ErrorFlag, 0);
@@ -700,7 +740,7 @@ static void testUnpackSingle() {
   expect("encoded unpacksn decode", decodeNextInstr() != 0, 0);
   int watchFlag = 0;
   expect("encoded unpacksn executes", execInstr(&watchFlag) != 0, 0);
-  expect("encoded unpacksn preserves NaN payload", cpuState.areg, 0x00412345);
+  expect("encoded unpacksn NaN significand undefined", cpuState.areg, undefinedWord);
   expect("encoded unpacksn exponent", cpuState.breg, 255);
   expect("encoded unpacksn NaN tag", cpuState.creg, 0x48d159e3);
 }
@@ -869,7 +909,7 @@ static void testLoopEnd() {
       bool repeats = count > 1 && count < 0x80000000U;
       uint32_t actual = 0;
       readBytes(0x9004, 4, &actual);
-      expect("lend count", actual, repeats ? count - 1 : count);
+      expect("lend always decrements count", actual, count - 1U);
       readBytes(0x9000, 4, &actual);
       expect("lend index", actual, repeats ? index + 1 : index);
       expect("lend branch", cpuState.iptr, repeats ? 0xfe0 : 0x1000);
@@ -893,6 +933,8 @@ static void testLoopEnd() {
   storeBytes(0x9104, 4, 1);
   expect("lend terminal count does not read index", static_cast<uint32_t>(lend_(0)), 0);
   expect("lend terminal count does not branch", cpuState.iptr, 0x1000);
+  readBytes(0x9104, 4, &actual);
+  expect("lend terminal count becomes zero", actual, 0);
 
   reset(0x20, 0x9200, 0);
   cpuState.iptr = 0x1000;
@@ -1627,14 +1669,21 @@ static void testReadyQueueControls() {
       expect("store queue front succeeds", storeFront(0) != 0, 0);
       expect("store queue front value", omrState.ProcQueueFPtr[priority], pointer);
       expect("store queue front preserves back", omrState.ProcQueueBPtr[priority], oldBack);
-      expect("store queue front preserves A", cpuState.areg, pointer);
+      expect("store queue front pops A", cpuState.areg, 0x1234);
+      expect("store queue front shifts C into B", cpuState.breg, 0x5678);
+      expect("store queue front leaves C undefined", cpuState.creg, undefinedWord);
+      cpuState.areg = pointer;
+      cpuState.breg = 0x1234;
+      cpuState.creg = 0x5678;
       expect("store queue back succeeds", storeBack(0) != 0, 0);
       expect("store queue back value", omrState.ProcQueueBPtr[priority], pointer);
       expect("store queue back preserves front", omrState.ProcQueueFPtr[priority], pointer);
-      expect("store queue back preserves A", cpuState.areg, pointer);
-      expect("store queue pointers preserve B", cpuState.breg, 0x1234);
-      expect("store queue pointers preserve C", cpuState.creg, 0x5678);
+      expect("store queue back pops A", cpuState.areg, 0x1234);
+      expect("store queue back shifts C into B", cpuState.breg, 0x5678);
+      expect("store queue back leaves C undefined", cpuState.creg, undefinedWord);
       cpuState.areg = 0x152000;
+      cpuState.breg = 0x1234;
+      cpuState.creg = 0x5678;
       expect("save queue succeeds", saveQueue(0) != 0, 0);
       uint32_t value = 0;
       readBytes(0x152000, 4, &value);
@@ -2612,6 +2661,22 @@ static void installTrap(unsigned char priority, uint32_t group, uint32_t workspa
 }
 
 static void testShadowRegisters() {
+  schedulerFixture(0x18f000, HIGH_PRIORITY);
+  storeBytes(0x18f204, 4, STATUS_TIMESLICE_ENABLE);
+  storeBytes(0x18f208, 4, NO_PROCESS);
+  storeBytes(0x18f20c, 4, undefinedWord);
+  cpuState.areg = 2;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x18f200;
+  expect("inactive native shadow control load", ldshadow_(0) != 0, 0);
+  cpuState.areg = 2;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x18f100;
+  expect("inactive native shadow status export", stshadow_(0) != 0, 0);
+  uint32_t inactiveStatus = 0;
+  readBytes(0x18f104, 4, &inactiveStatus);
+  expect("inactive native shadow remains invalid", inactiveStatus & STATUS_VALID, 0);
+  expect("inactive native shadow retains timeslice state", inactiveStatus & STATUS_TIMESLICE_ENABLE, STATUS_TIMESLICE_ENABLE);
   auto preemptLow = [] {
     schedulerFixture(0x190000);
     cpuState.areg = 0x1111;
@@ -2627,6 +2692,24 @@ static void testShadowRegisters() {
     expect("shadow fixture preempts low", pollTimers() != 0, 0);
     expect("shadow fixture high process", cpuState.wptr, 0x191000);
   };
+  preemptLow();
+  setPortableInstructionAbi(true);
+  storeBytes(0x18f300, 4, 0xa500c000);
+  cpuState.areg = 1;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x18f300;
+  expect("portable enable export succeeds", stshadow_(0) != 0, 0);
+  uint32_t portableEnables = 0;
+  readBytes(0x18f300, 4, &portableEnables);
+  expect("portable enable export preserves reserved bits", portableEnables, 0xa5a5c006);
+  storeBytes(0x18f300, 4, 0x12341234);
+  cpuState.areg = 1;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x18f300;
+  expect("portable enable import succeeds", ldshadow_(0) != 0, 0);
+  expect("portable import preserves upper global byte", omrState.Enables >> 24, 0xff);
+  expect("portable import replaces active global byte", (omrState.Enables >> 16) & 0xffU, 0x34);
+  setPortableInstructionAbi(false);
   for (uint32_t selection = 0; selection < 16; ++selection) {
     preemptLow();
     const uint32_t seed = 0xa500c000;
@@ -2635,7 +2718,7 @@ static void testShadowRegisters() {
     cpuState.breg = LOW_PRIORITY;
     cpuState.creg = 0x194000;
     expect("selective stshadow succeeds", stshadow_(0) != 0, 0);
-    const uint32_t expected[] = {(seed & ~0x00ff3fffU) | 0x00a50006U,
+    const uint32_t expected[] = {0xffa50006U,
         STATUS_VALID | STATUS_TIMESLICE_ENABLE | 0x40U, 0x190000, 0x3000, 0x1111, 0x2222, 0x3333};
     for (uint32_t index = 0; index < 12; ++index) {
             bool selected = (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
@@ -2662,7 +2745,7 @@ static void testShadowRegisters() {
     expect("ldshadow preserves active workspace", cpuState.wptr, 0x191000);
     expect("ldshadow preserves active mask", trapEnableMask(HIGH_PRIORITY), 8);
     expect("ldshadow selected low mask", trapEnableMask(LOW_PRIORITY), selection & 1U ? 0x1234 : 6);
-    expect("ldshadow selected global field", (omrState.Enables >> 16) & 255U, selection & 1U ? 0x34 : 0xa5);
+    expect("ldshadow selected full global field", omrState.Enables >> 16, selection & 1U ? 0x1234 : 0xffa5);
     expect("ldshadow A undefined", cpuState.areg, undefinedWord);
     expect("ldshadow caller deschedules", stopp_(0) != 0, 0);
     expect("ldshadow restored low workspace", cpuState.wptr, selection & 2U ? 0x192000 : 0x190000);
@@ -3902,9 +3985,9 @@ static void testTrapInstructionHooks() {
       expect("check trap A stack effect", cpuState.areg,
              entry.pops == 0 ? entry.areg : entry.pops == 1 ? entry.breg : entry.creg);
       expect("check trap B stack effect", cpuState.breg,
-             entry.pops == 0 ? entry.breg : entry.pops == 1 ? entry.creg : undefinedWord);
+              entry.handler == csngl_ ? entry.creg : entry.pops == 0 ? entry.breg : entry.pops == 1 ? entry.creg : undefinedWord);
       expect("check trap C stack effect", cpuState.creg,
-             entry.pops == 0 ? entry.creg : undefinedWord);
+              entry.handler == csngl_ ? undefinedWord : entry.pops == 0 ? entry.creg : undefinedWord);
       expect("check trap no fallback flag", omrState.HP_ErrorFlag | omrState.LP_ErrorFlag, 0);
       expect("check trap return", tret_(0) != 0, 0);
       schedulerFixture(0xc2000, priority);
@@ -3937,7 +4020,8 @@ static void testTrapInstructionHooks() {
   testerr_(0);
   expect("testerr reports and clears error", cpuState.areg, 0);
   expect("testerr clears flag", omrState.LP_ErrorFlag, 0);
-  expect("testerr does not push stack", cpuState.breg, 0x1234);
+  expect("testerr pushes over old A", cpuState.breg, 0x80000000);
+  expect("testerr pushes old B into C", cpuState.creg, 0x1234);
   testerr_(0);
   expect("testerr no-error result", cpuState.areg, 1);
   omrState.HaltOnErrorFlag = 1;
@@ -4797,7 +4881,83 @@ static void testAsyncTrace() {
   }
 }
 
-int main() {
+static int runSimulatorTrace(const char *filename, const char *countText, bool frozenClocks) {
+  char *countEnd = nullptr;
+  unsigned long instructionCount = std::strtoul(countText, &countEnd, 10);
+  if (*countText == '\0' || *countEnd != '\0' || instructionCount == 0 || instructionCount > 1000000)
+    return 2;
+  std::ifstream input(filename);
+  if (!input) return 2;
+  if (memoryInit() || initCPUState()) return 2;
+  std::string line;
+  uint32_t entry = 0;
+  bool first = true;
+  while (std::getline(input, line)) {
+    std::istringstream words(line);
+    uint64_t address = 0;
+    if (!(words >> std::hex >> address) || address > UINT32_MAX) return 2;
+    if (first) entry = static_cast<uint32_t>(address);
+    first = false;
+    uint32_t value = 0;
+    bool hasBytes = false;
+    while (words >> std::hex >> value) {
+      if (value > UINT8_MAX || address > UINT32_MAX || storeBytes(static_cast<uint32_t>(address), 1, value))
+        return 2;
+      ++address;
+      hasBytes = true;
+    }
+    if (!words.eof() || !hasBytes) return 2;
+  }
+  if (first) return 2;
+  setPortableInstructionAbi(false);
+  cpuState = {};
+  cpuState.areg = cpuState.breg = cpuState.creg = undefinedWord;
+  cpuState.iptr = entry;
+  cpuState.wptr = 0x80000100U;
+  cpuState.priority = HIGH_PRIORITY;
+  omrState = {};
+  omrState.Enables = 0xffff0000U;
+  std::string diagnostics;
+  compat::outputBuffer = &diagnostics;
+  int result = 0;
+  for (unsigned long index = 0; index < instructionCount; ++index) {
+    result = decodeNextInstr();
+    if (result) break;
+    std::printf("state %08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32
+                " %08" PRIx32 " %u\n", cpuState.iptr, cpuState.wptr | cpuState.priority,
+                cpuState.areg, cpuState.breg, cpuState.creg,
+                static_cast<unsigned int>(omrState.HP_ErrorFlag));
+    int breakFlag = 0;
+    if (frozenClocks) {
+      if (instrEntry[instrCode].cpucycles >= CPU_CLOCK / HP_TIMER_HZ) {
+        result = INVALID_CPU_FILE;
+        break;
+      }
+      omrState.ClockPhaseHP = 0;
+      omrState.ClockPhaseLP = 0;
+    }
+    result = execInstr(&breakFlag);
+    if (result) break;
+  }
+  compat::outputBuffer = nullptr;
+  if (result) std::fprintf(stderr, "simulator trace failed: %d\n%s", result, diagnostics.c_str());
+  return result ? 1 : 0;
+}
+
+int main(int argc, char **argv) {
+  if (argc == 4 && std::string(argv[1]) == "--sim-trace")
+    return runSimulatorTrace(argv[2], argv[3], false);
+  if (argc == 5 && std::string(argv[1]) == "--sim-trace" && std::string(argv[4]) == "--frozen-clocks")
+    return runSimulatorTrace(argv[2], argv[3], true);
+  if (argc == 7 && std::string(argv[1]) == "--sim-trace" && std::string(argv[4]) == "--frozen-clocks" &&
+      std::string(argv[5]) == "--product-id") {
+    char *valueEnd = nullptr;
+    unsigned long value = std::strtoul(argv[6], &valueEnd, 16);
+    if (*argv[6] == '\0' || *valueEnd != '\0' || value > UINT32_MAX) return 2;
+    st20ProductId = static_cast<uint32_t>(value);
+    return runSimulatorTrace(argv[2], argv[3], true);
+  }
+  if (argc != 1) return 2;
   testWordStack();
   testCarryArithmetic();
   testRegisterOperations();
