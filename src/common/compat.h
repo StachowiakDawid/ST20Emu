@@ -5,6 +5,7 @@
 
 #include <charconv>
 #include <format>
+#include <iterator>
 #include <string_view>
 #include <string>
 #include <utility>
@@ -13,10 +14,19 @@
 
 // C++23 <print> fallback emulator
 namespace compat {
+inline bool outputEnabled = true;
+inline thread_local std::string *outputBuffer = nullptr;
+
 template <typename... Args>
 void println(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
-  std::string str = std::format(fmt, std::forward<Args>(args)...) + '\n';
-  std::fputs(str.c_str(), stream);
+  if (!outputEnabled) return;
+  if (outputBuffer && (stream == stdout || stream == stderr)) {
+    std::format_to(std::back_inserter(*outputBuffer), fmt, std::forward<Args>(args)...);
+    outputBuffer->push_back('\n');
+  } else {
+    std::string str = std::format(fmt, std::forward<Args>(args)...) + '\n';
+    std::fputs(str.c_str(), stream);
+  }
 }
 
 template <typename... Args> void println(std::format_string<Args...> fmt, Args &&...args) {
@@ -25,8 +35,13 @@ template <typename... Args> void println(std::format_string<Args...> fmt, Args &
 
 template <typename... Args>
 void print(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
-  std::string str = std::format(fmt, std::forward<Args>(args)...);
-  std::fputs(str.c_str(), stream);
+  if (!outputEnabled) return;
+  if (outputBuffer && (stream == stdout || stream == stderr)) {
+    std::format_to(std::back_inserter(*outputBuffer), fmt, std::forward<Args>(args)...);
+  } else {
+    std::string str = std::format(fmt, std::forward<Args>(args)...);
+    std::fputs(str.c_str(), stream);
+  }
 }
 
 template <typename... Args> void print(std::format_string<Args...> fmt, Args &&...args) {

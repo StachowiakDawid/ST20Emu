@@ -29,7 +29,6 @@ CliError cmd_stop(CliEngine & /*engine*/, std::span<const std::string_view> args
   std::string p1 = args.size() > 0 ? std::string(args[0]) : "";
   std::string p2 = args.size() > 1 ? std::string(args[1]) : "";
 
-  // TODO: assuming setWatch returns 0 on success in the legacy backend
   int result = setWatch(p1.c_str(), p2.c_str());
   return result == 0 ? CliError::Success : CliError::InputError;
 }

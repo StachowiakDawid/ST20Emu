@@ -3,6 +3,7 @@
 #include "../../common/compat.h"
 #include "../../common/defines.h"
 #include "../cpu/st20.h"
+#include <cinttypes>
 
 // posix / linux
 #include <dirent.h>
@@ -12,13 +13,16 @@
 #include <unistd.h>
 
 // std
+#include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 /* this structure holds the state of the memory */
 struct MEMBLK {
-  long startAddr;
+  uint32_t startAddr;
   unsigned char data[BLKSIZE];
   unsigned char used[BLKSIZE / 8];
   MEMBLK *next{nullptr};
@@ -27,16 +31,62 @@ struct MEMBLK {
 /* this will hold the state of the memory */
 static MEMBLK *memoryMap = nullptr;
 
-MEMBLK *getMemBlk(long address, bool create_flag);
+namespace {
+std::vector<MemoryDevice> memoryDevices;
+
+int deviceForAccess(uint32_t address, int width, const MemoryDevice **device) {
+  *device = nullptr;
+  if (width <= 0) return 0;
+  uint64_t end = static_cast<uint64_t>(address) + static_cast<uint32_t>(width) - 1U;
+  for (const MemoryDevice &candidate : memoryDevices) {
+    bool overlaps = (address <= candidate.end && end >= candidate.start) ||
+                    (end > UINT32_MAX && static_cast<uint32_t>(end) >= candidate.start);
+    if (!overlaps) continue;
+    if (address < candidate.start || end > candidate.end) return INVALID_DEVICE_ACCESS;
+    *device = &candidate;
+    return 0;
+  }
+  return 0;
+}
+}
+
+int registerMemoryDevice(const MemoryDevice &device) {
+  if (device.start > device.end || (!device.read && !device.write)) return INVALID_MEMORY_DEVICE;
+  for (const MemoryDevice &existing : memoryDevices) {
+    if (device.start <= existing.end && device.end >= existing.start) return INVALID_MEMORY_DEVICE;
+  }
+  memoryDevices.push_back(device);
+  return 0;
+}
+
+int unregisterMemoryDevice(uint32_t start) {
+  for (auto device = memoryDevices.begin(); device != memoryDevices.end(); ++device) {
+    if (device->start == start) {
+      memoryDevices.erase(device);
+      return 0;
+    }
+  }
+  return INVALID_MEMORY_DEVICE;
+}
+
+bool isMemoryDeviceAddress(uint32_t address) {
+  for (const MemoryDevice &device : memoryDevices) {
+    if (address >= device.start && address <= device.end) return true;
+  }
+  return false;
+}
+
+MEMBLK *getMemBlk(uint32_t address, bool create_flag);
 int byteUsedBit(MEMBLK *blk, int offset, int set_flag);
 
 int memoryInit() {
   /* the emulator will get into an infinite loop if this initialization isn't done */
-  storeBytes(0x3004L, 4, 0L);
+  storeBytes(0x3004U, 4, 0U);
   // below for sti5518 ASC1 20005000 base
-  storeBytes(0x20005014L, 4, 0x00000000L);
+  storeBytes(0x20005008U, 4, 0x00000000U);
+  storeBytes(0x20005014U, 4, 0x00000000U);
   // below for sti5517
-  // storeBytes(0x200130f8L, 4, 0x00000001L);
+  // storeBytes(0x200130f8U, 4, 0x00000001U);
 
   return 0;
 }
@@ -55,7 +105,7 @@ int byteUsedBit(MEMBLK *block, int offset, int usedOperation) {
   }
 
   /* get the address of the byte's used bit */
-  int usedByteAddr = (offset & ADDR_IN_BLK_MASK) >> 3;
+  int usedByteAddr = static_cast<int>((static_cast<uint32_t>(offset) & ADDR_IN_BLK_MASK) >> 3);
   int usedBitAddr = offset & 7;
 
   /* get the state of the requested bit */
@@ -75,54 +125,53 @@ int byteUsedBit(MEMBLK *block, int offset, int usedOperation) {
   return wasSet ? 1 : 0;
 }
 
-/* THIS ROUTINE ISN'T NEEDED */
-/**************************
- * returns true if the requested byte was defined for the
- * specified block.  *Value is the value of the requested byte.
- */
-/*int readBlockByte (MEMBLK *block, int offset, unsigned char *value) {
-
-  *value = (unsigned char) block->data[offset];
-*/
-/* if the byte was stored, return true */
-/*
-  return (byteUsedBit(block, offset, (int) DONT_ALTER_BIT));
-}
-*/
-
 /**************************
  * This function reads from one to four bytes from the proper memory block.
  *
  * Returns 0 if the bytes were read properly.
  */
 
-int readBytes(long address, int nBytes, unsigned long *value) {
+int readBytes(uint32_t address, int nBytes, uint32_t *value) {
   MEMBLK *cBlk = nullptr;
   unsigned char cByte = 0;
-  unsigned long cWord = 0;
+  uint32_t cWord = 0;
 
   if (value == nullptr) {
     return READ_UNUSED_MEM;
   }
 
-  *value = UNDEFINED_WORD_OLD;
+  *value = undefinedWord;
 
   /* this routine won't work with anything longer than a double word */
   if (nBytes > 4) {
     return READ_TOO_LARGE;
   }
 
+  const MemoryDevice *mappedDevice = nullptr;
+  int deviceResult = deviceForAccess(static_cast<uint32_t>(address), nBytes, &mappedDevice);
+  if (deviceResult) return deviceResult;
+  if (mappedDevice) {
+    MemoryDevice device = *mappedDevice;
+    if (!device.read) return DEVICE_ACCESS_UNSUPPORTED;
+    uint32_t word = 0;
+    deviceResult = device.read(device.context, static_cast<uint32_t>(address), nBytes, &word);
+    if (deviceResult) return deviceResult;
+    uint32_t mask = nBytes == 4 ? UINT32_MAX : (1U << (nBytes * 8)) - 1U;
+    *value = word & mask;
+    return 0;
+  }
+
   /* read each of the requested bytes */
   for (int i = 0; i < nBytes; i++) {
 
     /* get the block that the current byte is in */
-    cBlk = getMemBlk(address + i, false);
+    cBlk = getMemBlk(address + static_cast<uint32_t>(i), false);
     if (cBlk == nullptr) {
       return READ_UNUSED_MEM;
     }
 
     /* get the offset of the byte in the block */
-    int offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
+    int offset = static_cast<int>((address + static_cast<uint32_t>(i)) & ADDR_IN_BLK_MASK);
 
     /* if the byte isn't defined, return error */
     if (!byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
@@ -133,7 +182,7 @@ int readBytes(long address, int nBytes, unsigned long *value) {
     cByte = cBlk->data[offset];
 
     /* build the return value from its component bytes */
-    cWord |= (static_cast<unsigned long>(cByte) << (8U * static_cast<unsigned long>(i)));
+    cWord |= (static_cast<uint32_t>(cByte) << (8U * static_cast<uint32_t>(i)));
   }
 
   *value = cWord;
@@ -141,47 +190,15 @@ int readBytes(long address, int nBytes, unsigned long *value) {
   return 0;
 }
 
-int readInvBytes(long address, int nBytes, long *value) {
+int readInvBytes(uint32_t address, int nBytes, uint32_t *value) {
   if (value == nullptr) {
     return READ_UNUSED_MEM;
   }
 
-  *value = UNDEFINED_WORD_OLD;
-
-  /* this routine won't work with anything longer than a double word */
-  if (nBytes > 4) {
-    return READ_TOO_LARGE;
-  }
-
-  unsigned long cWord = 0;
-
-  /* read each of the requested bytes (big-endian order) */
-  for (int i = 0; i < nBytes; i++) {
-
-    /* get the block that the current byte is in */
-    MEMBLK *cBlk = getMemBlk(address + i, false);
-    if (cBlk == nullptr) {
-      return READ_UNUSED_MEM;
-    }
-
-    /* get the offset of the byte in the block */
-    int offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
-
-    /* if the byte isn't defined, return error */
-    if (!byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
-      return READ_UNUSED_MEM;
-    }
-
-    /* get the data byte */
-    unsigned char cByte = cBlk->data[offset];
-
-    /* build the return value from its component bytes (big-endian shift) */
-    cWord |= (static_cast<unsigned long>(cByte) << (8U * static_cast<unsigned long>(3 - i)));
-  }
-
-  *value = static_cast<long>(cWord);
-
-  return 0;
+  uint32_t word = 0;
+  int result = readBytes(address, nBytes, &word);
+  *value = static_cast<uint32_t>(result ? word : std::byteswap(static_cast<uint32_t>(word)));
+  return result;
 }
 
 /**************************
@@ -189,18 +206,29 @@ int readInvBytes(long address, int nBytes, long *value) {
  *
  * Returns 0 if the bytes were stored properly.
  */
-int storeBytes(long address, int nBytes, long value) {
+int storeBytes(uint32_t address, int nBytes, uint32_t value) {
   /* this routine won't work with anything longer than a double word */
   if (nBytes > 4) {
     return 0; // preferably the appropriate non-zero error code
   }
 
-  unsigned long cWord = static_cast<unsigned long>(value);
+  uint32_t cWord = static_cast<uint32_t>(value);
+
+  const MemoryDevice *mappedDevice = nullptr;
+  int deviceResult = deviceForAccess(static_cast<uint32_t>(address), nBytes, &mappedDevice);
+  if (deviceResult) return deviceResult;
+  if (mappedDevice) {
+    MemoryDevice device = *mappedDevice;
+    if (!device.write) return DEVICE_ACCESS_UNSUPPORTED;
+    uint32_t mask = nBytes == 4 ? UINT32_MAX : (1U << (nBytes * 8)) - 1U;
+    return device.write(device.context, static_cast<uint32_t>(address), nBytes,
+                        static_cast<uint32_t>(value) & mask);
+  }
 
   for (int i = 0; i < nBytes; i++) {
     /* get the block that the current byte is in */
     /* if the memory block can't be created, return an error */
-    MEMBLK *cBlk = getMemBlk(address + i, true);
+    MEMBLK *cBlk = getMemBlk(address + static_cast<uint32_t>(i), true);
     if (cBlk == nullptr) {
       return READ_UNUSED_MEM;
     }
@@ -210,7 +238,7 @@ int storeBytes(long address, int nBytes, long value) {
     cWord >>= 8U;
 
     /* get the offset of the byte in the block */
-    int offset = static_cast<int>((address + i) & ADDR_IN_BLK_MASK);
+    int offset = static_cast<int>((address + static_cast<uint32_t>(i)) & ADDR_IN_BLK_MASK);
 
     /* save the byte in the memory block */
     cBlk->data[offset] = cByte;
@@ -227,18 +255,18 @@ int storeBytes(long address, int nBytes, long value) {
  *
  * Returns 0 if all bytes were copied properly.
  */
-int storeByteRange(long srcAddr, long destAddr, int nBytes) {
+int storeByteRange(uint32_t srcAddr, uint32_t destAddr, int nBytes) {
   for (int i = 0; i < nBytes; i++) {
-    unsigned long cWord = 0;
+    uint32_t cWord = 0;
 
     /* read a single byte from the source address */
-    int result = readBytes(srcAddr + i, 1, &cWord);
+    int result = readBytes(srcAddr + static_cast<uint32_t>(i), 1, &cWord);
     if (result != 0) {
       return result;
     }
 
     /* store the byte to the destination address */
-    result = storeBytes(destAddr + i, 1, static_cast<long>(cWord & 0xFFU));
+    result = storeBytes(destAddr + static_cast<uint32_t>(i), 1, cWord & 0xFFU);
     if (result != 0) {
       return result;
     }
@@ -247,8 +275,40 @@ int storeByteRange(long srcAddr, long destAddr, int nBytes) {
   return 0;
 }
 
-int allocBytes(long address, int nBytes) {
-  return storeBytes(address, nBytes, UNDEFINED_WORD_OLD);
+int validateDeviceMoveRange(uint32_t source, uint32_t destination, uint32_t length) {
+  if (length == 0) return 0;
+  uint64_t sourceEnd = static_cast<uint64_t>(source) + length;
+  uint64_t destinationEnd = static_cast<uint64_t>(destination) + length;
+  constexpr uint64_t addressSpaceSize = uint64_t{1} << 32;
+  if (sourceEnd > addressSpaceSize || destinationEnd > addressSpaceSize)
+    return INVALID_DEVICE_MOVE_RANGE;
+  auto touchesPeripheral = [](uint32_t start, uint64_t end) {
+    return start <= 0x3fffffffU && end > 0x20000000U;
+  };
+  if (touchesPeripheral(source, sourceEnd) || touchesPeripheral(destination, destinationEnd))
+    return DEVICE_MOVE_PERIPHERAL_UNSUPPORTED;
+  if (source < destinationEnd && destination < sourceEnd) return INVALID_DEVICE_MOVE_RANGE;
+  return 0;
+}
+
+int copyDeviceBytes(uint32_t source, uint32_t destination, uint32_t length) {
+  int validation = validateDeviceMoveRange(source, destination, length);
+  if (validation) return validation;
+  for (uint32_t offset = 0; offset < length;) {
+    uint32_t remaining = length - offset;
+    int width = remaining < 4 ? static_cast<int>(remaining) : 4;
+    uint32_t value = 0;
+    int result = readBytes(static_cast<uint32_t>(source + offset), width, &value);
+    if (result) return result;
+    result = storeBytes(static_cast<uint32_t>(destination + offset), width, static_cast<uint32_t>(value));
+    if (result) return result;
+    offset += static_cast<uint32_t>(width);
+  }
+  return 0;
+}
+
+int allocBytes(uint32_t address, int nBytes) {
+  return storeBytes(address, nBytes, undefinedWord);
 }
 
 /**************************
@@ -256,7 +316,7 @@ int allocBytes(long address, int nBytes) {
  * byte with the specified address.  A new memory block is
  * created if there is no memory block with the address.
  */
-MEMBLK *getMemBlk(long address, bool create_flag) {
+MEMBLK *getMemBlk(uint32_t address, bool create_flag) {
   MEMBLK *blk = nullptr;
   MEMBLK **lastBlk = nullptr;
 
@@ -290,16 +350,13 @@ MEMBLK *getMemBlk(long address, bool create_flag) {
   /* store the starting address for this block of memory */
   blk->startAddr = address & ADDR_OF_BLK_MASK;
 
-  /* mark the memory block as unused */
-  memset(blk->used, 0, static_cast<size_t>(BLKSIZE / 8));
-
   return blk;
 }
 
 /**************************
  * stores a large number of bytes in memory blocks
  */
-int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *totalBytes) {
+int bulkLoadBytes(uint32_t address, const char *byteFile, char *usedFile, uint32_t *totalBytes) {
   int nBytesRead = 0;
   int byteFd = -1;
   int usedFd = -1;
@@ -315,14 +372,17 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
     return INVALID_BYTE_FILE;
   }
 
-  long size = st.st_size;
+  if (st.st_size < 0 || static_cast<uint64_t>(st.st_size) > UINT32_MAX) {
+    return INVALID_BYTE_FILE;
+  }
+  uint32_t size = static_cast<uint32_t>(st.st_size);
 
   if (address == 0) {
-    address = 2147483647L - size + 1L;
+    address = WordSignBit - size;
   }
   compat::println(stderr, "Loading {:d} bytes from {} to 0x{:08x}", size, byteFile, address);
 
-  long nextAddress = address;
+  uint32_t nextAddress = address;
   char data[BLKSIZE];
   MEMBLK *cBlk = nullptr;
 
@@ -351,7 +411,13 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
      * have to fill the block starting at the proper byte address within
      * the block
      */
-    nBytesRead = static_cast<int>(read(byteFd, data, BLKSIZE));
+    uint32_t blockOffset = nextAddress & ADDR_IN_BLK_MASK;
+    nBytesRead = static_cast<int>(read(byteFd, data, BLKSIZE - blockOffset));
+    if (nBytesRead < 0) {
+      close(byteFd);
+      if (usedFd >= 0) close(usedFd);
+      return INVALID_BYTE_FILE;
+    }
 
     /* if we haven't reached the end of the file's data */
     if (nBytesRead > 0) {
@@ -366,18 +432,15 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
         return FAILED_MALLOC;
       }
 
-      long blockOffset = nextAddress & ADDR_IN_BLK_MASK;
-
       /* copy the data into the memory block */
-      memcpy(&(cBlk->data[blockOffset]), data,
-             static_cast<size_t>(BLKSIZE) - static_cast<size_t>(blockOffset));
+      memcpy(&(cBlk->data[blockOffset]), data, static_cast<size_t>(nBytesRead));
 
       /* if there is no used byte file, set all of the bytes to used */
       if (usedFd < 0) {
         /* set the bits in the used array to show which bytes have been stored */
         for (int i = 0; i < nBytesRead; i++) {
           /* set the used bit for the bytes that were read */
-          byteUsedBit(cBlk, static_cast<int>(blockOffset + i), static_cast<int>(SET_BIT));
+          byteUsedBit(cBlk, static_cast<int>(blockOffset + static_cast<uint32_t>(i)), SET_BIT);
         }
       } else {
         /* if there is a used byte file, load it */
@@ -391,8 +454,8 @@ int bulkLoadBytes(long address, const char *byteFile, char *usedFile, long *tota
       }
     } /* end of if nBytesRead > 0 */
 
-    *totalBytes += nBytesRead;
-    nextAddress += nBytesRead;
+    *totalBytes += static_cast<uint32_t>(nBytesRead);
+    nextAddress += static_cast<uint32_t>(nBytesRead);
 
   } while (nBytesRead > 0);
 
@@ -409,7 +472,7 @@ int saveMemory(const char *dirName) {
   int dataFileFd = 0;
   char usedFileName[NAME_SIZE];
   int usedFileFd = 0;
-  unsigned long nextAddress = 0xFFFFFFFFUL;
+  uint32_t nextAddress = 0xFFFFFFFFU;
   MEMBLK *cBlk = nullptr;
 
   /* check the directory name */
@@ -424,7 +487,7 @@ int saveMemory(const char *dirName) {
   }
 
   for (cBlk = memoryMap; cBlk != nullptr; cBlk = cBlk->next) {
-    auto blkAddr = static_cast<unsigned long>(cBlk->startAddr);
+    auto blkAddr = static_cast<uint32_t>(cBlk->startAddr);
 
     /* omit the ROM code addresses */
     /*	 if (cBlk->startAddr >= 0x7FF80000 && cBlk->startAddr <= 0x7FFFFFFF) {
@@ -442,8 +505,6 @@ int saveMemory(const char *dirName) {
      * the last file rather than creating a new file.
      * If not, create a new file.
      */
-    // TODO: why startAddr is a SIGNED long?
-    // this will be a big task to refactor addresses
     if (blkAddr != nextAddress) {
       /* close the file if it is already open */
       if (dataFileFd > 0) {
@@ -454,10 +515,10 @@ int saveMemory(const char *dirName) {
       }
 
       /* create the file names */
-      if (snprintf(dataFileName, NAME_SIZE, "%s/%08lx.bin", dirName, cBlk->startAddr) < 0) {
+      if (snprintf(dataFileName, NAME_SIZE, "%s/%08" PRIx32 ".bin", dirName, cBlk->startAddr) < 0) {
         return INVALID_OUT_FILE;
       }
-      if (snprintf(usedFileName, NAME_SIZE, "%s/%08lx.use", dirName, cBlk->startAddr) < 0) {
+      if (snprintf(usedFileName, NAME_SIZE, "%s/%08" PRIx32 ".use", dirName, cBlk->startAddr) < 0) {
         return INVALID_OUT_FILE;
       }
 
@@ -499,7 +560,7 @@ int saveMemory(const char *dirName) {
         close(usedFileFd);
       return WRITE_FAILURE;
     }
-    nextAddress += static_cast<unsigned long>(BLKSIZE);
+    nextAddress += static_cast<uint32_t>(BLKSIZE);
   }
 
   if (dataFileFd > 0) {
@@ -540,8 +601,8 @@ int loadMemory(const char *dirName) {
 
     compat::println("d_name: {}", entry->d_name);
 
-    long address = 0;
-    if (sscanf(entry->d_name, "%8lx", &address) != 1) {
+    uint32_t address = 0;
+    if (sscanf(entry->d_name, "%8" SCNx32, &address) != 1) {
       closedir(dirBlk);
       return INVALID_OUT_FILE;
     }
@@ -577,7 +638,7 @@ int loadMemory(const char *dirName) {
     compat::print(stderr, "   ");
     compat::println(stderr, "{}", usedFileName);
 
-    long dataLength = 0;
+    uint32_t dataLength = 0;
     int result = bulkLoadBytes(address, byteFileName, usedFileName, &dataLength);
     if (result != 0) {
       closedir(dirBlk);
@@ -605,6 +666,22 @@ const char *memoryError(int error) {
 
   case READ_UNUSED_MEM:
     return "An uninit memory byte was accessed ";
+
+  case WRITE_FAILURE:
+    return "Memory or device write failed";
+
+  case INVALID_MEMORY_DEVICE:
+    return "Invalid, overlapping, or unknown memory device region";
+
+  case INVALID_DEVICE_ACCESS:
+    return "Memory access crosses a device region boundary";
+
+  case DEVICE_ACCESS_UNSUPPORTED:
+    return "Device does not support this access direction";
+  case INVALID_DEVICE_MOVE_RANGE:
+    return "Device copy ranges overlap or wrap the address space";
+  case DEVICE_MOVE_PERIPHERAL_UNSUPPORTED:
+    return "Device copy cannot access the on-chip peripheral address range";
 
   default:
     return "Unknown memory error";

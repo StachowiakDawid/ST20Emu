@@ -10,6 +10,9 @@ build:
 run: build
     ./builddir/st20emu
 
+test: build
+    meson test -C builddir --print-errorlogs
+
 clean:
     @echo "Cleaning up build directory..."
     rm -rf builddir

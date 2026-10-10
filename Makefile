@@ -13,9 +13,13 @@ OBJS_CPP = $(patsubst $(SRC_DIR)/%.cpp, $(OBJ_DIR)/%.o, $(SRCS_CPP))
 OBJS_C   = $(patsubst $(SRC_DIR)/%.c,   $(OBJ_DIR)/%.o, $(SRCS_C))
 OBJS     = $(OBJS_CPP) $(OBJS_C)
 
+CPU_TEST = $(OBJ_DIR)/tests/cpu-instructions
+CPU_TEST_SRCS = tests/cpu_instructions.cpp src/core/cpu/instructions.cpp src/core/cpu/st20.cpp src/core/cpu/instrentry.cpp src/core/memory/memory.cpp src/soc/sti5518/STi5518_Devices.cpp
+CPU_TEST_HEADERS = $(wildcard src/core/cpu/*.h src/core/memory/*.h src/common/*.h src/soc/sti5518/STi5518_Devices.h)
+
 CFLAGS_BASE   = -std=c23
-CXXFLAGS_BASE = -std=c++23 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wold-style-cast
-LDFLAGS_BASE  =
+CXXFLAGS_BASE = -std=c++23 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wold-style-cast -pthread
+LDFLAGS_BASE  = -pthread
 
 BUILD ?= debug
 
@@ -32,6 +36,17 @@ else
 endif
 
 all: $(TARGET)
+
+test: $(CPU_TEST)
+	./$(CPU_TEST)
+
+$(CPU_TEST): $(CPU_TEST_SRCS) $(CPU_TEST_HEADERS) Makefile
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CPU_TEST_SRCS) -o $@ $(LDFLAGS)
+
+$(filter $(OBJ_DIR)/core/cpu/%.o,$(OBJS_CPP)): $(CPU_TEST_HEADERS)
+
+$(OBJS_CPP): $(wildcard $(SRC_DIR)/common/*.h)
 
 $(TARGET): $(OBJS)
 	@echo $(MSG)
@@ -52,4 +67,4 @@ clean:
 	@echo "Cleaning up build artifacts..."
 	rm -rf $(OBJ_DIR) $(TARGET)
 
-.PHONY: all clean
+.PHONY: all clean test

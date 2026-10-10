@@ -15,5 +15,9 @@
   },
   "[toml]": {
     "editor.defaultFormatter": "tombi-toml.tombi"
+  },
+  "chat.tools.terminal.autoApprove": {
+    "make": true,
+    "./st20emu": true
   }
 }

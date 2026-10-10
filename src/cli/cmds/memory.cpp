@@ -27,7 +27,7 @@ CliError cmd_load_data(CliEngine & /*engine*/, std::span<const std::string_view>
     return CliError::BadParameter;
 
   uint32_t startAddr = 0;
-  long dataLength = 0;
+  uint32_t dataLength = 0;
   int result = 0;
 
   if (args.size() >= 2 && parseHex(std::string(args[0]), startAddr)) {
@@ -56,8 +56,8 @@ CliError cmd_save(CliEngine & /*engine*/, std::span<const std::string_view> args
 }
 
 CliError cmd_view(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long address;
-  unsigned long value = 0;
+  uint32_t address;
+  uint32_t value = 0;
 
   if (args.empty() || !parseHex(std::string(args[0]), address))
     return CliError::BadParameter;
@@ -68,7 +68,7 @@ CliError cmd_view(CliEngine & /*engine*/, std::span<const std::string_view> args
 }
 
 CliError cmd_view_a(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long address, value;
+  uint32_t address, value;
 
   if (args.size() < 2 || !parseHex(std::string(args[0]), address) ||
       !parseHex(std::string(args[1]), value)) {
@@ -81,15 +81,16 @@ CliError cmd_view_a(CliEngine & /*engine*/, std::span<const std::string_view> ar
 }
 
 CliError cmd_view_aa(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long address, range;
+  uint32_t address, range;
 
   if (args.size() < 2 || !parseHex(std::string(args[0]), address) ||
       !parseHex(std::string(args[1]), range)) {
     return CliError::BadParameter;
   }
 
-  for (long i = address; i < (address + range); i += 4) {
-    long value = 0;
+  for (uint64_t offset = 0; offset < range; offset += BytesPerWord) {
+    uint32_t i = address + static_cast<uint32_t>(offset);
+    uint32_t value = 0;
     readInvBytes(i, 4, &value);
 
     if (!(i & 0x0f)) {
@@ -103,7 +104,7 @@ CliError cmd_view_aa(CliEngine & /*engine*/, std::span<const std::string_view> a
 }
 
 CliError cmd_view_w(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long n, value;
+  uint32_t n, value;
 
   if (args.empty() || !parseHex(std::string(args[0]), n)) {
     return CliError::BadParameter;

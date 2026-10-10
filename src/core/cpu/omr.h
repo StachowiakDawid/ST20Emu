@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 /* OMR include file, contains #defines and structs */
 #define HIGH_PRIORITY 0
 #define LOW_PRIORITY 1
@@ -17,32 +19,27 @@
 #define ST20SIM_CPU_CLOCK 40000000 // The default CPU Clock used by st20sim.exe by SGSThomson
 #define SDRAM_CLOCK 121500000      // Programmable between 100 and 125 Mhz
 #define LPM_CLOCK 212000           // 212 Khz
-#ifndef HP_TIMER_TICK
-#define HP_TIMER_TICK                                                                              \
-  (CPU_CLOCK / (15625 * 64)) // 1000000 ticks per sec (1Mhz=15625*64), complete a cycle in 60'
-static long hp_timertick = HP_TIMER_TICK; //(~61 cpu cycles = 1 tick)
-#endif
-#ifndef LP_TIMER_TICK
-#define LP_TIMER_TICK                                                                              \
-  (CPU_CLOCK / 15625) // 15625 ticks per sec (15,625Khz), complete a cycle in 76hour
-static long lp_timertick = LP_TIMER_TICK; //(3888 cpu cycles = 1 tick)
-#endif
-// static long lpm_timertick=CPU_CLOCK/LPM_CLOCK; //Low Power Module Clock (64bit!!)
+inline constexpr uint32_t HP_TIMER_HZ = 1000000;
+inline constexpr uint32_t LP_TIMER_HZ = 15625;
+inline constexpr uint32_t NO_PROCESS = 0x80000000U;
+// static uint32_t lpm_timertick=CPU_CLOCK/LPM_CLOCK; //Low Power Module Clock (64bit!!)
 
 #ifndef OMRSTATE_STRUCT
 #define OMRSTATE_STRUCT
 typedef struct omrState {
-  // unsigned long ProcQueueFPtr[0]; //high priority front pointer register
-  // unsigned long ProcQueueFPtr[1]; //low priority front pointer register
-  // unsigned long ProcQueueBPtr[0]; //high priority back pointer register
-  // unsigned long ProcQueueBPtr[1]; //low priority back pointer register
-  long ClockRegHP; // high priority clock register (32bit 1Mhz 1hour)
-  long ClockRegLP; // low priority clock register (32bit 15,625Khz 76hours)
-  // unsigned long TptrReg[0];		//high priority timer list pointer register
-  // unsigned long TptrReg[1];		//low priority timer list pointer register
-  // unsigned long TnextReg[0];	//high priority alarm register
-  // unsigned long TnextReg[1];	//low priority alarm register
-  unsigned long Enables;         // trap and global interrupt enables register
+  uint32_t ProcQueueFPtr[2]{NO_PROCESS, NO_PROCESS};
+  uint32_t ProcQueueBPtr[2]{NO_PROCESS, NO_PROCESS};
+  uint32_t TptrReg[2]{NO_PROCESS, NO_PROCESS};
+  uint32_t TnextReg[2]{};
+  uint32_t ClockRegHP;
+  uint32_t ClockRegLP;
+  uint64_t ClockPhaseHP;
+  uint64_t ClockPhaseLP;
+  uint64_t TimeslicePhase{0};
+  uint32_t TrapEnables[2]{};
+  bool halted{false};
+  bool analysedOnReset{false};
+  uint32_t Enables;         // trap and global interrupt enables register
   unsigned char ClockEnables;    // start & stop the two clock register (bit 0..1)
   unsigned char HP_ErrorFlag;    // High Priority Untrapped arithmetic error flags
                                  // set by the processor if an integer error
@@ -124,6 +121,11 @@ Figure
 //////////////////////////////////////////////////////////////////////////
 // DEFINES FOR ENABLES REGISTER
 //////////////////////////////////////////////////////////////////////////
+constexpr uint32_t TRAP_GROUP_BREAKPOINT = 0;
+constexpr uint32_t TRAP_GROUP_ERROR = 1;
+constexpr uint32_t TRAP_GROUP_SYSTEM = 2;
+constexpr uint32_t TRAP_GROUP_SCHEDULER = 3;
+
 #define BREAKPOINT_TRAPENB 0x01    // bit 0
 #define INTEGER_ERR_TRAPENB 0x02   // bit 1
 #define INTEGER_OVF_TRAPENB 0x04   // bit 2
@@ -139,14 +141,14 @@ Figure
 #define PROCESS_TRAPENB 0x1000     // bit 12
 #define QUEUE_EMPTY_TRAPENB 0x2000 // bit 13
 // bits14-15 are reserved 0x3000 0x4000
-#define LP_PROCESS_INT_ENB 0x8000     // bit 16
-#define LP_TIMESLICE_ENB 0x10000      // bit 17
-#define LP_EXTERNALEVENT_ENB 0x20000  // bit 18
-#define LP_TIMER_ALRM_ENB 0x40000     // bit 19
-#define HP_PROCESS_INT_ENB 0x80000    // bit 20
-#define HP_TIMESLICE_ENB 0x100000     // bit 21
-#define HP_EXTERNALEVENT_ENB 0x200000 // bit 22
-#define HP_TIMER_ALRM_ENB 0x400000    // bit 23
+#define LP_PROCESS_INT_ENB 0x10000    // bit 16
+#define LP_TIMESLICE_ENB 0x20000      // bit 17
+#define LP_EXTERNALEVENT_ENB 0x40000  // bit 18
+#define LP_TIMER_ALRM_ENB 0x80000     // bit 19
+#define HP_PROCESS_INT_ENB 0x100000   // bit 20
+#define HP_TIMESLICE_ENB 0x200000     // bit 21
+#define HP_EXTERNALEVENT_ENB 0x400000 // bit 22
+#define HP_TIMER_ALRM_ENB 0x800000    // bit 23
 // bits24-31 are reserved
 
 #endif

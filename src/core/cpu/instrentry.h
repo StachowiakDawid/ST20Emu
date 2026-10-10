@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <cstdint>
+
 typedef struct instrEntry_struct {
   const char *mnemonic;
-  int (*function)(long);
-  char cpucycles; // instruction cpu cycles
+  int (*function)(uint32_t);
+  uint32_t cpucycles;
 } INSTRENTRY;
 
 #endif

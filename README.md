@@ -23,6 +23,23 @@ Build a release version (it's too broken for now anyway and will silence runtime
 BUILD=release make clean && make
 ```
 
+Run the CPU instruction tests:
+
+```bash
+make test
+```
+
+Alternatively, with Meson and Ninja installed:
+
+```bash
+meson setup builddir
+meson compile -C builddir
+meson test -C builddir --print-errorlogs
+```
+
+The Meson executable is `builddir/st20emu`. With `just` installed, `just build`
+and `just test` run the same Meson workflow.
+
 ## Getting started
 
 Run the binary from your terminal:
@@ -30,6 +47,45 @@ Run the binary from your terminal:
 ```bash
 ./st20emu
 ```
+
+For unattended firmware execution:
+
+```bash
+./st20emu --firmware firmware/6300.bin --batch
+```
+
+Batch mode runs CPU instructions until the first fetch or execution error (including
+CPU halt or idle), then exits with status `1`. It never reads keyboard input or
+opens a prompt, and ignores watches and the interactive instruction-count limits.
+Firmware-loading failures also exit with status `1`; invalid arguments exit with
+status `2`. Firmware that never encounters an error runs indefinitely.
+
+The terminal prints the log filename. Both stdout and stderr, including startup
+diagnostics, are saved in the current working directory as
+`st20emu-log-YYYYMMDD-HHMMSS.txt`. During execution, the instruction count, decoded
+instruction, CPU state, and diagnostics are logged for every instruction. Output
+is captured as immutable register, instruction-byte, and workspace snapshots;
+a background worker formats the trace and writes it to disk. Snapshots are handed
+off every 100,000 instructions, with no byte-size threshold. Up to two batches
+can wait behind the batch being written, bounding the number of queued records;
+memory usage depends on the captured workspace and diagnostics. Execution waits
+for the worker only when this queue fills.
+Capturing snapshots and formatting execution diagnostics still take CPU time;
+lossless full tracing cannot outrun the logger indefinitely. Any remaining output, including
+the final error, CPU state, and total instruction count, is drained and flushed
+when execution stops. Forced termination can lose buffered or queued output.
+If a log with the same timestamp already exists, startup fails without overwriting it.
+
+By default the image is placed immediately below `0x80000000`, as with `l filename`,
+and execution starts at the configured `START_ADDR` (default `0x7ffffffe`). To load
+and start at an explicit nonzero hexadecimal address:
+
+```bash
+./st20emu --firmware firmware/program.bin --address 0x1000 --batch
+```
+
+Omit `--batch` to load the firmware at startup and continue interactively.
+Use `--help` for available options. An address of zero selects default placement.
 
 Once inside the interactive command prompt (`>`), load a binary file containing valid ST20 instructions (such as a TSOP dump) using the `l` command:
 
@@ -40,6 +96,20 @@ l firmware/6300.bin
 > **Note:** You can load any compatible ST20 binary. Ensure you load a file before starting execution; attempting to run the emulator with empty memory will result in immediate execution errors.
 
 The emulator reads configuration values from `st20emu.ini`, which must reside in the same directory as the executable. The settings in this file are straightforward and self-explanatory.
+
+### Native STi5518 Devices
+
+Startup installs independent ASC1 (`0x20004000`, source 9) and ASC2 (`0x20005000`, source 8) transmitter models and an interrupt-controller model. Transmitter-ready events use the firmware-programmed source routing, interrupt masks, vector workspace and native `iret` save area. Sources routed to the same interrupt level are combined. This works with `PORTABLE_INSTRUCTION_ABI = 0x0`; it does not require portable saved-operation formats.
+
+`takeSti5518Asc1Transmit()` and `takeSti5518Asc2Transmit()` retrieve each port's captured outgoing bytes for embedders. Transmission timing is simplified, incoming serial data and full FIFO behavior are not implemented, and device state is not included in snapshots. Firmware may still become idle while waiting for input or another unmodeled peripheral.
+
+### Portable Instruction ABI
+
+Set `PORTABLE_INSTRUCTION_ABI = 0x1` in the configuration to enable the emulator-specific saved-operation and floating-point formats. The default is `0x0`, preserving the reference-oriented fallback behavior. Embedders can use `setPortableInstructionAbi(true)`.
+
+Portable mode adds resumable moves and channel copies, complete tagged shadow records, `restart`, `postnormsn`, `roundsn`, queued/nested external interrupts, and bounded external FIFO channels. It is **not a verified ST20 silicon ABI** and may be incompatible with existing firmware. The record and FP formats, host event APIs, snapshot behavior, and remaining limits are specified in [the instruction status document](docs/instruction-status.md#portable-emulator-abi).
+
+`reboot` remains unimplemented. Exact chip-specific bus timings, alignment rules, and peripheral register-map integration are not certified by portable mode.
 
 > **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
 
@@ -80,7 +150,11 @@ Before using the commands, keep in mind these parameter meanings:
 | **Diagnostics & info** | `db`    | `db value`           | Searches the internal database for information about a specified register (passed as a hex number).                                                                                                                                                                                                                             |
 |                        | `omr`   | `omr`                | Displays "Other Machine Registers" (clock, status registers, traps, interrupts).                                                                                                                                                                                                                                                |
 |                        | `ver`   | `ver`                | Shows the contents of the "Enables" register with descriptive labels for every bit set to 1.                                                                                                                                                                                                                                    |
-|                        | `vra`   | `vra`                | Toggles **Verbose Register Access** mode ON/OFF for verbose output on `devlb`/`sb` and `devlw`/`sb` instructions. Only STi5518 regs are supported at moment.                                                                                                                                                                    |
+|                        | `vra`   | `vra`                | Toggles STi5518 register and memory-region descriptions for `devlb`, `devls`, `devlw`, `devsb`, `devss`, and `devsw`. Standard device-access notes are printed in either mode. |
+
+Only version-11 CPU snapshots are supported; unversioned files, older versions (including version 10), and incomplete runtime blocks are rejected without changing live state. CPU registers, addresses, watch values, and memory words now use `uint32_t` rather than host-sized integers. Unused status and workspace-use slots are reserved and written as zero; they are no longer maintained in live CPU state. Snapshot records still use native byte order, boolean representation, and structure padding.
+
+The `UNDEFINED_WORD` setting supplies the 32-bit pattern used for undefined registers, memory values, and instruction results. `TIMER_GUESS` supplies the initial value of both priority clocks.
 
 ---
 
@@ -91,7 +165,7 @@ After a command is executed or `ENTER` is pressed, the emulator prints standard 
 - Displays the current hex values for `A`, `B`, `C` and the `Iptr` registers
 - Displays all currently allocated workspace words.
 
-  > Note: Unused words default to the bit pattern 0xAAAAAAAA
+      > Note: Undefined words use `UNDEFINED_WORD`, which defaults to `0xCCCCCCCC`.
 
 - Displays the memory address of the upcoming command, its raw octal byte values, and its decoded assembly mnemonic.
 - Finally, it drops the cursor back to the command prompt (`>`), waiting for the input.

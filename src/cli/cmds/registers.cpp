@@ -2,6 +2,7 @@
 
 #include "../../common/compat.h"
 #include "../../core/cpu/st20.h"
+#include "../../core/cpu/instructions.h"
 #include "../../soc/sti5518/STi5518_SearchDB.h"
 
 #include <string>
@@ -9,7 +10,7 @@
 namespace cli::cmds {
 
 CliError cmd_set_areg(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long value;
+  uint32_t value;
   if (args.empty() || !parseHex(std::string(args[0]), value))
     return CliError::BadParameter;
 
@@ -18,7 +19,7 @@ CliError cmd_set_areg(CliEngine & /*engine*/, std::span<const std::string_view> 
 }
 
 CliError cmd_set_breg(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long value;
+  uint32_t value;
   if (args.empty() || !parseHex(std::string(args[0]), value))
     return CliError::BadParameter;
 
@@ -27,7 +28,7 @@ CliError cmd_set_breg(CliEngine & /*engine*/, std::span<const std::string_view> 
 }
 
 CliError cmd_set_creg(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long value;
+  uint32_t value;
   if (args.empty() || !parseHex(std::string(args[0]), value))
     return CliError::BadParameter;
 
@@ -36,7 +37,7 @@ CliError cmd_set_creg(CliEngine & /*engine*/, std::span<const std::string_view> 
 }
 
 CliError cmd_set_iptr(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long value;
+  uint32_t value;
   if (args.empty() || !parseHex(std::string(args[0]), value))
     return CliError::BadParameter;
 
@@ -45,7 +46,7 @@ CliError cmd_set_iptr(CliEngine & /*engine*/, std::span<const std::string_view> 
 }
 
 CliError cmd_store_wptr(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  long index, value;
+  uint32_t index, value;
   if (args.size() < 2 || !parseHex(std::string(args[0]), index) ||
       !parseHex(std::string(args[1]), value)) {
     return CliError::BadParameter;
@@ -57,12 +58,15 @@ CliError cmd_store_wptr(CliEngine & /*engine*/, std::span<const std::string_view
 
 CliError cmd_show_regs(CliEngine &engine, std::span<const std::string_view> /*args*/) {
   engine.toggle_verbose_regs();
+  setDeviceAccessObserver(engine.is_verbose_regs() ? +[](uint32_t address) {
+    soc::sti5518::search_for_reg(address);
+  } : nullptr);
   compat::println("Verbose Register Access {}", engine.is_verbose_regs() ? "ON" : "OFF");
   return CliError::Success;
 }
 
 CliError cmd_query_db(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  unsigned long n = 0;
+  uint32_t n = 0;
   if (args.empty() || !parseHex(std::string(args[0]), n))
     return CliError::BadParameter;
 

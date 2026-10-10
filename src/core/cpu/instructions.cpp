@@ -1,4 +1,5 @@
 #include "instrentry.h"
+#include "instructions.h"
 #include "st20.h"
 #include "omr.h"
 
@@ -7,42 +8,403 @@
 // #include "../../soc/sti5518/STi5518_SearchDB.h"
 #include "../memory/memory.h"
 
+#include <algorithm>
+#include <bit>
 #include <cstdint>
+#include <limits>
+#include <string_view>
 
 extern OMRSTATE omrState;
 extern CPUSTATE cpuState;
 extern int instrLength;
-extern long wptrEndAddr;
-extern long instrCode;
-extern long st20ProductId;
-extern long memStartVal;
+extern uint32_t wptrEndAddr;
+extern uint32_t instrCode;
+extern uint32_t st20ProductId;
+extern uint32_t memStartVal;
 
-extern long pop(void);
-extern int push(long value);
-extern int readWptrWord(long index, long *value);
+extern int readWptrWord(uint32_t index, uint32_t *value);
 
 extern INSTRENTRY instrEntry[];
+
+namespace {
+DeviceAccessObserver deviceAccessObserver = nullptr;
+
+int deviceAccess(int width, bool writeAccess, const char *mnemonic) {
+  uint32_t address = pop();
+  bool mappedDevice = isMemoryDeviceAddress(address);
+  uint32_t value = 0;
+  int result = 0;
+  if (writeAccess) {
+    uint32_t mask = width == BytesPerWord ? WordMask : (1U << (width * BitsPerByte)) - 1U;
+    value = pop() & mask;
+    result = storeBytes(address, width, static_cast<uint32_t>(value));
+  } else {
+    result = readBytes(address, width, &value);
+    push(value);
+  }
+
+  compat::println("NOTE: At 0x{:08x} {} of device at address {:08x}, value=0x{:08x}",
+                  get_iptr() - static_cast<uint32_t>(instrLength),
+                  writeAccess ? "Write" : "Read", address, value);
+  if (!writeAccess && !mappedDevice)
+    compat::println("Value of A register is questionable");
+  if (deviceAccessObserver)
+    deviceAccessObserver(static_cast<uint32_t>(address));
+
+  if (result && (mappedDevice || writeAccess || result != READ_UNUSED_MEM)) {
+    compat::println("ERROR: {}", memoryError(result));
+    compat::println("  Error occurred when executing {} instruction", mnemonic);
+    return result;
+  }
+  return 0;
+}
+
+uint32_t reverseWord(uint32_t value) {
+  value = ((value >> 1) & 0x55555555U) | ((value & 0x55555555U) << 1);
+  value = ((value >> 2) & 0x33333333U) | ((value & 0x33333333U) << 2);
+  value = ((value >> 4) & 0x0f0f0f0fU) | ((value & 0x0f0f0f0fU) << 4);
+  value = ((value >> 8) & 0x00ff00ffU) | ((value & 0x00ff00ffU) << 8);
+  return (value >> 16) | (value << 16);
+}
+
+int saveReadyQueue(unsigned char priority) {
+  uint32_t address = cpuState.areg;
+  int result = storeBytes(address, BytesPerWord, omrState.ProcQueueFPtr[priority]);
+  if (!result) result = storeBytes(static_cast<uint32_t>(address + BytesPerWord), BytesPerWord, omrState.ProcQueueBPtr[priority]);
+  if (!result) pop();
+  return result;
+}
+
+int crcSteps(uint32_t count) {
+  uint32_t data = pop();
+  uint32_t checksum = pop();
+  uint32_t polynomial = cpuState.areg;
+  for (uint32_t bit = 0; bit < count; ++bit) {
+    bool outgoing = (checksum & WordSignBit) != 0;
+    checksum = (checksum << 1) | ((data >> (BitsPerWord - 1 - bit)) & 1U);
+    if (outgoing) checksum ^= polynomial;
+  }
+  push(checksum);
+  return 0;
+}
+
+uint32_t saturateWord(int64_t value) {
+  return static_cast<uint32_t>(std::clamp<int64_t>(value,
+      std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()));
+}
+
+uint64_t roundEvenShift(uint64_t value, int64_t shift) {
+  if (shift > BitsPerDoubleWord) return 0;
+  if (shift == BitsPerDoubleWord) return value > (uint64_t{1} << 63) ? 1 : 0;
+  uint64_t quotient = value >> shift;
+  uint64_t remainder = value & ((uint64_t{1} << shift) - 1);
+  uint64_t half = uint64_t{1} << (shift - 1);
+  return quotient + (remainder > half || (remainder == half && (quotient & 1U)) ? 1U : 0U);
+}
+
+enum class Move2dFilter { All, Nonzero, Zero };
+
+int copy2d(Move2dFilter filter) {
+  uint32_t width = pop();
+  uint32_t destination = pop();
+  uint32_t source = pop();
+  if (portableInstructionAbiEnabled()) {
+    uint32_t operation = filter == Move2dFilter::All ? 3U : filter == Move2dFilter::Zero ? 4U : 5U;
+    return beginResumableMove(operation, width, destination, source);
+  }
+  uint32_t rows = cpuState.move2dBlockLength;
+  uint32_t sourceStride = cpuState.move2dSourceStride;
+  uint32_t destinationStride = cpuState.move2dDestStride;
+  if (width == 0 || rows == 0) return 0;
+  for (uint32_t row = 0; row < rows; ++row) {
+    uint32_t sourceRow = source + row * sourceStride;
+    uint32_t destinationRow = destination + row * destinationStride;
+    for (uint32_t column = 0; column < width; ++column) {
+      uint32_t value = 0;
+      int result = readBytes(static_cast<uint32_t>(sourceRow + column), 1, &value);
+      if (result) return result;
+      if (filter == Move2dFilter::All || (filter == Move2dFilter::Nonzero && value != 0) ||
+          (filter == Move2dFilter::Zero && value == 0)) {
+        result = storeBytes(static_cast<uint32_t>(destinationRow + column), 1, static_cast<uint32_t>(value));
+        if (result) return result;
+      }
+    }
+  }
+  return 0;
+}
+}
+
+void setDeviceAccessObserver(DeviceAccessObserver observer) {
+  deviceAccessObserver = observer;
+}
 
 /*
  * The instrCode is used as an index to find the instrCode mnemonic and the subroutine
  * that will emulate the instruction.
  */
 
-int adc_(long operand) {
-  /* warning... I'm not checking for overflow */
-  push(pop() + operand);
+int saveh_(uint32_t /*unused*/) {
+  return saveReadyQueue(HIGH_PRIORITY);
+}
 
+int savel_(uint32_t /*unused*/) {
+  return saveReadyQueue(LOW_PRIORITY);
+}
+
+int sthb_(uint32_t /*unused*/) {
+  return setReadyQueue(HIGH_PRIORITY, omrState.ProcQueueFPtr[HIGH_PRIORITY], cpuState.areg);
+}
+
+int sthf_(uint32_t /*unused*/) {
+  return setReadyQueue(HIGH_PRIORITY, cpuState.areg, omrState.ProcQueueBPtr[HIGH_PRIORITY]);
+}
+
+int stlb_(uint32_t /*unused*/) {
+  return setReadyQueue(LOW_PRIORITY, omrState.ProcQueueFPtr[LOW_PRIORITY], cpuState.areg);
+}
+
+int stlf_(uint32_t /*unused*/) {
+  return setReadyQueue(LOW_PRIORITY, cpuState.areg, omrState.ProcQueueBPtr[LOW_PRIORITY]);
+}
+
+int swapqueue_(uint32_t /*unused*/) {
+  uint32_t priority = cpuState.areg;
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  uint32_t front = omrState.ProcQueueFPtr[priority];
+  uint32_t back = omrState.ProcQueueBPtr[priority];
+  int result = setReadyQueue(priority, cpuState.breg, cpuState.creg);
+  if (result) return result;
+  cpuState.areg = front;
+  cpuState.breg = back;
+  cpuState.creg = undefinedWord;
   return 0;
 }
 
-int add_(long /*unused*/) {
-  /* warning... I'm not checking for overflow */
-  push(pop() + pop());
-
+int insertqueue_(uint32_t /*unused*/) {
+  int result = insertReadyQueue(cpuState.areg,
+                               cpuState.breg, cpuState.creg);
+  if (result) return result;
+  pop();
+  pop();
+  pop();
   return 0;
 }
 
-int ajw_(long value) {
+int endp_(uint32_t /*unused*/) {
+  return endParallel(cpuState.areg);
+}
+
+int fmul_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  if (oldAreg == INT32_MIN && oldBreg == INT32_MIN) {
+    push(undefinedWord);
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
+  }
+  int64_t product = oldAreg * oldBreg;
+  uint64_t magnitude = static_cast<uint64_t>(product < 0 ? -product : product);
+  uint64_t rounded = magnitude >> 31;
+  uint64_t remainder = magnitude & 0x7fffffffU;
+  if (remainder > 0x40000000U || (remainder == 0x40000000U && (rounded & 1U))) ++rounded;
+  int64_t result = product < 0 ? -static_cast<int64_t>(rounded) : static_cast<int64_t>(rounded);
+  push(result);
+  return 0;
+}
+
+int fptesterr_(uint32_t /*unused*/) {
+  push(1);
+  return 0;
+}
+
+int unpacksn_(uint32_t /*unused*/) {
+  uint32_t packed = cpuState.areg;
+  uint32_t oldBreg = cpuState.breg;
+  uint32_t fraction = packed & 0x007fffffU;
+  uint32_t exponent = (packed >> 23) & 0xffU;
+  uint32_t type = exponent == 0xffU ? (fraction == 0 ? 2U : 3U)
+                                 : (exponent == 0 && fraction == 0 ? 0U : 1U);
+  cpuState.areg = fraction;
+  cpuState.breg = exponent;
+  cpuState.creg = static_cast<uint32_t>((oldBreg << 2) + type);
+  return 0;
+}
+
+int testpranal_(uint32_t /*unused*/) {
+  push(omrState.analysedOnReset ? 1 : 0);
+  return 0;
+}
+
+int postnormsn_(uint32_t /*unused*/) {
+  if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
+  uint32_t count = cpuState.creg;
+  if (count > BitsPerDoubleWord) return INVALID_PORTABLE_STATE;
+  uint32_t temporary = 0;
+  int result = readWptrWord(pw::Temp, &temporary);
+  if (result) return result;
+  uint32_t word = temporary;
+  int64_t exponent = static_cast<int32_t>(word << 1) / 2;
+  exponent -= count;
+  exponent = std::clamp<int64_t>(exponent, -(int64_t{1} << 30), (int64_t{1} << 30) - 1);
+  if (cpuState.areg == 0 && cpuState.breg == 0) exponent = 0;
+  cpuState.creg = (word & WordSignBit) | (static_cast<uint32_t>(exponent) & 0x7fffffffU);
+  return 0;
+}
+
+int roundsn_(uint32_t /*unused*/) {
+  if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
+  uint64_t significand = (static_cast<uint64_t>(cpuState.breg) << BitsPerWord) |
+                         cpuState.areg;
+  uint32_t word = cpuState.creg;
+  uint32_t sign = word & WordSignBit;
+  int64_t exponent = static_cast<int32_t>(word << 1) / 2;
+  if (significand != 0 && !(significand & (uint64_t{1} << 63))) return INVALID_PORTABLE_STATE;
+  uint32_t packed = sign;
+  if (significand != 0) {
+    if (exponent > 127) packed |= 0x7f800000U;
+    else if (exponent < -126) packed |= static_cast<uint32_t>(roundEvenShift(significand, 40 - 126 - exponent));
+    else {
+      uint64_t rounded = roundEvenShift(significand, 40);
+      if (rounded == (uint64_t{1} << 24)) {
+        rounded >>= 1;
+        ++exponent;
+      }
+      if (exponent > 127) packed |= 0x7f800000U;
+      else packed |= (static_cast<uint32_t>(exponent + 127) << 23) | (static_cast<uint32_t>(rounded) & 0x7fffffU);
+    }
+  }
+  pop();
+  pop();
+  pop();
+  push(packed);
+  return 0;
+}
+
+int restart_(uint32_t /*unused*/) {
+  return restartProcess(cpuState.areg);
+}
+
+int ldshadow_(uint32_t /*unused*/) {
+  int result = transferShadowRegisters(cpuState.areg,
+      cpuState.breg, cpuState.creg, true);
+  if (result) return result;
+  pop();
+  pop();
+  pop();
+  return 0;
+}
+
+int stshadow_(uint32_t /*unused*/) {
+  int result = transferShadowRegisters(cpuState.areg,
+      cpuState.breg, cpuState.creg, false);
+  if (result) return result;
+  pop();
+  pop();
+  pop();
+  return 0;
+}
+
+int iret_(uint32_t /*unused*/) {
+  return returnFromInterrupt();
+}
+
+int intdis_(uint32_t /*unused*/) {
+  if (cpuState.priority == LOW_PRIORITY) cpuState.interruptsDisabled = true;
+  return 0;
+}
+
+int intenb_(uint32_t /*unused*/) {
+  if (cpuState.priority == LOW_PRIORITY) cpuState.interruptsDisabled = false;
+  return 0;
+}
+
+int settimeslice_(uint32_t /*unused*/) {
+  if (cpuState.priority != LOW_PRIORITY) return 0;
+  bool previous = (cpuState.status & STATUS_TIMESLICE_ENABLE) != 0;
+  if (cpuState.areg == 0) cpuState.status &= ~STATUS_TIMESLICE_ENABLE;
+  else cpuState.status |= STATUS_TIMESLICE_ENABLE;
+  cpuState.areg = previous ? 1 : 0;
+  return 0;
+}
+
+int timeslice_(uint32_t /*unused*/) {
+  return timesliceProcess();
+}
+
+int cb_(uint32_t /*unused*/) {
+  int32_t value = static_cast<int32_t>(cpuState.areg);
+  return value < -128 || value > 127 ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int cbu_(uint32_t /*unused*/) {
+  return cpuState.areg > 255 ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int cs_(uint32_t /*unused*/) {
+  int32_t value = static_cast<int32_t>(cpuState.areg);
+  return value < -32768 || value > 32767 ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int csu_(uint32_t /*unused*/) {
+  return cpuState.areg > 65535 ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int csngl_(uint32_t /*unused*/) {
+  uint32_t sign = static_cast<int32_t>(cpuState.areg) < 0 ? WordMask : 0;
+  return cpuState.breg != sign ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int cflerr_(uint32_t /*unused*/) {
+  return (cpuState.areg & 0x7f800000U) == 0x7f800000U
+      ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int ccnt1_(uint32_t /*unused*/) {
+  uint32_t bound = pop();
+  uint32_t value = cpuState.areg;
+  return value == 0 || value > bound ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int csub0_(uint32_t /*unused*/) {
+  uint32_t bound = pop();
+  return cpuState.areg >= bound ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int cword_(uint32_t /*unused*/) {
+  int64_t bound = pop();
+  int64_t value = static_cast<int32_t>(cpuState.areg);
+  return value < -bound || value >= bound ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int cir_(uint32_t /*unused*/) {
+  int32_t lower = static_cast<int32_t>(pop());
+  int32_t upper = static_cast<int32_t>(pop());
+  int32_t value = static_cast<int32_t>(cpuState.areg);
+  return value < lower || value > upper ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int ciru_(uint32_t /*unused*/) {
+  uint32_t lower = pop();
+  uint32_t upper = pop();
+  uint32_t value = cpuState.areg;
+  return value < lower || value > upper ? signalArithmeticError(INTEGER_ERR_TRAPENB) : 0;
+}
+
+int adc_(uint32_t operand) {
+  int64_t value = static_cast<int32_t>(pop());
+  int64_t sum = value + static_cast<int32_t>(operand);
+  push(sum);
+  return sum > INT32_MAX || sum < INT32_MIN ? signalArithmeticError(INTEGER_OVF_TRAPENB) : 0;
+}
+
+int add_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  int64_t sum = oldBreg + oldAreg;
+  push(sum);
+  return sum > INT32_MAX || sum < INT32_MIN ? signalArithmeticError(INTEGER_OVF_TRAPENB) : 0;
+}
+
+int ajw_(uint32_t value) {
   int result;
 
   result = allocWptr(value);
@@ -53,14 +415,33 @@ int ajw_(long value) {
   return 0;
 }
 
-int and_(long /*unused*/) {
+int alt_(uint32_t /*unused*/) {
+  return beginAlternative(false);
+}
+
+int talt_(uint32_t /*unused*/) {
+  return beginAlternative(true);
+}
+
+int altwt_(uint32_t /*unused*/) {
+  pop();
+  pop();
+  pop();
+  return waitAlternative();
+}
+
+int altend_(uint32_t /*unused*/) {
+  return finishAlternative();
+}
+
+int and_(uint32_t /*unused*/) {
   push(pop() & pop());
 
   return 0;
 }
 
-int bcnt_(long /*unused*/) {
-  push(pop() * 4);
+int bcnt_(uint32_t /*unused*/) {
+  push(pop() * BytesPerWord);
 
   return 0;
 }
@@ -75,30 +456,40 @@ Definition:
   Creg' <- undefined
 Error signals: none
 */
-int bitcnt_(long /*unused*/) {
-  unsigned long oldAreg = static_cast<unsigned long>(pop());
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
-  unsigned long count = 0;
-
-  while (oldAreg) {
-    if (oldAreg & 0x8000)
-      count++;
-    oldAreg <<= 1;
-  }
-
-  push(static_cast<long>(oldBreg + count));
+int bitcnt_(uint32_t /*unused*/) {
+  uint32_t oldAreg = pop();
+  uint32_t oldBreg = pop();
+  uint32_t count = static_cast<uint32_t>(std::popcount(oldAreg));
+  push(oldBreg + count);
 
   return 0;
 }
 
-int bsub_(long /*unused*/) {
+int bitrevword_(uint32_t /*unused*/) {
+  push(reverseWord(pop()));
+  return 0;
+}
+
+int bitrevnbits_(uint32_t /*unused*/) {
+  uint32_t count = pop();
+  uint32_t value = pop();
+  uint32_t reversed = undefinedWord;
+  if (count == 0)
+    reversed = 0;
+  else if (count <= BitsPerWord)
+    reversed = reverseWord(value) >> (BitsPerWord - count);
+  push(reversed);
+  return 0;
+}
+
+int bsub_(uint32_t /*unused*/) {
   push(pop() + pop());
 
   return 0;
 }
 
-int call_(long offset) {
-  long addr = cpuState.iptr;
+int call_(uint32_t offset) {
+  uint32_t addr = cpuState.iptr;
 
   int result = wptrPushState();
   if (result != 0) {
@@ -107,23 +498,44 @@ int call_(long offset) {
   }
 
   cpuState.areg = cpuState.iptr;
-  cpuState.breg = UNDEFINED_WORD_OLD;
-  cpuState.creg = UNDEFINED_WORD_OLD;
-  cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
+  cpuState.breg = undefinedWord;
+  cpuState.creg = undefinedWord;
+  cpuState.iptr += offset;
 
   compat::println("Call to {:08x} ,return to {:08x}", cpuState.iptr, addr);
 
   return 0;
 }
 
-int cj_(long offset) {
-  if (cpuState.areg) { /* don't jump */
+int cj_(uint32_t offset) {
+  if (cpuState.areg) {
     pop();
   } else {
-    cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
+    cpuState.iptr = cpuState.iptr + offset;
   }
 
   return 0;
+}
+
+int causeerror_(uint32_t /*unused*/) {
+  uint32_t cause = cpuState.areg;
+  unsigned char priority = cause >= INTERNALCH_TRAPENB
+                               ? static_cast<unsigned char>(cpuState.breg & 1U)
+                               : cpuState.priority;
+  return requestTrap(cause, priority, true);
+}
+
+int clrhalterr_(uint32_t /*unused*/) {
+  omrState.HaltOnErrorFlag = 0;
+  return 0;
+}
+
+int crcbyte_(uint32_t /*unused*/) {
+  return crcSteps(BitsPerByte);
+}
+
+int crcword_(uint32_t /*unused*/) {
+  return crcSteps(BitsPerWord);
 }
 
 /*
@@ -132,34 +544,8 @@ Code: 2F F0
 Description: Perform a device read from memory, a memory-mapped device or a
 peripheral. The byte addressed by Areg is read into Areg as an unsigned value.
 */
-int devlb_(long /*unused*/) {
-  int result;
-  long oldAreg, newAreg;
-  long addr;
-
-  // current address
-  addr = get_iptr();
-
-  oldAreg = pop();
-  result = readBytes(oldAreg, 1, reinterpret_cast<unsigned long *>(&newAreg));
-  push(newAreg);
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt() || showRegs()) {
-  compat::println("NOTE: At 0x{:08x} Read of device at address {:08x}, value=0x{:08x}",
-                  addr - static_cast<long>(instrLength), oldAreg, newAreg);
-  compat::println("Value of A register is questionable");
-
-  // search_for_reg(oldAreg);
-  // }
-
-  if (result && result != READ_UNUSED_MEM) {
-    compat::println("ERROR: {}", memoryError(result));
-    compat::println("  Error occurred when executing devlb instruction");
-    return -1;
-  }
-
-  return 0;
+int devlb_(uint32_t /*unused*/) {
+  return deviceAccess(1, false, "devlb");
 }
 
 /*
@@ -169,35 +555,8 @@ Description: Perform a device read from memory, a memory-mapped device or a
 peripheral. The 16-bit object addressed by Areg is read into Areg as an unsigned
 value.
 */
-int devls_(long /*unused*/) {
-  int result;
-  long oldAreg, newAreg;
-  long addr;
-
-  // current address
-  addr = get_iptr();
-
-  oldAreg = pop();
-  result = readBytes(oldAreg, 2, reinterpret_cast<unsigned long *>(&newAreg));
-  push(newAreg);
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt() || showRegs()) {
-  compat::println("NOTE: At 0x{:08x} Read of device at address {:08x}, value=0x{:08x}",
-                  addr - static_cast<long>(instrLength), oldAreg, newAreg);
-  compat::println("Value of A register is questionable");
-
-  // if (showRegs())
-  //   search_for_reg(oldAreg);
-  // }
-
-  if (result && result != READ_UNUSED_MEM) {
-    compat::println("ERROR: {}", memoryError(result));
-    compat::println("  Error occurred when executing devls instruction");
-    return -1;
-  }
-
-  return 0;
+int devls_(uint32_t /*unused*/) {
+  return deviceAccess(2, false, "devls");
 }
 
 /*
@@ -206,35 +565,8 @@ Code: 2F F4
 Description: Perform a device read from memory, a memory-mapped device or a
 peripheral. The word addressed by Areg is read into Areg.
 */
-int devlw_(long /*unused*/) {
-  int result;
-  long oldAreg, newAreg;
-  long addr;
-
-  // current address
-  addr = get_iptr();
-
-  oldAreg = pop();
-  result = readBytes(oldAreg, 4, reinterpret_cast<unsigned long *>(&newAreg));
-  push(newAreg);
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt() || showRegs()) {
-  compat::println("NOTE: At 0x{:08x} Read of device at address {:08x}, value=0x{:08x}",
-                  addr - static_cast<long>(instrLength), oldAreg, newAreg);
-  compat::println("Value of A register is questionable");
-
-  //   if (showRegs())
-  //     search_for_reg(oldAreg);
-  // }
-
-  if (result && result != READ_UNUSED_MEM) {
-    compat::println("ERROR: {}", memoryError(result));
-    compat::println("  Error occurred when executing devlw instruction");
-    return -1;
-  }
-
-  return 0;
+int devlw_(uint32_t /*unused*/) {
+  return deviceAccess(BytesPerWord, false, "devlw");
 }
 
 /*
@@ -243,34 +575,8 @@ Code: 2F F1
 Description: Perform a device write from memory, a memory-mapped device or a
 peripheral. Store the least significant byte of Breg into the byte addressed by Areg.
 */
-int devsb_(long /*value*/) {
-  int result;
-  long value1, value2;
-  long addr;
-
-  // current address
-  addr = get_iptr();
-
-  value1 = pop();
-  value2 = pop();
-  result = storeBytes(value1, 1, static_cast<unsigned char>(value2 & 0xFF));
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt() || showRegs()) {
-  compat::println("NOTE: At 0x{:08x} Write to device at address {:08x}, value=0x{:08x}",
-                  addr - static_cast<long>(instrLength), value1,
-                  static_cast<unsigned char>(value2) & 0xFF);
-  //   if (showRegs())
-  //     search_for_reg(value1);
-  // }
-
-  if (result) {
-    compat::println("ERROR: {}", st20Error(result));
-    compat::println("  Error occurred when executing devsb instruction");
-    return -1;
-  }
-
-  return 0;
+int devsb_(uint32_t /*value*/) {
+  return deviceAccess(1, true, "devsb");
 }
 
 /*
@@ -279,34 +585,8 @@ Code: 2F F3
 Description: Perform a device write from memory, a memory-mapped device or a
 peripheral. Store bits 0..5 of Breg into the sixteen bits addressed by Areg.
 */
-int devss_(long /*value*/) {
-  int result;
-  long value1, value2;
-  long addr;
-  // current address
-  addr = get_iptr();
-
-  value1 = pop();
-  value2 = pop();
-  result = storeBytes(value1, 2, static_cast<unsigned int>(value2 & 0xFFFF));
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt() || showRegs()) {
-  compat::println("NOTE: At 0x{:08x} Write to device at address {:08x}, value=0x{:08x}",
-                  addr - static_cast<long>(instrLength), value1,
-                  static_cast<unsigned int>(value2) & 0xFFFF);
-
-  //   // Search description in register database
-  //   if (showRegs())
-  //     search_for_reg(value1);
-  // }
-
-  if (result) {
-    compat::println("ERROR: {}", st20Error(result));
-    return -1;
-  }
-
-  return 0;
+int devss_(uint32_t /*value*/) {
+  return deviceAccess(2, true, "devss");
 }
 
 /*
@@ -315,133 +595,114 @@ Code: 2F F5
 Description: Perform a device write from memory, a memory-mapped device or a
 peripheral. Store Breg into the word of memory addressed by Areg.
 */
-int devsw_(long /*value*/) {
-  int result;
-  long value1, value2;
-  long addr;
-
-  // current address
-  addr = get_iptr();
-
-  value1 = pop();
-  value2 = pop();
-  result = storeBytes(value1, 4, static_cast<long>(value2 & 0xFFFFFFFF));
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt() || showRegs()) {
-  compat::println("NOTE: At 0x{:08x} Write to device at address {:08x}, value=0x{:08x}",
-                  addr - static_cast<long>(instrLength), value1,
-                  static_cast<unsigned int>(value2) & 0xFFFF);
-
-  //   // Search description in register database
-  //   if (showRegs())
-  //     search_for_reg(value1);
-  // }
-
-  if (result) {
-    compat::println("ERROR: {}", st20Error(result));
-    return -1;
-  }
-
-  return 0;
+int devsw_(uint32_t /*value*/) {
+  return deviceAccess(BytesPerWord, true, "devsw");
 }
 
 /* Code: F4
   Description: Subtract Areg from Breg, without checking for overflow.
 */
-int diff_(long /*unused*/) {
-  uint32_t Areg = static_cast<uint32_t>(pop());
-  uint32_t Breg = static_cast<uint32_t>(pop());
+int diff_(uint32_t /*unused*/) {
+  uint32_t Areg = pop();
+  uint32_t Breg = pop();
 
-  // We need to use uint to omit runtime integer overflow errors
-  // It's safer than to depend on C undefined behaviors.
-  push(static_cast<long>(static_cast<int32_t>(Breg - Areg)));
+  push(Breg - Areg);
 
   return 0;
 }
 
-/* Code: 22 FC
-  Description: Divide Breg by Areg, with checking for overflow. The result when not
-  exact is rounded towards zero.
-*/
-int div_(long /*unused*/) {
+int disc_(uint32_t /*unused*/) {
+  uint32_t offset = pop();
+  bool enabled = pop() != 0;
+  uint32_t channel = pop();
+  uint32_t selected = 0;
+  int result = disableAltChannel(offset, enabled, channel, &selected);
+  push(selected);
+  return result;
+}
+
+int diss_(uint32_t /*unused*/) {
+  uint32_t offset = pop();
+  bool enabled = pop() != 0;
+  uint32_t selected = 0;
+  int result = disableAltSkip(offset, enabled, &selected);
+  push(selected);
+  return result;
+}
+
+int dist_(uint32_t /*unused*/) {
+  uint32_t offset = pop();
+  bool enabled = pop() != 0;
+  uint32_t time = pop();
+  uint32_t selected = 0;
+  int result = disableAltTimer(offset, enabled, time, &selected);
+  push(selected);
+  return result;
+}
+
+int div_(uint32_t /*unused*/) {
   int32_t Areg = static_cast<int32_t>(pop());
   int32_t Breg = static_cast<int32_t>(pop());
 
-  if ((Areg == 0) || ((Breg == -2147483648LL) && (Areg == -1))) {
-    (void)pop(); // Areg' <- undefined
-    // TODO: Signal IntegerOverflow per documentation
-    return 0;
+  if ((Areg == 0) || ((Breg == MostNeg) && (Areg == -1))) {
+    push(undefinedWord);
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
   }
 
-  push(static_cast<long>(Breg / Areg));
+  push(Breg / Areg);
 
   return 0;
 }
 
-int dup_(long /*unused*/) {
-  long value;
-
-  value = pop();
+int dup_(uint32_t /*unused*/) {
+  uint32_t value = pop();
   push(value);
   push(value);
 
   return 0;
 }
 
-int eqc_(long value) {
-  long oldAreg = pop();
+int enbc_(uint32_t /*unused*/) {
+  uint32_t guard = pop();
+  uint32_t channel = pop();
+  int result = enableAltChannel(guard != 0, channel);
+  push(guard);
+  return result;
+}
 
-  if (oldAreg == (value & 0xFFFFFFFF)) {
-    push(1L);
+int enbt_(uint32_t /*unused*/) {
+  uint32_t guard = pop();
+  uint32_t time = pop();
+  int result = enableAltTimer(guard != 0, time);
+  push(guard);
+  return result;
+}
+
+int enbs_(uint32_t /*unused*/) {
+  return enableAltSkip(cpuState.areg != 0);
+}
+
+int eqc_(uint32_t value) {
+  uint32_t oldAreg = pop();
+
+  if (oldAreg == value) {
+    push(1U);
   } else {
-    push(0L);
+    push(0U);
   }
 
   return 0;
 }
 
-int gajw_(long /*unused*/) {
-  int result;
-  long oldAreg;
-  long newAreg;
-  int i;
-  long address;
-
-  oldAreg = pop();
-  if (oldAreg & 0x03) {
-    compat::println("WARNING: Value in A register does not point to a word boundary");
-  }
-
-  result = addrWptrWord(0, &newAreg);
-  push(newAreg);
-  if (result) {
-    compat::println("ERROR: {}", st20Error(result));
-    return -1;
-  }
-  wptrEndAddr = oldAreg + 3;
-  cpuState.nWptr = 1;
-  cpuState.wptrUsed[0] = true;
-
-  addrWptrWord(0, &address);
-  result = allocBytes(address, 4);
-  /*  cpuState.wptr[0] = UNDEFINED_WORD_OLD;*/
-
-  for (i = 1; i < MAX_WPTR; i++) {
-    cpuState.wptrUsed[i] = false;
-  }
-  /*
-    result = storeWptrWord (0, oldAreg);
-    if (result) {
-     compat::println()"ERROR: {}", st20Error(result));
-     return -1;
-    }
-  */
+int gajw_(uint32_t /*unused*/) {
+  uint32_t address = cpuState.areg;
+  cpuState.areg = cpuState.wptr;
+  setWptr(address);
   return 0;
 }
 
-int gcall_(long /*unused*/) {
-  long oldAreg;
+int gcall_(uint32_t /*unused*/) {
+  uint32_t oldAreg;
 
   oldAreg = pop();
   push(cpuState.iptr);
@@ -450,29 +711,34 @@ int gcall_(long /*unused*/) {
   return 0;
 }
 
-int gt_(long /*unused*/) {
-  long value1, value2;
+int gt_(uint32_t /*unused*/) {
+  int32_t oldAreg = static_cast<int32_t>(pop());
+  int32_t oldBreg = static_cast<int32_t>(pop());
+  push(oldBreg > oldAreg);
 
-  value1 = pop();
-  value2 = pop();
+  return 0;
+}
+
+int gtu_(uint32_t /*unused*/) {
+  uint32_t value1 = pop();
+  uint32_t value2 = pop();
 
   push(value2 > value1);
 
   return 0;
 }
 
-int gtu_(long /*unused*/) {
-  long value1, value2;
-
-  value1 = pop();
-  value2 = pop();
-
-  push(static_cast<unsigned long>(value2) > static_cast<unsigned long>(value1));
-
-  return 0;
+int in_(uint32_t /*unused*/) {
+  uint32_t length = pop();
+  uint32_t channel = pop();
+  uint32_t buffer = pop();
+  return transferChannel(channel, length, buffer, true);
 }
 
-int invalidOp_(long /*unused*/) {
+int invalidOp_(uint32_t /*unused*/) {
+  if (std::string_view(instrEntry[instrCode].mnemonic) == "invalidop" &&
+      (trapEnableMask(cpuState.priority) & ILL_OPCODE_TRAPENB))
+    return requestTrap(ILL_OPCODE_TRAPENB, cpuState.priority);
   compat::println("This instruction ({}) has not been implemented yet",
                   instrEntry[instrCode].mnemonic);
   return -1;
@@ -482,25 +748,26 @@ int invalidOp_(long /*unused*/) {
   Description: Unconditional relative jump. The destination of the jump is expressed as
   a byte offset from the first byte after the current instruction. j 0 causes a breakpoint.
 */
-int j_(long offset) {
+int j_(uint32_t offset) {
   pop();
   pop();
   pop();
 
   if (offset == 0) {
-    compat::println("Breakpoint signalled by jump instruction");
+    int result = requestTrap(BREAKPOINT_TRAPENB, cpuState.priority);
+    if (result) return result;
   } else {
-    cpuState.iptr = (cpuState.iptr + offset) & 0xFFFFFFFF;
+    cpuState.iptr += offset;
   }
 
-  return 0;
+  return checkPeriodicTimeslice();
 }
 
 /* Code: 21 F6
   Description: Add with carry in and check for overflow. The result of the operation is
   the sum of Areg, Breg and bit 0 of Creg.
 */
-int ladd_(long /*unused*/) {
+int ladd_(uint32_t /*unused*/) {
   int64_t Areg, Breg, Creg, sum;
 
   Areg = static_cast<int32_t>(pop()); // Areg
@@ -509,14 +776,14 @@ int ladd_(long /*unused*/) {
 
   sum = Areg + Breg + (Creg & 0x01);
 
-  if (sum > 0x7FFFFFFFLL) {
-    push(static_cast<long>(sum - 0x100000000LL));
-    // TODO: Signal IntegerOverflow per documentation
-  } else if (sum < -2147483648LL) {
-    push(static_cast<long>(sum + 0x100000000LL));
-    // TODO: Signal IntegerOverflow per documentation
+  if (sum > MostPos) {
+    push(sum - (int64_t{1} << BitsPerWord));
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
+  } else if (sum < MostNeg) {
+    push(sum + (int64_t{1} << BitsPerWord));
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
   } else {
-    push(static_cast<long>(sum));
+    push(sum);
   }
 
   return 0;
@@ -525,16 +792,15 @@ int ladd_(long /*unused*/) {
 /*	Code: F1
   Description: Load the unsigned byte addressed by Areg into Areg.
 */
-int lb_(long /*unused*/) {
+int lb_(uint32_t /*unused*/) {
   int result;
-  long oldAreg, newAreg;
+  uint32_t oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 1, reinterpret_cast<unsigned long *>(&newAreg));
+  result = readBytes(oldAreg, 1, &newAreg);
   push(newAreg);
 
-  // TODO: rework with commands.cpp when possible
-  // TODO: CPU module should not have a knowledge about CLI
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
   compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
@@ -551,18 +817,18 @@ int lb_(long /*unused*/) {
 /*	Code: 2B F9
   Description: Load the byte addressed by Areg into Areg and sign extend to a word.
 */
-int lbx_(long /*unused*/) {
+int lbx_(uint32_t /*unused*/) {
   int result;
-  long oldAreg, newAreg;
+  uint32_t oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 1, reinterpret_cast<unsigned long *>(&newAreg));
+  result = readBytes(oldAreg, 1, &newAreg);
   if ((newAreg & 0x80) == 0x80) {
     newAreg = newAreg | 0xffffff00;
   }
   push(newAreg);
 
-  // TODO: rework with commands.cpp when possible
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
   compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
@@ -579,7 +845,7 @@ int lbx_(long /*unused*/) {
 /*	Code: Function 4
   Description: Load constant into Areg.
 */
-int ldc_(long operand) {
+int ldc_(uint32_t operand) {
   push(operand);
 
   return 0;
@@ -589,7 +855,7 @@ int ldc_(long operand) {
   Description: See ldprodid. This instruction may be removed in future so ldprodid
   should be used instead.
 */
-int lddevid_(long /*unused*/) {
+int lddevid_(uint32_t /*unused*/) {
   /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
           st20ProductId); */
 
@@ -603,60 +869,80 @@ int lddevid_(long /*unused*/) {
   minus borrow in from Creg, producing difference in Areg and borrow out in Breg,
   without checking for overflow.
 */
-int ldiff_(long /*unused*/) {
-  unsigned long temp;
+int ldiff_(uint32_t /*unused*/) {
+  uint32_t temp;
 
-  unsigned long value1 = static_cast<unsigned long>(pop());
-  unsigned long value2 = static_cast<unsigned long>(pop());
-  unsigned long value3 = static_cast<unsigned long>(pop());
+  uint32_t value1 = pop();
+  uint32_t value2 = pop();
+  uint32_t value3 = pop();
 
-  unsigned long carry = N_Add(value1, value3 & 0x01, &temp);
+  uint32_t carry = N_Add(value1, value3 & 0x01, &temp);
   value3 = value2 - temp;
 
   if ((temp > value2) || (carry == 1)) {
-    push(1L);
+    push(1U);
   } else {
-    push(0L);
+    push(0U);
   }
 
-  push(static_cast<long>(value3));
+  push(value3);
 
   return 0;
 }
 
-int ldiv_(long /*operand*/) {
-  unsigned long oldAreg = static_cast<unsigned long>(pop());
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
-  unsigned long oldCreg = static_cast<unsigned long>(pop());
+int ldiv_(uint32_t /*operand*/) {
+  uint32_t oldAreg = cpuState.areg;
+  uint32_t oldBreg = cpuState.breg;
+  uint32_t oldCreg = cpuState.creg;
 
   if (oldCreg >= oldAreg) {
-    /* Overflow */
-    return -1;
+    cpuState.creg = undefinedWord;
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
   }
-
-  unsigned long bl = oldBreg & MAX_INT;
-  unsigned long bh = oldBreg >> NBITS;
-
-  // using 1UL ensures the shifted '1' is treated as an unsigned long
-  unsigned long temp = (oldCreg % oldAreg) * (1UL << NBITS) + bh;
-
-  unsigned long hval = temp / oldAreg;
-
-  temp = (temp % oldAreg) * (1UL << NBITS) + bl;
-
-  unsigned long lval = temp / oldAreg;
-
-  unsigned long rem = temp % oldAreg;
-
-  push(static_cast<long>(rem));
-  push(static_cast<long>((hval << NBITS) + lval));
+  pop();
+  pop();
+  pop();
+  uint64_t dividend = (static_cast<uint64_t>(oldCreg) << BitsPerWord) | oldBreg;
+  push(dividend % oldAreg);
+  push(dividend / oldAreg);
 
   return 0;
 }
 
-int ldl_(long index) {
+int ldinf_(uint32_t /*unused*/) {
+  push(0x7f800000U);
+  return 0;
+}
+
+int lend_(uint32_t /*unused*/) {
+  uint32_t offset = pop();
+  uint32_t address = pop();
+  pop();
+  uint32_t countAddress = address + le::Count * BytesPerWord;
+  uint32_t indexAddress = address + le::Index * BytesPerWord;
+  uint32_t count = 0;
+  uint32_t index = 0;
+  int result = readBytes(countAddress, BytesPerWord, &count);
+  if (!result && static_cast<int32_t>(count) > 1) {
+    result = readBytes(indexAddress, BytesPerWord, &index);
+    if (!result) {
+      result = storeBytes(countAddress, BytesPerWord, count - 1U);
+      if (!result)
+        result = storeBytes(indexAddress, BytesPerWord, index + 1U);
+      if (!result)
+        cpuState.iptr = cpuState.iptr - offset;
+    }
+  }
+  if (result) {
+    compat::println("ERROR: {}", memoryError(result));
+    return -1;
+  }
+  return 0;
+}
+
+int ldl_(uint32_t index) {
   int result;
-  long value;
+  uint32_t value;
 
   result = readWptrWord(index, &value);
   push(value);
@@ -669,9 +955,9 @@ int ldl_(long index) {
   return 0;
 }
 
-int ldlp_(long index) {
+int ldlp_(uint32_t index) {
   int result;
-  long value;
+  uint32_t value;
 
   result = addrWptrWord(index, &value);
   push(value);
@@ -684,25 +970,25 @@ int ldlp_(long index) {
   return 0;
 }
 
-int ldmemstartval_(long /*unused*/) {
+int ldmemstartval_(uint32_t /*unused*/) {
   push(memStartVal);
   return 0;
 }
 
-int ldnl_(long offset) {
-  uint32_t oldAreg = static_cast<uint32_t>(pop());
-  unsigned long cWord = 0;
+int ldnl_(uint32_t offset) {
+  uint32_t oldAreg = pop();
+  uint32_t cWord = 0;
 
-  if (oldAreg & 0x03) {
+  if (oldAreg & ByteSelectMask) {
     compat::println("WARNING: Attempt to access a word that is not on a word boundary");
   }
 
-  uint32_t address = oldAreg + static_cast<uint32_t>(offset * 4);
+  uint32_t address = oldAreg + offset * BytesPerWord;
 
-  int result = readBytes(static_cast<long>(address), 4, &cWord);
-  push(static_cast<long>(cWord));
+  int result = readBytes(address, BytesPerWord, &cWord);
+  push(cWord);
 
-  // TODO: rework with commands.cpp when possible
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
   compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", address, cWord);
   // }
@@ -710,33 +996,31 @@ int ldnl_(long offset) {
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
     compat::println("  Error occurred when executing ldnl {:08x}  iptr={:08x}", address,
-                    static_cast<long>(get_iptr()));
+                    get_iptr());
     return -1;
   }
 
   return 0;
 }
 
-int ldnlp_(long offset) {
-  push(pop() + offset * 4);
+int ldnlp_(uint32_t offset) {
+  push(pop() + offset * BytesPerWord);
   return 0;
 }
 
-int ldpi_(long /*unused*/) {
+int ldpi_(uint32_t /*unused*/) {
   push(cpuState.iptr + pop());
 
   return 0;
 }
 
-int ldpri_(long /*unused*/) {
-  compat::println("Priority is unknown.  Setting A register to {:0x}", LOW_PRIORITY);
-
-  push(static_cast<long>(LOW_PRIORITY));
+int ldpri_(uint32_t /*unused*/) {
+  push(cpuState.priority);
 
   return 0;
 }
 
-int ldprodid_(long /*unused*/) {
+int ldprodid_(uint32_t /*unused*/) {
   /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
           st20ProductId); */
 
@@ -745,76 +1029,65 @@ int ldprodid_(long /*unused*/) {
   return 0;
 }
 
-/*
-LDTIMER (load timer)
-Code: 22 F2
-Description: Load the value of the current priority timer into Areg.
-Definition:
-  Areg4 <- ClockReg[Priority]
-  Breg4 <- Areg
-  Creg4 <- Breg
-Error signals: none
-*/
-
-// int ldtimer_ (long /*unused*/) {
-//   push(timerGuess);
-//   compat::println("Read of timer.  Assuming timer value is {:0x}", timerGuess);
-//
-//   return 0;
-// }
-
-int ldtraph_(long /*unused*/) {
-  unsigned long trapbase = 0x80000000;
-  unsigned long value;
-  // int result;
-  // result was not used but could be for info
-
-  unsigned long oldAreg = static_cast<unsigned long>(pop());
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
-  unsigned long oldCreg = static_cast<unsigned long>(pop());
-
-  compat::println("ldtraph: Group, &TrapHandler, priority: {:0x}, {:0x},  {:0x}", oldAreg, oldBreg,
-                  oldCreg);
-
-  trapbase = trapbase + 0x40 + 0x80 * oldCreg + 0x20 * oldAreg;
-
-  // TODO: what happened here?
-  // this reads 4 bytes from Breg and writes them into value variable
-
-  // result =
-  readBytes(static_cast<long>(oldBreg), 4, &value);
-
-  // but
-  // this reads 16 (sic!) bytes from Breg and writes them into trapbase
-  // why 16 bytes now?
-  // also this function does it with for loop 1 by 1 so there's performance issue
-  // commented by: Omikorin
-
-  // result =
-  storeByteRange(static_cast<long>(oldBreg), static_cast<long>(trapbase), 0x10);
-
-  return 0;
+int ldtraph_(uint32_t /*unused*/) {
+  if (trapEnableMask(cpuState.priority) & LOADTRAP_TRAPENB)
+    return requestTrap(LOADTRAP_TRAPENB, cpuState.priority);
+  uint32_t group = pop();
+  uint32_t buffer = pop();
+  uint32_t priority = pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  return transferTrapRecord(group, static_cast<unsigned char>(priority), buffer, true, false);
 }
 
-int lmul_(long /*operand*/) {
-  unsigned long oldAreg = static_cast<unsigned long>(pop());
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
-  unsigned long oldCreg = static_cast<unsigned long>(pop());
+int sttraph_(uint32_t /*unused*/) {
+  if (trapEnableMask(cpuState.priority) & STORETRAP_TRAPENB)
+    return requestTrap(STORETRAP_TRAPENB, cpuState.priority);
+  uint32_t group = pop();
+  uint32_t buffer = pop();
+  uint32_t priority = pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  return transferTrapRecord(group, static_cast<unsigned char>(priority), buffer, false, false);
+}
 
-  unsigned long al = oldAreg & 0xffff;
-  unsigned long ah = (oldAreg >> 16) & 0xffff;
+int ldtrapped_(uint32_t /*unused*/) {
+  if (trapEnableMask(cpuState.priority) & LOADTRAP_TRAPENB)
+    return requestTrap(LOADTRAP_TRAPENB, cpuState.priority);
+  uint32_t group = pop();
+  uint32_t buffer = pop();
+  uint32_t priority = pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  return transferTrapRecord(group, static_cast<unsigned char>(priority), buffer, true, true);
+}
 
-  unsigned long bl = oldBreg & 0xffff;
-  unsigned long bh = (oldBreg >> 16) & 0xffff;
+int sttrapped_(uint32_t /*unused*/) {
+  if (trapEnableMask(cpuState.priority) & STORETRAP_TRAPENB)
+    return requestTrap(STORETRAP_TRAPENB, cpuState.priority);
+  uint32_t group = pop();
+  uint32_t buffer = pop();
+  uint32_t priority = pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  return transferTrapRecord(group, static_cast<unsigned char>(priority), buffer, false, true);
+}
 
-  unsigned long hval = ah * bh;
-  unsigned long lval = al * bl;
-  unsigned long temp1 = ah * bl;
-  unsigned long temp2 = al * bh;
+int lmul_(uint32_t /*operand*/) {
+  uint32_t oldAreg = pop();
+  uint32_t oldBreg = pop();
+  uint32_t oldCreg = pop();
 
-  unsigned long temp12;
+  uint32_t al = oldAreg & 0xffff;
+  uint32_t ah = (oldAreg >> 16) & 0xffff;
 
-  unsigned long carry = N_Add(lval, oldCreg, &bl);
+  uint32_t bl = oldBreg & 0xffff;
+  uint32_t bh = (oldBreg >> 16) & 0xffff;
+
+  uint32_t hval = ah * bh;
+  uint32_t lval = al * bl;
+  uint32_t temp1 = ah * bl;
+  uint32_t temp2 = al * bh;
+
+  uint32_t temp12;
+
+  uint32_t carry = N_Add(lval, oldCreg, &bl);
   hval = hval + carry;
 
   carry = N_Add(temp1, temp2, &temp12);
@@ -825,53 +1098,29 @@ int lmul_(long /*operand*/) {
 
   ah = ((temp12 >> 16) & 0xffff) + hval;
 
-  push(static_cast<long>(ah));
-  push(static_cast<long>(al));
+  push(ah);
+  push(al);
 
   return 0;
 }
 
 // C= A+B with carry set if overflow
-unsigned long N_Add(unsigned long A, unsigned long B, unsigned long *C) {
-  int bit0_A, bit0_B;
-  unsigned long t1, t2, t3, carry;
-  t1 = A;
-  t2 = B;
-  t3 = (t1 << 31) >> 31;
-  if (t3 == 0) {
-    bit0_A = 0;
-  } else {
-    bit0_A = 1;
-  }
-
-  t3 = (t2 << 31) >> 31;
-  if (t3 == 0) {
-    bit0_B = 0;
-  } else {
-    bit0_B = 1;
-  }
-
-  t3 = (t1 >> 1) + (t2 >> 1);
-  if ((bit0_A == 1) && (bit0_B == 1))
-    t3++;
-  if ((t3 >> 31) == 0) {
-    carry = 0;
-  } else {
-    carry = 1;
-  }
-  *C = A + B;
-  return (carry);
+uint32_t N_Add(uint32_t A, uint32_t B, uint32_t *C) {
+  uint64_t sum = static_cast<uint64_t>(static_cast<uint32_t>(A)) +
+                 static_cast<uint32_t>(B);
+  *C = static_cast<uint32_t>(sum);
+  return static_cast<uint32_t>(sum >> BitsPerWord);
 }
 
-int ls_(long /*unused*/) {
+int ls_(uint32_t /*unused*/) {
   int result;
-  long oldAreg, newAreg;
+  uint32_t oldAreg, newAreg;
 
   oldAreg = pop();
-  result = readBytes(oldAreg, 2, reinterpret_cast<unsigned long *>(&newAreg));
+  result = readBytes(oldAreg, 2, &newAreg);
   push(newAreg);
 
-  // TODO: rework with commands.cpp when possible
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
   compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
@@ -885,35 +1134,47 @@ int ls_(long /*unused*/) {
   return 0;
 }
 
-int lshl_(long /*unused*/) {
-  unsigned short oldAreg = static_cast<unsigned short>(pop());
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
-  unsigned long oldCreg = static_cast<unsigned long>(pop());
-
-  if (oldAreg >= 32) {
-    push(static_cast<long>((oldBreg << (oldAreg - 32)) & 0xffffffff));
-    push(0L);
-  } else {
-    push(static_cast<long>(((oldBreg >> (32 - oldAreg)) | (oldCreg << oldAreg)) & 0xffffffff));
-    push(static_cast<long>((oldBreg << oldAreg) & 0xffffffff));
+int lsx_(uint32_t /*unused*/) {
+  uint32_t address = pop();
+  uint32_t value = 0;
+  int result = readBytes(address, 2, &value);
+  push(static_cast<int16_t>(value));
+  if (result) {
+    compat::println("ERROR: {}", memoryError(result));
+    return -1;
   }
-
   return 0;
 }
 
-int lshr_(long /*unused*/) {
-  unsigned short oldAreg = static_cast<unsigned short>(pop());
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
-  unsigned long oldCreg = static_cast<unsigned long>(pop());
-
-  if (oldAreg >= 32) {
-    push(0L);
-    push(static_cast<long>((oldCreg >> (oldAreg - 32)) & 0xffffffff));
-  } else {
-    push(static_cast<long>(oldCreg >> oldAreg));
-    push(static_cast<long>((oldCreg << (32 - oldAreg)) | (oldBreg >> oldAreg)));
+int lshl_(uint32_t /*unused*/) {
+  uint32_t count = pop();
+  uint32_t low = pop();
+  uint32_t high = pop();
+  if (count >= BitsPerDoubleWord) {
+    push(undefinedWord);
+    push(undefinedWord);
+    return 0;
   }
+  uint64_t value = (static_cast<uint64_t>(high) << BitsPerWord) | low;
+  uint64_t shifted = value << count;
+  push(shifted >> BitsPerWord);
+  push(shifted);
+  return 0;
+}
 
+int lshr_(uint32_t /*unused*/) {
+  uint32_t count = pop();
+  uint32_t low = pop();
+  uint32_t high = pop();
+  if (count >= BitsPerDoubleWord) {
+    push(undefinedWord);
+    push(undefinedWord);
+    return 0;
+  }
+  uint64_t value = (static_cast<uint64_t>(high) << BitsPerWord) | low;
+  uint64_t shifted = value >> count;
+  push(shifted >> BitsPerWord);
+  push(shifted);
   return 0;
 }
 
@@ -921,7 +1182,7 @@ int lshr_(long /*unused*/) {
   Description: Subtract with borrow in and check for overflow. The result of the
   operation, put into Areg, is Breg minus Areg, minus bit 0 of Creg.
 */
-int lsub_(long /*unused*/) {
+int lsub_(uint32_t /*unused*/) {
   int64_t Areg = static_cast<int32_t>(pop());
   int64_t Breg = static_cast<int32_t>(pop());
   int64_t Creg = static_cast<int32_t>(pop());
@@ -929,49 +1190,59 @@ int lsub_(long /*unused*/) {
   int64_t diff = Breg - Areg - (Creg & 0x01);
 
   if (diff > 0x7FFFFFFFLL) {
-    push(static_cast<long>(diff - 0x100000000LL));
-    // TODO: Signal IntegerOverflow per documentation
+    push(diff - 0x100000000LL);
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
   } else if (diff < -2147483648LL) {
-    push(static_cast<long>(diff + 0x100000000LL));
-    // TODO: Signal IntegerOverflow per documentation
+    push(diff + 0x100000000LL);
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
   } else {
-    push(static_cast<long>(diff));
+    push(diff);
   }
 
   return 0;
 }
 
-int lsum_(long /*unused*/) {
-  unsigned long temp;
+int lsum_(uint32_t /*unused*/) {
+  uint32_t temp;
 
-  unsigned long value1 = static_cast<unsigned long>(pop());
-  unsigned long value2 = static_cast<unsigned long>(pop());
-  unsigned long value3 = static_cast<unsigned long>(pop());
+  uint32_t value1 = pop();
+  uint32_t value2 = pop();
+  uint32_t value3 = pop();
 
-  unsigned long carry = N_Add(value1, (value3 & 0x01), &temp);
+  uint32_t carry = N_Add(value1, (value3 & 0x01), &temp);
   carry = carry + N_Add(value2, temp, &value3);
 
   if (carry > 0) {
-    push(1L);
-    push(static_cast<long>(value3 - 0xffffffff - 1));
+    push(1U);
+    push(value3 - WordMask - 1);
   } else {
-    push(0L);
-    push(static_cast<long>(value3));
+    push(0U);
+    push(value3);
   }
 
   return 0;
 }
 
-int mint_(long /*unused*/) {
-  push(MINIMUM_INTEGER);
+int mint_(uint32_t /*unused*/) {
+  push(MostNeg);
 
   return 0;
 }
 
-int move_(long /*unused*/) {
-  long oldAreg = pop();
-  long oldBreg = pop();
-  long oldCreg = pop();
+int devmove_(uint32_t /*unused*/) {
+  uint32_t length = pop();
+  uint32_t destination = pop();
+  uint32_t source = pop();
+  if (portableInstructionAbiEnabled()) return beginResumableMove(2, length, destination, source);
+  return copyDeviceBytes(source, destination, length);
+}
+
+int move_(uint32_t /*unused*/) {
+  uint32_t oldAreg = pop();
+  uint32_t oldBreg = pop();
+  uint32_t oldCreg = pop();
+  if (portableInstructionAbiEnabled())
+    return beginResumableMove(1, oldAreg, oldBreg, oldCreg);
 
   int result = storeByteRange(oldCreg, oldBreg, static_cast<int>(oldAreg));
 
@@ -987,70 +1258,117 @@ int move_(long /*unused*/) {
   return 0;
 }
 
-int mul_(long /*unused*/) {
-  /* WARNING: no checking for overflow */
-  push(pop() * pop());
-
+int move2dinit_(uint32_t /*unused*/) {
+  cpuState.move2dBlockLength = pop();
+  cpuState.move2dDestStride = pop();
+  cpuState.move2dSourceStride = pop();
   return 0;
 }
 
-int nop_(long /*unused*/) {
+int move2dall_(uint32_t /*unused*/) {
+  return copy2d(Move2dFilter::All);
+}
+
+int move2dnonzero_(uint32_t /*unused*/) {
+  return copy2d(Move2dFilter::Nonzero);
+}
+
+int move2dzero_(uint32_t /*unused*/) {
+  return copy2d(Move2dFilter::Zero);
+}
+
+int mul_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  int64_t product = oldAreg * oldBreg;
+  push(product);
+  return product > INT32_MAX || product < INT32_MIN ? signalArithmeticError(INTEGER_OVF_TRAPENB) : 0;
+}
+
+int norm_(uint32_t /*unused*/) {
+  uint32_t low = pop();
+  uint32_t high = pop();
+  pop();
+  uint64_t value = (static_cast<uint64_t>(high) << BitsPerWord) | low;
+  int count = std::countl_zero(value);
+  uint64_t normalized = value == 0 ? 0 : value << count;
+  push(count);
+  push(normalized >> BitsPerWord);
+  push(normalized);
   return 0;
 }
 
-int not_(long /*unused*/) {
+int nop_(uint32_t /*unused*/) {
+  return 0;
+}
+
+int not_(uint32_t /*unused*/) {
   push(~pop());
 
   return 0;
 }
 
-int or_(long /*unused*/) {
+int or_(uint32_t /*unused*/) {
   push(pop() | pop());
 
   return 0;
 }
 
-int pop_(long /*unused*/) {
+int out_(uint32_t /*unused*/) {
+  uint32_t length = pop();
+  uint32_t channel = pop();
+  uint32_t buffer = pop();
+  return transferChannel(channel, length, buffer, false);
+}
+
+int outbyte_(uint32_t /*unused*/) {
+  uint32_t value = pop();
+  uint32_t channel = pop();
+  pop();
+  return outputChannelValue(channel, value, 1);
+}
+
+int outword_(uint32_t /*unused*/) {
+  uint32_t value = pop();
+  uint32_t channel = pop();
+  pop();
+  return outputChannelValue(channel, value, BytesPerWord);
+}
+
+int pop_(uint32_t /*unused*/) {
   pop();
 
   return 0;
 }
 
-int prod_(long /*unused*/) {
-  push(pop() * pop());
+int prod_(uint32_t /*unused*/) {
+  uint64_t oldAreg = pop();
+  uint64_t oldBreg = pop();
+  push(oldAreg * oldBreg);
 
   return 0;
 }
 
-int resetch_(long /*unused*/) {
-  long oldAreg = pop();
-  long newAreg = 0;
-
-  if (oldAreg & 0x03) {
-    compat::println("WARNING: Attempt to access a word that is not on a word boundary");
+int rem_(uint32_t /*unused*/) {
+  int64_t divisor = static_cast<int32_t>(pop());
+  int64_t dividend = static_cast<int32_t>(pop());
+  if (divisor == 0) {
+    push(undefinedWord);
+    return signalArithmeticError(INTEGER_OVF_TRAPENB);
   }
+  push(dividend % divisor);
+  return 0;
+}
 
-  int result = readBytes(oldAreg, 4, reinterpret_cast<unsigned long *>(&newAreg));
-  push(newAreg);
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt()) {
-  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
-  // }
-
-  result = storeBytes(oldAreg, 4, static_cast<long>(NOT_PROCESS));
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt()) {
-  compat::println("NOTE: Write memory address {:08x}, value=0x{:08x}", oldAreg, MINIMUM_INTEGER);
-  // }
-
-  compat::println("Channel at address {:08x} was reset", oldAreg);
-
+int resetch_(uint32_t /*unused*/) {
+  uint32_t channel = pop();
+  uint32_t previous = undefinedWord;
+  int result = resetChannel(channel, &previous);
+  push(previous);
   return result;
 }
 
-int ret_(long /*unused*/) {
+int ret_(uint32_t /*unused*/) {
   int result;
 
   result = wptrPopState();
@@ -1062,9 +1380,9 @@ int ret_(long /*unused*/) {
   return 0;
 }
 
-int rev_(long /*unused*/) {
+int rev_(uint32_t /*unused*/) {
   int result = 0;
-  long oldAreg, oldBreg;
+  uint32_t oldAreg, oldBreg;
 
   oldAreg = pop();
   oldBreg = pop();
@@ -1075,26 +1393,45 @@ int rev_(long /*unused*/) {
   return (result);
 }
 
-int runp_(long /*unused*/) {
-  int result = 0;
-  long oldAreg;
-
-  oldAreg = pop();
+int runp_(uint32_t /*unused*/) {
+  uint32_t descriptor = pop();
   pop();
   pop();
-
-  compat::println("A new process was started.  Process descriptor =0x{:08x}", oldAreg);
-
-  return (result);
+  unsigned char priority = static_cast<unsigned char>(descriptor & 1U);
+  if (trapEnableMask(priority) & RUN_TRAPENB)
+    return requestTrap(RUN_TRAPENB, priority, false, descriptor);
+  int result = enqueueProcess(descriptor & WordSelectMask, static_cast<unsigned char>(descriptor & 1U));
+  return result ? result : pollTimers();
 }
 
-int sb_(long /*value*/) {
-  long value1 = pop();
-  long value2 = pop();
+int satadd_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  push(saturateWord(oldBreg + oldAreg));
+  return 0;
+}
+
+int satsub_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  push(saturateWord(oldBreg - oldAreg));
+  return 0;
+}
+
+int satmul_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  push(saturateWord(oldBreg * oldAreg));
+  return 0;
+}
+
+int sb_(uint32_t /*value*/) {
+  uint32_t value1 = pop();
+  uint32_t value2 = pop();
 
   int result = storeBytes(value1, 1, static_cast<unsigned char>(value2 & 0xFF));
 
-  // TODO: rework with commands.cpp when possible
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
   compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFF);
   // }
@@ -1107,49 +1444,94 @@ int sb_(long /*value*/) {
   return 0;
 }
 
-int shl_(long /*unused*/) {
-  long value;
-  long nbits;
+int seterr_(uint32_t /*unused*/) {
+  if (cpuState.priority == HIGH_PRIORITY) omrState.HP_ErrorFlag = 1;
+  else omrState.LP_ErrorFlag = 1;
+  if (omrState.HaltOnErrorFlag) {
+    omrState.halted = true;
+    return CPU_HALTED;
+  }
+  return 0;
+}
 
-  nbits = pop();
-  value = pop();
-  push(value << nbits);
+int testerr_(uint32_t /*unused*/) {
+  unsigned char &error = cpuState.priority == HIGH_PRIORITY ? omrState.HP_ErrorFlag : omrState.LP_ErrorFlag;
+  cpuState.areg = error == 0 ? 1U : 0U;
+  error = 0;
+  return 0;
+}
+
+int stoperr_(uint32_t /*unused*/) {
+  return (cpuState.priority == HIGH_PRIORITY ? omrState.HP_ErrorFlag : omrState.LP_ErrorFlag)
+             ? suspendProcess() : 0;
+}
+
+int sethalterr_(uint32_t /*unused*/) {
+  omrState.HaltOnErrorFlag = 1;
+  if (cpuState.priority == HIGH_PRIORITY ? omrState.HP_ErrorFlag : omrState.LP_ErrorFlag) {
+    omrState.halted = true;
+    return CPU_HALTED;
+  }
+  return 0;
+}
+
+int testhalterr_(uint32_t /*unused*/) {
+  push(omrState.HaltOnErrorFlag != 0 ? 1U : 0U);
+  return 0;
+}
+
+int shl_(uint32_t /*unused*/) {
+  uint32_t count = pop();
+  uint32_t value = pop();
+  uint32_t shifted = count < BitsPerWord ? value << count : undefinedWord;
+  push(shifted);
 
   return 0;
 }
 
-int shr_(long /*unused*/) {
-  long nbits = pop();
-  unsigned long value = static_cast<unsigned long>(pop());
-
-  push(static_cast<long>(value >> nbits));
+int shr_(uint32_t /*unused*/) {
+  uint32_t count = pop();
+  uint32_t value = pop();
+  uint32_t shifted = count < BitsPerWord ? value >> count : undefinedWord;
+  push(shifted);
 
   return 0;
 }
 
-int signal_(long /*unused*/) {
-  int result = 0;
-  long oldAreg;
-
-  oldAreg = pop();
+int signal_(uint32_t /*unused*/) {
+  uint32_t semaphore = pop();
   pop();
   pop();
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt()) {
-  compat::println("A signal was received for address 0x{:08x}", oldAreg);
-  // }
-
-  return (result);
+  return signalSemaphore(semaphore);
 }
 
-int ss_(long /*value*/) {
-  long value1 = pop();
-  long value2 = pop();
+int slmul_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  uint32_t carry = pop();
+  uint64_t product = static_cast<uint64_t>(oldAreg * oldBreg + carry);
+  push(product >> BitsPerWord);
+  push(product);
+  return 0;
+}
+
+int sulmul_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = pop();
+  uint32_t carry = pop();
+  uint64_t product = static_cast<uint64_t>(oldAreg * oldBreg + carry);
+  push(product >> BitsPerWord);
+  push(product);
+  return 0;
+}
+
+int ss_(uint32_t /*value*/) {
+  uint32_t value1 = pop();
+  uint32_t value2 = pop();
 
   int result = storeBytes(value1, 2, static_cast<unsigned int>(value2 & 0xFFFF));
 
-  // TODO: rework with commands.cpp when possible
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
   compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFFFF);
   // }
@@ -1162,9 +1544,9 @@ int ss_(long /*value*/) {
   return 0;
 }
 
-int ssub_(long /*unused*/) {
-  long oldAreg;
-  long oldBreg;
+int ssub_(uint32_t /*unused*/) {
+  uint32_t oldAreg;
+  uint32_t oldBreg;
 
   oldAreg = pop();
   oldBreg = pop();
@@ -1174,18 +1556,16 @@ int ssub_(long /*unused*/) {
   return 0;
 }
 
-int startp_(long /*unused*/) {
-  // int result;
-  long oldAreg, oldBreg;
-
-  oldAreg = pop();
-  oldBreg = pop();
+int startp_(uint32_t /*unused*/) {
+  uint32_t workspace = pop();
+  uint32_t offset = pop();
   pop();
-
-  compat::println("A new process was started.  Workspace=0x{:08x}, Iptr=0x{:08x}", oldAreg,
-                  cpuState.iptr + oldBreg);
-
-  return 0;
+  int result = storeBytes(static_cast<uint32_t>(workspace + static_cast<uint32_t>(pw::Iptr) * BytesPerWord), BytesPerWord,
+                          static_cast<uint32_t>(cpuState.iptr + offset));
+  if (!result && (trapEnableMask(cpuState.priority) & RUN_TRAPENB))
+    return requestTrap(RUN_TRAPENB, cpuState.priority, false, workspace | cpuState.priority);
+  if (!result) result = enqueueProcess(workspace, cpuState.priority);
+  return result ? result : pollTimers();
 }
 
 /*
@@ -1200,9 +1580,9 @@ Definition:
 Error signals: none
 */
 
-int stclock_(long /*unused*/) {
-  long oldAreg;
-  long oldBreg;
+int stclock_(uint32_t /*unused*/) {
+  uint32_t oldAreg;
+  uint32_t oldBreg;
 
   oldAreg = pop();
   oldBreg = pop();
@@ -1211,9 +1591,9 @@ int stclock_(long /*unused*/) {
                   (oldAreg & 1) ? "low priority" : "high priority");
 
   if (oldAreg & 1)
-    omrState.ClockRegLP = oldBreg;
+    omrState.ClockRegLP = static_cast<uint32_t>(oldBreg);
   else
-    omrState.ClockRegHP = oldBreg;
+    omrState.ClockRegHP = static_cast<uint32_t>(oldBreg);
 
   // omrState.Enables|=HPTIMER_MASK; // set bit0
   // omrState.Enables|=LPTIMER_MASK; // set bit1
@@ -1224,7 +1604,7 @@ int stclock_(long /*unused*/) {
   return 0;
 }
 
-int stl_(long index) {
+int stl_(uint32_t index) {
   int result;
 
   result = storeWptrWord(index, pop());
@@ -1242,15 +1622,15 @@ Code: Function 0x0E
 Description: Store the contents of Breg into the non-local variable at the specified
        word offset from Areg.
 */
-int stnl_(long offset) {
-  long oldAreg = pop();
-  unsigned long oldBreg = static_cast<unsigned long>(pop());
+int stnl_(uint32_t offset) {
+  uint32_t oldAreg = pop();
+  uint32_t oldBreg = pop();
 
-  int result = storeBytes(oldAreg + offset * 4, 4, static_cast<long>(oldBreg));
+  int result = storeBytes(oldAreg + offset * BytesPerWord, BytesPerWord, static_cast<uint32_t>(oldBreg));
 
-  // TODO: rework with commands.cpp when possible
+  // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", oldAreg + offset * 4,
+  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", oldAreg + offset * BytesPerWord,
                   oldBreg);
   // }
 
@@ -1262,140 +1642,111 @@ int stnl_(long offset) {
   return 0;
 }
 
-int stopp_(long /*unused*/) {
+int stopp_(uint32_t /*unused*/) {
   pop();
   pop();
   pop();
 
-  compat::println("This process has been terminated");
-
-  return 0;
+  return suspendProcess();
 }
 
-/*
-STTIMER (store timer)
-Code: 25 F4
-Description: Initialize the timers. Set the low and high priority clock registers to the
-value in Areg and start them ticking and scheduling ready processes.
-Definition:
-  Clockreg'[0] <- Areg
-  Clockreg'[1] <- Areg
-  Start timers
-
-  Areg' <- Breg
-  Breg' <- Creg
-  Creg' <- undefined
-Error signals: none
-*/
-
-// int sttimer_ (long /*unused*/) {
-//   compat::println("Low and high priority clock registers were set to 0x{:08x}",
-//						pop());
-//
-//   return 0;
-// }
-
-int sub_(long /*unused*/) {
-  long value1;
-  long value2;
-
-  value1 = pop();
-  value2 = pop();
-
-  /* warning... I'm not checking for overflow */
-  push(value2 - value1);
-
-  return 0;
+int sub_(uint32_t /*unused*/) {
+  int64_t oldAreg = static_cast<int32_t>(pop());
+  int64_t oldBreg = static_cast<int32_t>(pop());
+  int64_t difference = oldBreg - oldAreg;
+  push(difference);
+  return difference > INT32_MAX || difference < INT32_MIN ? signalArithmeticError(INTEGER_OVF_TRAPENB) : 0;
 }
 
-int sum_(long /*unused*/) {
+int sum_(uint32_t /*unused*/) {
   push(pop() + pop());
 
   return 0;
 }
 
-int wait_(long /*unused*/) {
-  long oldAreg;
-
-  oldAreg = pop();
+int wait_(uint32_t /*unused*/) {
+  uint32_t semaphore = pop();
   pop();
   pop();
-
-  // TODO: rework with commands.cpp when possible
-  // if (needPrompt()) {
-  compat::println("Wait on semaphore at 0x{:08x}", oldAreg);
-  // }
-
-  return 0;
+  return waitSemaphore(semaphore);
 }
 
-int wcnt_(long /*unused*/) {
-  // long value1, value2;
-  long value1;
+int wcnt_(uint32_t /*unused*/) {
+  // uint32_t value1, value2;
+  uint32_t value1;
 
   value1 = pop();
-  push(value1 & 0x3);
-  push((value1 & 0xfffffffc) / 4);
+  push(value1 & ByteSelectMask);
+  push((value1 & WordSelectMask) / BytesPerWord);
 
   return 0;
 }
 
-int wsub_(long /*unused*/) {
-  long value1, value2;
+int wsub_(uint32_t /*unused*/) {
+  uint32_t value1, value2;
 
   value1 = pop();
   value2 = pop();
 
-  push(value1 + value2 * 4);
+  push(value1 + value2 * BytesPerWord);
 
   return 0;
 }
 
-int wsubdb_(long /*unused*/) {
-  long value1, value2;
+int wsubdb_(uint32_t /*unused*/) {
+  uint32_t value1, value2;
 
   value1 = pop();
   value2 = pop();
 
-  push(value1 + value2 * 8);
+  push(value1 + value2 * BytesPerDoubleWord);
 
   return 0;
 }
 
-int xdble_(long /*unused*/) {
-  long value1;
+int xbword_(uint32_t /*unused*/) {
+  int8_t value = static_cast<int8_t>(pop());
+  push(value);
+  return 0;
+}
 
-  value1 = pop();
-  if (value1 >= 0)
-    push(0);
-  else
-    push(-1);
+int xword_(uint32_t /*unused*/) {
+  uint32_t signMask = pop();
+  uint32_t value = pop();
+  uint32_t extended = undefinedWord;
+  if (signMask != 0 && (signMask & (signMask - 1)) == 0) {
+    if (signMask == WordSignBit)
+      extended = value;
+    else if (value < (signMask << 1))
+      extended = value < signMask ? value : value - (signMask << 1);
+  }
+  push(extended);
+  return 0;
+}
 
-  push(value1);
+int xdble_(uint32_t /*unused*/) {
+  uint32_t oldAreg = pop();
+  push(static_cast<int32_t>(oldAreg) < 0 ? -1U : 0U);
+  push(oldAreg);
 
   return 0;
 }
 
-int xor_(long /*unused*/) {
+int xor_(uint32_t /*unused*/) {
   push(pop() ^ pop());
 
   return 0;
 }
 
-int xsword_(long /*unused*/) {
-  long value1;
-
-  value1 = pop();
-  if ((value1 & 0x8000) == 0x8000)
-    value1 = value1 | 0xffff0000;
-
-  push(value1);
+int xsword_(uint32_t /*unused*/) {
+  int16_t value = static_cast<int16_t>(pop());
+  push(value);
 
   return 0;
 }
 
 /*
-int _ (long value) {
+int _ (uint32_t value) {
   int result;
 
   if (result) {
@@ -1422,18 +1773,14 @@ Definition:
 Error signals: none
 */
 
-int ldtimer_(long /*unused*/) {
-  // Current Priority is obtained reading WDesc flag in the process descriptor
-  // see #include OMR.h
-
-  if (cpuState.nWptr & 0x01) { // HighPriority
+int ldtimer_(uint32_t /*unused*/) {
+  if (cpuState.priority == HIGH_PRIORITY) {
     push(omrState.ClockRegHP);
     compat::println("Read of HIGH_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegHP);
-  } else { // LowPriority
+  } else {
     push(omrState.ClockRegLP);
     compat::println("Read of LOW_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegLP);
   }
-  //'ticking' code is into execInstr() subroutine
   return 0;
 }
 
@@ -1453,7 +1800,7 @@ Definition:
 Error signals: none
 */
 
-int sttimer_(long /*unused*/) {
+int sttimer_(uint32_t /*unused*/) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
   compat::println("LOW and HIGH priority clock registers were set to 0x{:08x}",
@@ -1462,9 +1809,32 @@ int sttimer_(long /*unused*/) {
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
   omrState.ClockEnables |= LPTIMER_MASK; // set bit1
 
-  //'ticking' code is into execInstr() subroutine
+  return pollTimers();
+}
 
-  return 0;
+int taltwt_(uint32_t /*unused*/) {
+  pop();
+  pop();
+  pop();
+  return waitTimedAlternative();
+}
+
+int tin_(uint32_t /*unused*/) {
+  uint32_t time = pop();
+  pop();
+  pop();
+  return waitTimer(time);
+}
+
+int swaptimer_(uint32_t /*unused*/) {
+  uint32_t priority = pop();
+  uint32_t front = pop();
+  pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  uint32_t previous = NO_PROCESS;
+  int result = swapTimerList(static_cast<unsigned char>(priority), front, &previous);
+  push(previous);
+  return result;
 }
 
 /*
@@ -1480,17 +1850,17 @@ Definition:
 Error signals: none
 */
 
-int clockdis_(long /*unused*/) {
+int clockdis_(uint32_t /*unused*/) {
 
-  long oldAreg = pop();
-  long oldClockEnables = omrState.ClockEnables;
+  uint32_t oldAreg = pop();
+  uint32_t oldClockEnables = omrState.ClockEnables;
 
   if (oldAreg & HPTIMER_MASK)
     omrState.ClockEnables &= ~HPTIMER_MASK; // clear bit0
   if (oldAreg & LPTIMER_MASK)
     omrState.ClockEnables &= ~LPTIMER_MASK; // clear bit1
 
-  push(oldClockEnables &= 0x03); // bit 0.1 leaved unchanged. others are zero'ed
+  push(oldClockEnables &= ENABLE_CLOCKREG_MASK); // bit 0.1 leaved unchanged. others are zero'ed
                                  //'ticking' code is into execInstr() subroutine
   return 0;
 }
@@ -1509,17 +1879,17 @@ Definition:
 Error signals: none
 */
 
-int clockenb_(long /*unused*/) {
+int clockenb_(uint32_t /*unused*/) {
 
-  long oldAreg = pop();
-  long oldClockEnables = omrState.ClockEnables;
+  uint32_t oldAreg = pop();
+  uint32_t oldClockEnables = omrState.ClockEnables;
 
   if (oldAreg & HPTIMER_MASK)
     omrState.ClockEnables |= HPTIMER_MASK; // set bit0
   if (oldAreg & LPTIMER_MASK)
     omrState.ClockEnables |= LPTIMER_MASK; // set bit1
 
-  push(oldClockEnables &= 0x03); // bit 0.1 leaved unchanged. others are zero'ed
+  push(oldClockEnables &= ENABLE_CLOCKREG_MASK); // bit 0.1 leaved unchanged. others are zero'ed
                                  //'ticking' code is into execInstr() subroutine
   return 0;
 }
@@ -1533,8 +1903,8 @@ Definition:
   Areg' <- ClockReg[Areg]
 Error signals: none
  */
-int ldclock_(long /*unused*/) {
-  long oldAreg;
+int ldclock_(uint32_t /*unused*/) {
+  uint32_t oldAreg;
 
   oldAreg = pop();
 
@@ -1567,19 +1937,19 @@ Definition:
   Creg' <- undefined
 Error signals: none
 */
-int trapdis_(long /*unused*/) {
-  long Areg = pop();                  // traps mask
-  [[maybe_unused]] long Breg = pop(); // priority (popped to maintain stack state)
+int tret_(uint32_t /*unused*/) {
+  return returnFromTrap();
+}
 
-  long oldEnables = static_cast<long>(omrState.Enables);
-
-  Areg &= 0x3fff; // consider only bit 0..13
-
-  omrState.Enables &= ~static_cast<unsigned long>(Areg);
-
-  push(oldEnables & 0x3fff); // return old status in Areg
-
-  return 0;
+int trapdis_(uint32_t /*unused*/) {
+  uint32_t mask = pop();
+  uint32_t priority = pop();
+  pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  uint32_t previous = 0;
+  int result = changeTrapMask(static_cast<unsigned char>(priority), mask, false, &previous);
+  push(previous);
+  return result;
 }
 
 /*
@@ -1596,19 +1966,15 @@ Definition:
   Creg' <- undefined
 Error signals: none
 */
-int trapenb_(long /*unused*/) {
-  long Areg = pop();                  // traps mask
-  [[maybe_unused]] long Breg = pop(); // priority (popped to maintain stack state)
-
-  long oldEnables = static_cast<long>(omrState.Enables);
-
-  Areg &= 0x3fff; // consider only bit 0..13
-
-  omrState.Enables |= static_cast<unsigned long>(Areg);
-
-  push(oldEnables & 0x3fff); // return old status in Areg
-
-  return 0;
+int trapenb_(uint32_t /*unused*/) {
+  uint32_t mask = pop();
+  uint32_t priority = pop();
+  pop();
+  if (priority > LOW_PRIORITY) return INVALID_PROCESS_LIST;
+  uint32_t previous = 0;
+  int result = changeTrapMask(static_cast<unsigned char>(priority), mask, true, &previous);
+  push(previous);
+  return result;
 }
 
 /*
@@ -1624,17 +1990,11 @@ Definition:
   Areg'31..8 <- 0
 Error signals: none
 */
-int gintdis_(long /*unused*/) {
-  long Areg = pop(); // global intr events mask
-
-  long oldEnables = static_cast<long>(omrState.Enables);
-
-  Areg &= 0xff; // CONSIDER ONLY BIT 7..0
-
-  omrState.Enables &= ~static_cast<unsigned long>(Areg);
-
-  oldEnables &= 0x3fc000; // consider only bit 16..23
-  push(oldEnables << 16); // return old status in Areg
+int gintdis_(uint32_t /*unused*/) {
+  uint32_t mask = (pop() & 0xffU) << 16;
+  uint32_t oldEnables = (omrState.Enables >> 16) & 0xffU;
+  omrState.Enables &= ~static_cast<uint32_t>(mask);
+  push(oldEnables);
 
   return 0;
 }
@@ -1649,17 +2009,11 @@ Definition:
   Areg'8..31 <- 0
 Error signals: none
 */
-int gintenb_(long /*unused*/) {
-  long Areg = pop(); // global intr events mask
-
-  long oldEnables = static_cast<long>(omrState.Enables);
-
-  Areg &= 0xff; // CONSIDER ONLY BIT 7..0
-
-  omrState.Enables |= static_cast<unsigned long>(Areg);
-
-  oldEnables &= 0x3fc000; // consider only bit 16..23
-  push(oldEnables << 16); // return old status in Areg
+int gintenb_(uint32_t /*unused*/) {
+  uint32_t mask = (pop() & 0xffU) << 16;
+  uint32_t oldEnables = (omrState.Enables >> 16) & 0xffU;
+  omrState.Enables |= static_cast<uint32_t>(mask);
+  push(oldEnables);
 
   return 0;
 }

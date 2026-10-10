@@ -1,7 +1,7 @@
 # RFC 1
 
 **Status**: In Progress
-**Last Updated**: 15 July 2026
+**Last Updated**: 7 October 2026
 **Created on**: 14 July 2026
 **Created by**: Michał Korczak
 
@@ -73,7 +73,7 @@ For starters, we should not try to build a Gearboy-style GUI. A huge advancement
 
 ### Testing
 
-At some point, we need to build an automated test harness. This harness should test CPU logic and assert final registers states. The ST20 architecture is not our usual ISA and should be tested thoroughly
+An automated CPU instruction harness now exists in [tests/cpu_instructions.cpp](../tests/cpu_instructions.cpp). Run it with `make test` or `meson test -C builddir`. It checks instruction behavior, register state, scheduling, traps, device access, and portable-mode continuations. The ST20 architecture should continue to be tested thoroughly as hardware fidelity improves.
 
 ### Compiler and linker
 

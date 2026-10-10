@@ -3,7 +3,10 @@
 
 #pragma once
 
-inline constexpr unsigned long UNDEFINED_WORD_OLD = 0xCCCCCCCCU;
+#include <cstdint>
+
+inline constexpr uint32_t UNDEFINED_WORD_OLD = 0xCCCCCCCCU;
+inline uint32_t undefinedWord = UNDEFINED_WORD_OLD;
 
 inline constexpr int NAME_SIZE = 100;
 inline constexpr int PARM_SIZE = 30;
