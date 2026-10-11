@@ -97,9 +97,32 @@ l firmware/6300.bin
 
 The emulator reads configuration values from `st20emu.ini`, which must reside in the same directory as the executable. The settings in this file are straightforward and self-explanatory.
 
+### SoC Selection
+
+Use `--soc sti5518` (the default) or `--soc sti5512` to select the device model.
+The selected SoC is printed at startup and included in batch logs.
+
+```bash
+./st20emu --soc sti5512 --soc-revision 0xaa --firmware firmware/wsad.bin.bak --batch
+```
+
+The minimal STi5512 model implements only `VID_REV` at `0x00000078` as an
+8-bit, read-only register. `--soc-revision HEX` selects its value (00 to ff)
+and is accepted only with STi5512. The default `0x00` is a synthetic emulator
+value, not a documented silicon reset value; the example `0xaa` is a firmware
+comparison value, not a verified revision for the target board. The register
+is defined in the STi5512 Register Manual (7145562 B), pages 189-190, with
+`VideoBaseAddress = 0` in Table 1.
+
+STi5512 selection does not install the STi5518 ASC or interrupt-controller
+models. Other STi5512 peripherals, external RAM reset contents, and device
+snapshots remain unimplemented. In particular, this does not resolve the
+separate unwritten-memory read at `0x40000000`. The interactive `vra` register
+descriptions remain STi5518-specific.
+
 ### Native STi5518 Devices
 
-Startup installs independent ASC1 (`0x20004000`, source 9) and ASC2 (`0x20005000`, source 8) transmitter models and an interrupt-controller model. Transmitter-ready events use the firmware-programmed source routing, interrupt masks, vector workspace and native `iret` save area. Sources routed to the same interrupt level are combined. This works with `PORTABLE_INSTRUCTION_ABI = 0x0`; it does not require portable saved-operation formats.
+STi5518 startup installs independent ASC1 (`0x20004000`, source 9) and ASC2 (`0x20005000`, source 8) transmitter models and an interrupt-controller model. Transmitter-ready events use the firmware-programmed source routing, interrupt masks, vector workspace and native `iret` save area. Sources routed to the same interrupt level are combined. This works with `PORTABLE_INSTRUCTION_ABI = 0x0`; it does not require portable saved-operation formats.
 
 `takeSti5518Asc1Transmit()` and `takeSti5518Asc2Transmit()` retrieve each port's captured outgoing bytes for embedders. Transmission timing is simplified, incoming serial data and full FIFO behavior are not implemented, and device state is not included in snapshots. Firmware may still become idle while waiting for input or another unmodeled peripheral.
 

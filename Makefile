@@ -14,8 +14,8 @@ OBJS_C   = $(patsubst $(SRC_DIR)/%.c,   $(OBJ_DIR)/%.o, $(SRCS_C))
 OBJS     = $(OBJS_CPP) $(OBJS_C)
 
 CPU_TEST = $(OBJ_DIR)/tests/cpu-instructions
-CPU_TEST_SRCS = tests/cpu_instructions.cpp src/core/cpu/instructions.cpp src/core/cpu/st20.cpp src/core/cpu/instrentry.cpp src/core/memory/memory.cpp src/soc/sti5518/STi5518_Devices.cpp
-CPU_TEST_HEADERS = $(wildcard src/core/cpu/*.h src/core/memory/*.h src/common/*.h src/soc/sti5518/STi5518_Devices.h)
+CPU_TEST_SRCS = tests/cpu_instructions.cpp src/core/cpu/instructions.cpp src/core/cpu/st20.cpp src/core/cpu/instrentry.cpp src/core/memory/memory.cpp src/soc/sti5512/STi5512_Devices.cpp src/soc/sti5518/STi5518_Devices.cpp
+CPU_TEST_HEADERS = $(wildcard src/core/cpu/*.h src/core/memory/*.h src/common/*.h src/soc/sti5512/STi5512_Devices.h src/soc/sti5518/STi5518_Devices.h)
 
 CFLAGS_BASE   = -std=c23
 CXXFLAGS_BASE = -std=c++23 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wold-style-cast -pthread

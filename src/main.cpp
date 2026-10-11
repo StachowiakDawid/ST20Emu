@@ -5,6 +5,7 @@
 #include "common/defines.h"
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
+#include "soc/sti5512/STi5512_Devices.h"
 #include "soc/sti5518/STi5518_Devices.h"
 
 #include <algorithm>
@@ -258,10 +259,15 @@ int main(int argc, char **argv) {
   uint32_t loadAddress = 0;
   bool addressSpecified = false;
   bool batch = false;
+  std::string_view soc = "sti5518";
+  uint32_t socRevision = 0;
+  bool revisionSpecified = false;
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--firmware FILE] [--address HEX] [--batch]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--firmware FILE] [--address HEX] [--batch]\n"
+              "  --soc NAME       Emulated SoC (default: sti5518)\n"
+              "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
                       "  --firmware FILE  Load raw firmware at startup\n"
                       "  --address HEX    Load and entry address (0/default: auto-place, START_ADDR entry)\n"
                       "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt",
@@ -270,6 +276,21 @@ int main(int argc, char **argv) {
     }
     if (option == "--batch") {
       batch = true;
+    } else if (option == "--soc" && index + 1 < argc) {
+      soc = argv[++index];
+      if (soc != "sti5518" && soc != "sti5512") {
+        compat::println(stderr, "Invalid SoC: {} (expected sti5518 or sti5512)", soc);
+        return 2;
+      }
+    } else if (option == "--soc-revision" && index + 1 < argc) {
+      std::string_view value = argv[++index];
+      if (value.starts_with("0x") || value.starts_with("0X")) value.remove_prefix(2);
+      auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), socRevision, 16);
+      if (error != std::errc{} || end != value.data() + value.size() || socRevision > 0xffU) {
+        compat::println(stderr, "Invalid SoC revision: {} (expected hexadecimal byte)", argv[index]);
+        return 2;
+      }
+      revisionSpecified = true;
     } else if ((option == "--firmware" || option == "--address") && index + 1 < argc) {
       std::string_view value = argv[++index];
       if (option == "--firmware") {
@@ -287,6 +308,10 @@ int main(int argc, char **argv) {
       compat::println(stderr, "Unknown option or missing value: {} (use --help)", option);
       return 2;
     }
+  }
+  if (revisionSpecified && soc != "sti5512") {
+    compat::println(stderr, "--soc-revision requires --soc sti5512");
+    return 2;
   }
   if ((batch || addressSpecified) && firmware.empty()) {
     compat::println(stderr, "--batch and --address require --firmware FILE");
@@ -330,9 +355,12 @@ int main(int argc, char **argv) {
   st20emuInit(&userParms);
   st20Init(&userParms);
   memoryInit();
-  int deviceResult = initSti5518Devices();
+  compat::println("SoC: {}", soc);
+  if (soc == "sti5512") compat::println("VID_REV: 0x{:02x}", socRevision);
+  int deviceResult = soc == "sti5512" ? initSti5512Devices(static_cast<uint8_t>(socRevision))
+                                     : initSti5518Devices();
   if (deviceResult) {
-    compat::println(stderr, "Cannot initialize STi5518 devices: {}", memoryError(deviceResult));
+    compat::println(stderr, "Cannot initialize {} devices: {}", soc, memoryError(deviceResult));
     return 1;
   }
 

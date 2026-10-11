@@ -6,6 +6,7 @@
 #include <cinttypes>
 #include "../src/core/memory/memory.h"
 #include "../src/soc/sti5518/STi5518_Devices.h"
+#include "../src/soc/sti5512/STi5512_Devices.h"
 
 #include <cstdint>
 #include <bit>
@@ -2996,6 +2997,33 @@ static void testShadowRegisters() {
   schedulerFixture(0x20000);
 }
 
+static void testSti5512Devices() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5512 devices", initSti5512Devices() != 0, 0);
+  expect("STi5512 revision mapped", isMemoryDeviceAddress(0x78), 1);
+  expect("STi5512 does not install ASC2", isMemoryDeviceAddress(0x20005000), 0);
+  uint32_t value = 0xffffffffU;
+  expect("STi5512 revision byte readable", readBytes(0x78, 1, &value) != 0, 0);
+  expect("STi5512 synthetic default revision", value, 0);
+  expect("STi5512 revision configurable", initSti5512Devices(0xaa) != 0, 0);
+  reset(0x78, 0x11223344, 0x55667788);
+  expect("STi5512 devlb succeeds", devlb_(0) != 0, 0);
+  expect("STi5512 devlb revision", cpuState.areg, 0xaa);
+  expect("STi5512 devlb preserves B", cpuState.breg, 0x11223344);
+  expect("STi5512 devlb preserves C", cpuState.creg, 0x55667788);
+  expect("STi5512 revision rejects writes", storeBytes(0x78, 1, 0x55) == DEVICE_ACCESS_UNSUPPORTED, 1);
+  expect("STi5512 revision rejects wide reads", readBytes(0x78, 4, &value) == INVALID_DEVICE_ACCESS, 1);
+  readBytes(0x78, 1, &value);
+  expect("STi5512 rejected write preserves revision", value, 0xaa);
+  shutdownSti5512Devices();
+  expect("STi5512 shutdown removes revision", isMemoryDeviceAddress(0x78), 0);
+  expect("STi5512 can initialize again", initSti5512Devices(0xff) != 0, 0);
+  readBytes(0x78, 1, &value);
+  expect("STi5512 maximum revision byte", value, 0xff);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
 static void testSti5518Devices() {
   schedulerFixture(0x180000);
   setPortableInstructionAbi(false);
@@ -3118,6 +3146,7 @@ static void testSti5518Devices() {
 }
 
 static void testInterruptReturns() {
+  testSti5512Devices();
   testSti5518Devices();
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
     schedulerFixture(0x180000, priority);
