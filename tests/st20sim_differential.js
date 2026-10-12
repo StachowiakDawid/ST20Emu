@@ -8,7 +8,7 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const reference = require('../manuals/ST20/ST20_C2_C4-Core-Instruction-Set-Reference-Manual--72-TRN-273-01.json');
 const catalog = new Map(reference.instructions.map(entry => [entry.mnemonic, entry]));
-const options = { rounds: 2, samples: 16, seed: 0x20c2c4, operations: null, isolate: 1, priority: 0 };
+const options = { rounds: 2, samples: 16, seed: 0x20c2c4, operations: null, isolate: 1, priority: 0, interrupted: 0, trapshadow: 0, trapmasks: 0, crossshadow: 0 };
 const selected = [
   'add', 'sub', 'sum', 'diff', 'prod', 'mul', 'div', 'rem', 'gt',
   'and', 'or', 'xor', 'not', 'rev', 'dup', 'xdble', 'xsword', 'xbword',
@@ -42,7 +42,7 @@ const alternatives = new Set(['alt', 'talt', 'enbc', 'enbs', 'enbt', 'disc', 'di
 const records = new Set(['ldtraph', 'sttraph', 'ldtrapped', 'sttrapped']);
 const channels = new Set(['in', 'out', 'outbyte', 'outword']);
 const contextChanges = new Set(['ajw', 'gajw', 'call', 'ret', 'endp', 'restart', 'iret', 'stopp', 'tret']);
-const nativeUnavailable = new Set(['postnormsn', 'roundsn', 'reboot']);
+const nativeUnavailable = new Set(['reboot']);
 function instructionBytes(name) {
   if (name === 'taltwt') return [0x25, 0xf1];
   return catalog.get(name).encoding.bytes_hex.map(value => parseInt(value, 16));
@@ -52,7 +52,7 @@ function fixtureScope(name) {
   if (copies.has(name)) return 'native atomic RAM copies, lengths 0..16, two rows/stride 20 for 2D; no interrupted operations';
   if (alternatives.has(name)) return 'ready/skip/channel guard paths; no blocking wait or timer expiry; altend offset 0';
   if (records.has(name)) return 'four-word records, all groups and both priorities; no monitor traps';
-  if (['ldshadow', 'stshadow'].includes(name)) return 'inactive LP bank, selectors 0..15, idle block group; no native pending operation';
+  if (['ldshadow', 'stshadow'].includes(name)) return `${options.crossshadow ? `LP caller captured by HP run trap/tret, ${options.crossshadow >= 4 ? options.crossshadow % 2 ? 'invalid return to queued LP fallback' : 'invalidation/reactivation' : options.crossshadow >= 2 ? 'edited valid Status/Wptr/Iptr' : 'fixed caller Wptr/Iptr'}, ` : options.trapshadow ? 'HP breakpoint handler/tret, independent ' : 'inactive '}LP bank, idle block group; no native pending operation`;
   if (channels.has(name)) return 'matched software-channel peer, lengths 0..16 or scalar output; no external channel';
   if (clocks.has(name)) return 'clock-register data and enable masks with automatic ticks frozen';
   if (queues.has(name)) return name === 'timeslice' ? 'empty ready queues; no rotation/preemption' : 'RAM queue mutation and readback; no preemption';
@@ -69,8 +69,10 @@ function fixtureScope(name) {
   if (name === 'endp') return 'final branch/count 1 only';
   if (name === 'restart') return 'valid native record with no pending operation';
   if (name === 'iret') return 'valid standalone save frame; simulator controller context remains unresolved';
-  if (name === 'tret') return 'breakpoint handler entry and return, aligned handler stack inputs';
+  if (name === 'tret') return options.trapmasks ? 'independent caller/handler global and trap masks, direct handler reads and return restoration' : 'breakpoint handler entry and return, aligned handler stack inputs';
   if (name === 'causeerror') return 'enabled causes with group handlers; unexpected core control flow blocks completion';
+  if (name === 'postnormsn') return 'native workspace exponent, shifts 0..64, denormal guards, exponent wrap/clamp and norm/postnormsn/roundsn composition';
+  if (name === 'roundsn') return 'native biased exponent, nearest-even ties, sticky guards, subnormal carry and overflow';
   if (nativeUnavailable.has(name)) return name === 'reboot' ? 'bounded probe; emulator deliberately excludes reboot' : 'zero native FP probe; emulator native FP format is unsupported';
   return 'boundary and seeded operands in native mode; defined architectural results only';
 }
@@ -108,6 +110,8 @@ function generate(seed, operations) {
   const instructions = [];
   const cases = [];
   const fixups = [];
+  const unexecutedAddresses = new Set();
+  let lowWorkspace = 0x80000200;
   function emit(name, code, owner, setup = false, errorProbe = false) {
     let decodedOperand = 0;
     for (const byte of code) {
@@ -120,10 +124,11 @@ function generate(seed, operations) {
   function secondary(name, owner, setup = false) {
     emit(name, instructionBytes(name), owner, setup);
   }
-  function writeWord(address, value, owner) {
+  function writeWord(address, value, owner, device = false) {
     emit('ldc', encode(4, value), owner, true);
     emit('ldc', encode(4, address), owner, true);
-    emit('stnl', encode(14, 0), owner, true);
+    if (device) secondary('devsw', owner, true);
+    else emit('stnl', encode(14, 0), owner, true);
   }
   function stack(values, owner, setup = true) {
     for (const value of values) emit('ldc', encode(4, value), owner, setup);
@@ -140,7 +145,7 @@ function generate(seed, operations) {
     emit(name, [...Array(7).fill(0x20), functionNibble << 4], owner, setup);
     fixups.push({ offset, functionNibble, resolve: () => (resolve() - origin - offset - 8) >>> 0 });
   }
-  if (options.priority) {
+  if (options.priority && options.interrupted < 2) {
     let entry;
     writeWord(0x800001f8, 0x80000000, 0);
     addressWord(0x800001fc, () => entry, 0);
@@ -149,7 +154,83 @@ function generate(seed, operations) {
     secondary('stopp', 0, true);
     entry = origin + bytes.length;
   }
-  for (const name of operations) {
+  if (options.interrupted) {
+    const name = operations[0];
+    let handler;
+    let finish;
+    let lowEntry;
+    let skippedInstructions = 0;
+    const timerProbe = options.interrupted >= 2;
+    const deviceProbe = options.interrupted >= 3;
+    const source = deviceProbe ? 0x40010000 : 0x80001000;
+    cases.push({ name, sample: 0, source: hex(source), destination: '80001200', length: 64 });
+    stack([3], 0); secondary('clockenb', 0, true);
+    if (!timerProbe) {
+      writeWord(0x80003ff8, 0x80000000, 0);
+      addressWord(0x80003ffc, () => handler, 0);
+      writeWord(0x1ffffffc, 0x20000100, 0);
+      writeWord(0x2000001c, 0x80004000, 0, true);
+      writeWord(0x200000c0, 0x10080, 0, true);
+      writeWord(0x20000100, 0, 0, true);
+    }
+    stack([0xff], 0); secondary('gintenb', 0, true);
+    for (let index = 0; index < 48; ++index) {
+      writeWord(source + index * 4, (seed ^ (index * 0x1020304)) >>> 0, 0);
+      writeWord(0x80001200 + index * 4, 0xa5a55a5a, 0);
+    }
+    if (timerProbe) {
+      stack([0, 0], 0); secondary('stclock', 0, true);
+      if (deviceProbe) writeWord(0x800000f8, 0x80000000, 0);
+      writeWord(0x800001f8, 0x80000000, 0);
+      addressWord(0x800001fc, () => lowEntry, 0);
+      stack([0x80000201], 0); secondary('runp', 0, true);
+      stack([0], 0); secondary('tin', 0, true);
+      handler = origin + bytes.length;
+      const handlerStart = instructions.length;
+      stack([0x80006100, 1, 15], 0); secondary('stshadow', 0);
+      for (let index = 0; index < 12; ++index) {
+        stack([0x80006100 + index * 4], 0, false);
+        emit('ldnl', encode(3, 0), 0);
+      }
+      if (deviceProbe) {
+        for (let index = 0; index < 10; ++index) {
+          stack([0x80006500 + index * 4], 0, false);
+          emit('ldnl', encode(3, 0), 0);
+        }
+      }
+      branch('j', 0, () => finish, 0, true);
+      skippedInstructions = instructions.length - handlerStart;
+      lowEntry = origin + bytes.length;
+    }
+    if (name.startsWith('move2d')) {
+      stack([80, 80, 2], 0); secondary('move2dinit', 0, true);
+    }
+    stack([source, 0x80001200, 64], 0);
+    const interruptCount = instructions.length + 1 - skippedInstructions;
+    secondary(name, 0);
+    branch('j', 0, () => finish, 0, true);
+    if (!timerProbe) handler = origin + bytes.length;
+    for (const priority of timerProbe ? [] : [0, 1]) {
+      stack([0x80006000 + priority * 0x100, priority, 15], 0);
+      secondary('stshadow', 0);
+    }
+    for (const priority of timerProbe ? [] : [0, 1]) {
+      for (let index = 0; index < 12; ++index) {
+        stack([0x80006000 + priority * 0x100 + index * 4], 0, false);
+        emit('ldnl', encode(3, 0), 0);
+      }
+    }
+    finish = origin + bytes.length;
+    if (deviceProbe) {
+      for (let index = 0; index < 10; ++index) {
+        stack([0x80006500 + index * 4], 0, false);
+        emit('ldnl', encode(3, 0), 0);
+      }
+    }
+    cases[0].interruptCount = interruptCount;
+    cases[0].handler = hex(handler);
+  }
+  for (const name of options.interrupted ? [] : operations) {
     const entry = catalog.get(name);
     if (!entry || (!entry.encoding.bytes_hex && entry.instruction_class !== 'primary' && name !== 'taltwt'))
       throw new Error(`No reference encoding for ${name}`);
@@ -174,6 +255,7 @@ function generate(seed, operations) {
       let continuation;
       let subroutine;
       let resume;
+      let returnAddress;
       if (loads.has(name) || stores.has(name)) {
         const byteAccess = ['lb', 'lbx', 'sb', 'devlb', 'devsb'].includes(name);
         const shortAccess = ['ls', 'lsx', 'ss', 'devls', 'devss'].includes(name);
@@ -205,7 +287,10 @@ function generate(seed, operations) {
         memoryChecks.push(areg);
         if (name !== 'resetch') memoryChecks.push(areg + 4, areg + 8);
       }
-      if (name === 'causeerror') areg = (1 << (sample % 14)) >>> 0;
+      if (name === 'causeerror') {
+        areg = (1 << (sample % 14)) >>> 0;
+        if (areg >= 0x40) breg = options.priority;
+      }
       if (alternatives.has(name)) {
         areg = ['disc', 'diss', 'dist'].includes(name) ? sample % 8 : sample % 2;
         if (name === 'enbc') breg = 0x80003000;
@@ -224,7 +309,7 @@ function generate(seed, operations) {
         for (let index = 0; index < 4; ++index) memoryChecks.push(destination + index * 4);
       }
       if (['ldshadow', 'stshadow'].includes(name)) {
-        areg = sample % 16;
+        areg = options.crossshadow >= 4 ? 7 : sample % 16;
         breg = 1;
         creg = name === 'ldshadow' ? 0x80006000 : 0x80006200;
         for (let index = 0; index < 12; ++index) memoryChecks.push(0x80006200 + index * 4);
@@ -249,8 +334,41 @@ function generate(seed, operations) {
       if (name === 'endp') { areg = 0x80004000; memoryChecks.push(areg, areg + 4); }
       if (name === 'restart') areg = 0x80006000;
       if (name === 'call') memoryChecks.push(0x800000f0, 0x800000f4, 0x800000f8, 0x800000fc);
-      if (nativeUnavailable.has(name)) areg = breg = creg = 0;
-      cases.push({ name, sample, areg: hex(areg), breg: hex(breg), creg: hex(creg), immediate: hex(immediate) });
+      if (name === 'reboot') areg = breg = creg = 0;
+      if (name === 'postnormsn') creg = sample % 65;
+      if (name === 'roundsn') creg = sample < boundaries.length ? boundaries[sample] : nextWord() % 300;
+      let temporary = pattern;
+      let normalizeFirst = false;
+      if (['postnormsn', 'roundsn'].includes(name) && sample >= boundaries.length) {
+        const fpSample = sample - boundaries.length;
+        const exponents = [-65, -64, -63, -33, -32, -31, -24, -23, -2, -1, 0, 1, 2,
+          126, 127, 128, 253, 254, 255, 256, 0x80000000, 0x7fffffff];
+        const exponent = exponents[Math.floor(fpSample / 8) % exponents.length];
+        areg = [0, 1, 0x7fffffff, 0x80000000, 0xffffffff, 0, 1, nextWord()][fpSample % 8];
+        breg = [0x80000000, 0x8000007f, 0x80000080, 0x80000081,
+          0x80000180, 0xffffff80, 0xffffffff, nextWord() | 0x80000000][fpSample % 8] >>> 0;
+        if (name === 'postnormsn') {
+          normalizeFirst = fpSample >= exponents.length * 8;
+          if (normalizeFirst) {
+            breg >>>= fpSample % 32;
+            if (areg === 0 && breg === 0) areg = 1;
+            creg = breg !== 0 ? Math.clz32(breg) : 32 + Math.clz32(areg);
+          }
+          temporary = (exponent + creg) >>> 0;
+        }
+        else { creg = exponent >>> 0; if (exponent === 0) breg &= 0x7fffffff; }
+      }
+      cases.push({ name, sample, areg: hex(areg), breg: hex(breg), creg: hex(creg), immediate: hex(immediate),
+        ...(name === 'postnormsn' ? { temporary: hex(temporary), normalizeFirst } : {}) });
+      if (options.trapmasks) {
+        cases[owner].callerGlobal = hex(areg & 0xffff);
+        cases[owner].handlerGlobal = hex(breg & 0xffff);
+        cases[owner].callerTraps = hex((creg & 0x3fff) | 1);
+        cases[owner].handlerTraps = hex(immediate & 0x3ffe);
+        memoryChecks.push(0x80004018, 0x8000401c,
+          (options.priority ? 0x80000200 : 0x80000100) + 24,
+          (options.priority ? 0x80000200 : 0x80000100) + 28);
+      }
       emit('clrhalterr', catalog.get('clrhalterr').encoding.bytes_hex.map(value => parseInt(value, 16)), owner, true);
       emit('testerr', catalog.get('testerr').encoding.bytes_hex.map(value => parseInt(value, 16)), owner, true);
       if (['intdis', 'intenb', 'settimeslice'].includes(name)) {
@@ -285,6 +403,10 @@ function generate(seed, operations) {
       if (name === 'ret') addressWord(0x80000100, () => continuation, owner);
       if (name === 'endp') { addressWord(areg, () => continuation, owner); writeWord(areg + 4, 1, owner); }
       if (name === 'restart' || name === 'iret') {
+        if (name === 'iret') {
+          writeWord(0x1ffffffc, 0x20000100, owner);
+          writeWord(0x20000100, 0, owner, true);
+        }
         const values = name === 'restart'
           ? [0x00ff0000, 0x80100000, 0x80004000, 0, pattern, breg, creg, 0, 0, 0, 0, 0]
           : [0x80100000, 0x80004000, 0, pattern, breg, creg];
@@ -304,16 +426,25 @@ function generate(seed, operations) {
       if (name === 'tret' || name === 'causeerror') {
         const bit = name === 'tret' ? 0 : sample % 14;
         const group = bit === 0 ? 0 : bit <= 2 ? 1 : bit <= 5 ? 2 : 3;
-        const handler = 0x80000040 + group * 0x20;
-        writeWord(handler, 0, owner);
+        const handler = 0x80000040 + options.priority * 0x80 + group * 0x20;
+        if (name === 'causeerror') {
+          for (const priority of [0, 1]) { stack([priority, 0x3fff], owner); secondary('trapdis', owner, true); }
+        }
+        if (options.trapmasks) {
+          stack([0xffff], owner); secondary('gintdis', owner, true);
+          stack([areg & 0xffff], owner); secondary('gintenb', owner, true);
+          stack([options.priority, 0x3fff], owner); secondary('trapdis', owner, true);
+          stack([options.priority, (creg & 0x3fff) | 1], owner); secondary('trapenb', owner, true);
+        }
+        writeWord(handler, options.trapmasks ? (((breg & 0xffff) << 16) | (immediate & 0x3ffe)) >>> 0 : 0, owner);
         writeWord(handler + 4, 0x80000000, owner);
         writeWord(handler + 8, 0x80004000, owner);
         addressWord(handler + 12, () => subroutine, owner);
-        stack([0, (1 << bit) >>> 0], owner); secondary('trapenb', owner, true);
+        stack([options.priority, (1 << bit) >>> 0], owner); secondary('trapenb', owner, true);
       }
-      if (name === 'postnormsn') writeWord(0x80000100, 0, owner);
+      if (name === 'postnormsn') writeWord(0x80000100, temporary, owner);
       if (['gintenb', 'gintdis'].includes(name)) { stack([0xff], owner); secondary('gintenb', owner, true); }
-      if (['trapenb', 'trapdis', 'causeerror'].includes(name) || queues.has(name)) {
+      if (['trapenb', 'trapdis'].includes(name) || queues.has(name)) {
         for (const priority of [0, 1]) { stack([priority, 0x3fff], owner); secondary('trapdis', owner, true); }
       }
       if (clocks.has(name)) {
@@ -357,11 +488,32 @@ function generate(seed, operations) {
       }
       if (['ldshadow', 'stshadow'].includes(name)) {
         const values = [0x00ff0000, 0x80100000, 0x80007000, origin, pattern, breg, 0x12345678, 0, 0, 0, 0, 0];
+        if (options.crossshadow) values[2] = options.crossshadow >= 2 ? 0x80007000 + sample * 64 : 0x80000200;
+        if (options.crossshadow >= 2) values[1] = sample % 2 ? 0x80000000 : 0x80100000;
+        if (options.crossshadow >= 4) values[1] &= 0x7fffffff;
         for (let index = 0; index < 12; ++index) {
-          writeWord(0x80006000 + index * 4, values[index], owner);
+          if (options.crossshadow && index === 3) addressWord(0x80006000 + index * 4,
+              () => options.crossshadow >= 2 ? resume : returnAddress, owner);
+          else writeWord(0x80006000 + index * 4, values[index], owner);
           writeWord(0x80006200 + index * 4, 0xa5a55a5a, owner);
         }
-        if (name === 'stshadow') { stack([0x80006000, 1, 7], owner); secondary('ldshadow', owner, true); }
+        if (name === 'stshadow' && !options.crossshadow) { stack([0x80006000, 1, 7], owner); secondary('ldshadow', owner, true); }
+        if (options.trapshadow) {
+          writeWord(0x80000040, 0xffff0000, owner);
+          writeWord(0x80000044, 0x80000000, owner);
+          writeWord(0x80000048, 0x80004000, owner);
+          addressWord(0x8000004c, () => subroutine, owner);
+          stack([0, 1], owner); secondary('trapenb', owner, true);
+        }
+        if (options.crossshadow) {
+          writeWord(0x800000a0, 0xffff0000, owner);
+          writeWord(0x800000a4, 0x80000000, owner);
+          writeWord(0x800000a8, 0x80004000, owner);
+          addressWord(0x800000ac, () => subroutine, owner);
+          writeWord(0x800040f8, 0x80000000, owner);
+          addressWord(0x800040fc, () => resume, owner);
+          stack([0, 0x400], owner); secondary('trapenb', owner, true);
+        }
       }
       if (loads.has(name) || stores.has(name))
         writeWord(memoryChecks[0], loads.has(name) ? pattern : 0xa5a55a5a, owner);
@@ -384,6 +536,7 @@ function generate(seed, operations) {
           return continuation;
         } });
       } else stack([areg], owner);
+      if (normalizeFirst) secondary('norm', owner, true);
       const code = entry.instruction_class === 'primary'
         ? encode(parseInt(entry.encoding.function_nibble, 16), immediate)
         : instructionBytes(name);
@@ -397,23 +550,92 @@ function generate(seed, operations) {
         resume = origin + bytes.length;
         instructions.push(instructions.splice(resumeIndex, 1)[0]);
         stack([creg, breg, areg], owner);
+      } else if ((options.trapshadow || options.crossshadow) && ['ldshadow', 'stshadow'].includes(name)) {
+        if (options.crossshadow) {
+          stack([0x80004100], owner);
+          secondary('runp', owner, true);
+        } else emit('j', encode(0, 0), owner, true);
+        returnAddress = origin + bytes.length;
+        const resumeIndex = instructions.length;
+        branch('j', 0, () => resume, owner, true);
+        subroutine = origin + bytes.length;
+        stack([creg, breg, areg], owner);
+        emit(name, code, owner);
+        if (options.crossshadow >= 2) {
+          stack([0x80006400, 1, 7], owner);
+          secondary('stshadow', owner);
+          for (let index = 0; index < 7; ++index) {
+            stack([0x80006400 + index * 4], owner);
+            emit('ldnl', encode(3, 0), owner);
+          }
+          if (options.crossshadow === 2) {
+            for (let index = 0; index < 4; ++index) {
+              stack([0x800000b0 + index * 4], owner);
+              emit('ldnl', encode(3, 0), owner);
+            }
+          }
+        }
+        if (options.crossshadow >= 4) {
+          if (options.crossshadow % 2 === 0) {
+            writeWord(0x80006004, sample % 2 ? 0x80000000 : 0x80100000, owner);
+            stack([0x80006000, 1, 7], owner);
+            secondary('ldshadow', owner);
+            stack([0x80006600, 1, 7], owner);
+            secondary('stshadow', owner);
+            for (let index = 0; index < 7; ++index) {
+              stack([0x80006600 + index * 4], owner);
+              emit('ldnl', encode(3, 0), owner);
+            }
+          } else {
+            writeWord(0x80008ff8, 0x80000000, owner);
+            addressWord(0x80008ffc, () => resume, owner);
+            stack([0x80009001], owner);
+            secondary('runp', owner);
+          }
+        }
+        secondary('tret', owner, true);
+        resume = origin + bytes.length;
+        const returnBranch = instructions.splice(resumeIndex, 1)[0];
+        if (options.crossshadow < 2 || name !== 'ldshadow' || !(areg & 2)) instructions.push(returnBranch);
+        else unexecutedAddresses.add(returnBranch.address);
+        if (options.crossshadow >= 2 && name === 'ldshadow' && (areg & 2))
+          lowWorkspace = options.crossshadow >= 4 && options.crossshadow % 2 ? 0x80009000 : 0x80007000 + sample * 64;
       } else if (name === 'tret' || name === 'causeerror') {
         if (name === 'tret') emit('j', encode(0, 0), owner, true);
         else secondary('causeerror', owner);
         const resumeIndex = instructions.length;
         branch('j', 0, () => resume, owner, true);
         subroutine = origin + bytes.length;
+        if (options.trapmasks) {
+          stack([0], owner, false); secondary('gintdis', owner);
+          emit('stl', encode(13, 6), owner);
+          stack([options.priority, 0], owner, false); secondary('trapdis', owner);
+          emit('stl', encode(13, 7), owner);
+        }
         stack([creg, breg, areg], owner);
         secondary('tret', owner);
         resume = origin + bytes.length;
         instructions.push(instructions.splice(resumeIndex, 1)[0]);
         stack([creg, breg, areg], owner);
+        if (options.trapmasks) {
+          stack([0], owner, false); secondary('gintdis', owner);
+          emit('stl', encode(13, 6), owner);
+          stack([options.priority, 0], owner, false); secondary('trapdis', owner);
+          emit('stl', encode(13, 7), owner);
+        }
       } else emit(name, code, owner);
       if (name === 'j' || name === 'gcall' || name === 'cj' && areg === 0) bytes.push(0x40);
       continuation = origin + bytes.length;
+      if (name === 'postnormsn') secondary('roundsn', owner);
       if (name === 'move2dinit') {
         for (const value of [0x80001000, 0x80001200, sample % 17]) emit('ldc', encode(4, value), owner);
         secondary('move2dall', owner);
+      }
+      if (options.crossshadow && name === 'ldshadow') {
+        for (let index = 4; index < 7; ++index) {
+          emit('stl', encode(13, index), owner);
+          memoryChecks.push(lowWorkspace + index * 4);
+        }
       }
       if (name === 'ldshadow') { stack([0x80006200, 1, 15], owner, false); secondary('stshadow', owner); }
       if (channels.has(name)) { stack([0x80006000], owner, false); secondary('saveh', owner); }
@@ -450,7 +672,9 @@ function generate(seed, operations) {
     const code = encode(fixup.functionNibble, fixup.resolve());
     if (code.length > 8) throw new Error('Address fixup exceeds its reserved instruction');
     bytes.splice(fixup.offset, 8, ...Array(8 - code.length).fill(0x20), ...code);
-    instructions.find(entry => entry.address === origin + fixup.offset).operand = fixup.resolve() >>> 0;
+    const instruction = instructions.find(entry => entry.address === origin + fixup.offset);
+    if (instruction) instruction.operand = fixup.resolve() >>> 0;
+    else if (!unexecutedAddresses.has(origin + fixup.offset)) throw new Error('Missing executed fixup instruction');
   }
   const stopAddress = origin + bytes.length;
   bytes.push(...encode(15, 5014));
@@ -470,6 +694,18 @@ function parseSimulator(text) {
   return states;
 }
 
+function writeReport(directory, report) {
+  const stderr = path.join(directory, 'simulator.stderr');
+  const banner = fs.existsSync(stderr)
+    ? /st20sim: ST20 CPU simulator, version ([^\r\n]+)/.exec(fs.readFileSync(stderr, 'utf8'))
+    : null;
+  const oracle = {
+    executable: `${process.env.ST20SIM_ROOT}\\bin\\st20sim.exe`,
+    version: banner?.[1] ?? null,
+  };
+  fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify({ ...report, oracle }, null, 2));
+}
+
 function executeSimulator(directory, timeout = 30000) {
   const host = process.env.ST20SIM_HOST;
   if (!host) throw new Error('Set ST20SIM_HOST to your Windows SSH destination');
@@ -486,7 +722,7 @@ $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
 $env:ST20ROOT = ${quote(toolRoot)}
 $directory = ${quote(guestDirectory)}
-$child = Start-Process -FilePath ($env:ST20ROOT + '\\bin\\st20sim.exe') -WorkingDirectory $directory -ArgumentList @('-cfg', ('"' + $directory + '\\probe.cfg"'), '-event', ('"' + $directory + '\\clocks.events"'), '-wptr', '0x80000100', '-trace', '4', '-tracelog', ('"' + $directory + '\\simulator.trace"'), ('"' + $directory + '\\probe.hex"')) -NoNewWindow -PassThru -RedirectStandardOutput ($directory + '\\simulator.stdout') -RedirectStandardError ($directory + '\\simulator.stderr')
+$child = Start-Process -FilePath ($env:ST20ROOT + '\\bin\\st20sim.exe') -WorkingDirectory $directory -ArgumentList @('-cfg', ('"' + $directory + '\\probe.cfg"'), '-event', ('"' + $directory + '\\clocks.events"'), '-wptr', '0x80000100', '-trace', '${options.interrupted ? 7 : 4}', '-tracelog', ('"' + $directory + '\\simulator.trace"'), ('"' + $directory + '\\probe.hex"')) -NoNewWindow -PassThru -RedirectStandardOutput ($directory + '\\simulator.stdout') -RedirectStandardError ($directory + '\\simulator.stderr')
 $handle = $child.Handle
 if (-not $child.WaitForExit(${timeout})) { $child.Kill(); $child.WaitForExit(); throw 'Simulator timed out' }
 $child.Refresh()
@@ -517,6 +753,7 @@ function compare(program, simulator, local) {
   let defined = [false, false, false];
   const memoryDefined = new Map();
   const shadowDefined = [[false, false, false], [false, false, false]];
+  let capturedStackLoaded = false;
   const readDefined = (address, width) => Array.from({ length: width }, (_, offset) =>
     memoryDefined.get((address + offset) >>> 0) === true).every(Boolean);
   function writeDefined(address, width, value) {
@@ -552,6 +789,12 @@ function compare(program, simulator, local) {
     if (name === 'xword') defined[0] = before[0] && before[1];
     if (name === 'unpacksn') defined[0] = before[0] && (registers[0] & 0x7f800000) !== 0x7f800000;
     if (name === 'csngl') defined = [before[0], before[2], false];
+    if (options.crossshadow && name === 'runp' && (parseInt(local[index][1], 16) & 1)) {
+      shadowDefined[1] = [...before];
+      capturedStackLoaded = false;
+    }
+    if (options.crossshadow && name === 'tret') defined = capturedStackLoaded && !(options.crossshadow >= 4 && options.crossshadow % 2)
+      ? [...shadowDefined[1]] : [false, false, false];
     if (name === 'testerr') defined = [true, before[0], before[1]];
     if (['sthf', 'sthb', 'stlf', 'stlb'].includes(name)) defined = [before[1], before[2], false];
     if (name === 'ldl') defined[0] = readDefined((workspace + instruction.operand * 4) >>> 0, 4);
@@ -581,7 +824,10 @@ function compare(program, simulator, local) {
     }
     if (name === 'ldshadow' && (registers[0] & 4))
       shadowDefined[registers[1]] = [0, 1, 2].map(field => readDefined(registers[2] + 16 + field * 4, 4));
+    if (options.crossshadow && name === 'ldshadow' && (registers[0] & 4)) capturedStackLoaded = true;
     if (name === 'stshadow') {
+      if (options.crossshadow && (registers[0] & 1)) writeDefined(registers[2], 4, true);
+      if (options.crossshadow && (registers[0] & 2)) writeDefined(registers[2] + 4, 12, true);
       const source = registers[1] === (parseInt(local[index][1], 16) & 1) ? before : shadowDefined[registers[1]];
       if (registers[0] & 4) source.forEach((value, field) => writeDefined(registers[2] + 16 + field * 4, 4, value));
       if (registers[0] & 8) writeDefined(registers[2] + 28, 20, false);
@@ -596,7 +842,7 @@ function main() {
   for (let index = 2; index < process.argv.length; index += 2) {
     const key = process.argv[index].replace(/^--/, '');
     if (!Object.hasOwn(options, key) || process.argv[index + 1] === undefined)
-      throw new Error('Usage: node tests/st20sim_differential.js [--rounds N] [--samples N] [--seed N] [--operations add,sub,...] [--isolate 0|1]');
+      throw new Error('Usage: node tests/st20sim_differential.js [--rounds N] [--samples N] [--seed N] [--operations add,sub,...] [--isolate 0|1] [--priority 0|1] [--interrupted 0|1|2|3|4|5] [--trapshadow 0|1] [--trapmasks 0|1] [--crossshadow 0|1|2|3|4|5|6|7]');
     options[key] = key === 'operations' ? process.argv[index + 1].split(',') : Number(process.argv[index + 1]);
   }
   for (const key of ['rounds', 'samples', 'seed'])
@@ -608,6 +854,25 @@ function main() {
     throw new Error('Set ST20SIM_HOST and ST20SIM_ROOT before running the differential tests');
   if (![0, 1].includes(options.isolate)) throw new Error('Invalid isolate');
   if (![0, 1].includes(options.priority)) throw new Error('Invalid priority');
+  if (![0, 1, 2, 3, 4, 5].includes(options.interrupted)) throw new Error('Invalid interrupted');
+  if (![0, 1].includes(options.trapshadow)) throw new Error('Invalid trapshadow');
+  if (![0, 1].includes(options.trapmasks)) throw new Error('Invalid trapmasks');
+  if (![0, 1, 2, 3, 4, 5, 6, 7].includes(options.crossshadow)) throw new Error('Invalid crossshadow');
+  if (options.crossshadow >= 4 && operations.some(name => name !== 'ldshadow'))
+    throw new Error('Captured validity fixtures require ldshadow');
+  if (options.crossshadow && (options.priority !== 1 || options.interrupted || options.trapshadow || options.trapmasks || !options.isolate ||
+      operations.some(name => !['ldshadow', 'stshadow'].includes(name))))
+    throw new Error('Captured shadow fixtures require isolated LP ldshadow/stshadow operations');
+  if (options.trapmasks && (options.interrupted || options.trapshadow || !options.isolate || operations.some(name => name !== 'tret')))
+    throw new Error('Trap mask fixtures require isolated tret operations');
+  if (options.trapshadow && (options.priority !== 0 || options.interrupted || !options.isolate ||
+      operations.some(name => !['ldshadow', 'stshadow'].includes(name))))
+    throw new Error('Trap shadow fixtures require isolated HP ldshadow/stshadow operations');
+  if (options.interrupted >= 2 && options.priority !== 1)
+    throw new Error('Timer-driven interrupted probes require --priority 1');
+  if (options.interrupted && (!options.isolate || operations.some(name =>
+      !['move', 'devmove', 'move2dall', 'move2dzero', 'move2dnonzero'].includes(name))))
+    throw new Error('Interrupted oracle probes require isolated move operations');
   if (operations.some(name => lowPriorityControls.has(name)) && options.priority !== 1)
     throw new Error('intdis, intenb, settimeslice and stlf require --priority 1 and a separate LP batch');
   if (operations.length === 0 || operations.some(name => !selected.includes(name)))
@@ -625,13 +890,98 @@ function main() {
     let program;
     try {
     program = generate(seed, batch);
+    if (options.interrupted >= 3) {
+      const include = process.env.ST20SIM_INCLUDE || path.resolve(root, '..', 'ST20R1.8.1', 'include');
+      run(process.env.ST20SIM_CLANG || 'clang', ['--target=i686-pc-windows-msvc', '-std=c17', '-O2', '-Wall', '-Wextra', '-Werror',
+        '-fno-stack-protector', '-DWIN32', '-I', include, '-c', path.join(root, 'tests', 'st20sim_continuation_device.c'),
+        '-o', path.join(directory, 'continuation-device.obj')]);
+      run(process.env.ST20SIM_LINKER || 'lld-link', ['/dll', '/noentry', '/machine:x86',
+        `/out:${path.join(directory, 'continuation-device.dll')}`, path.join(directory, 'continuation-device.obj')]);
+    }
     fs.writeFileSync(path.join(directory, 'probe.hex'), program.rom);
     fs.writeFileSync(path.join(directory, 'probe.cfg'),
-      'processor c2\nmemory RAM 0x80000000 0x200000 RAM\nmemory ROM1 0x7ff00000 0x100000 ROM\nbootiptr 0x7ff00000\n');
-    fs.writeFileSync(path.join(directory, 'clocks.events'), 'tick 1000000000\nlotick 1000000000\n');
+      'processor c2\nmemory RAM 0x80000000 0x200000 RAM\nmemory ROM1 0x7ff00000 0x100000 ROM\n' +
+      (options.interrupted >= 3 ? 'memory PROBE 0x40010000 0x1000 DEVICE\n' +
+        'simdll -file continuation-device.dll -init continuation_init ' +
+        (options.interrupted === 4 ? '-parm signal -sig continuation_signal -siglevel 4 -poll_all -alu\n' :
+          options.interrupted === 5 ? '-parm tick\n' : '-parm queue\n') +
+        'simmem PROBE -mem continuation_memory\n' : '') +
+      (options.interrupted === 1 || batch.includes('iret') ? 'memory CONTROL 0x1ffffff0 0x10 RAM\n' : '') + 'bootiptr 0x7ff00000\n');
+    fs.writeFileSync(path.join(directory, 'clocks.events'),
+      (options.interrupted === 1 ? `interrupt ${program.cases[0].interruptCount} -1 RPC 7\n` :
+        options.interrupted === 2 ? `tick ${program.cases[0].interruptCount}\n` : '') +
+      'tick 1000000000\nlotick 1000000000\n');
     fs.writeFileSync(path.join(directory, 'cases.json'), JSON.stringify({ seed, cases: program.cases, instructions: program.instructions }, null, 2));
+    if (options.interrupted) {
+      const simulator = executeSimulator(directory);
+      if (options.interrupted >= 3) {
+        const diagnostics = Array(10).fill(null);
+        const byAddress = new Map(program.instructions.map(instruction => [hex(instruction.address), instruction]));
+        for (let index = 0; index + 1 < simulator.length; ++index) {
+          const state = simulator[index];
+          if (byAddress.get(state[0])?.name !== 'ldnl' || state[2] === null) continue;
+          const address = parseInt(state[2], 16);
+          if (address >= 0x80006500 && address < 0x80006528 && (address & 3) === 0)
+            diagnostics[(address - 0x80006500) / 4] = simulator[index + 1][2];
+        }
+        program.cases[0].deviceDiagnostics = diagnostics;
+      }
+      if (!simulator.some(state => state[0] === program.cases[0].handler))
+        throw new Error('Preemption request did not enter the capture handler; no active native state captured');
+      const shadow = Array(12);
+      const instructionByAddress = new Map(program.instructions.map(instruction => [hex(instruction.address), instruction]));
+      for (let index = 0; index + 1 < simulator.length; ++index) {
+        const state = simulator[index];
+        if (instructionByAddress.get(state[0])?.name !== 'ldnl' || state[2] === null) continue;
+        const address = parseInt(state[2], 16);
+        if (address >= 0x80006100 && address < 0x80006130 && (address & 3) === 0)
+          shadow[(address - 0x80006100) / 4] = simulator[index + 1][2];
+      }
+      if (Array.from(shadow).some(word => word === undefined) || shadow[1] === null)
+        throw new Error('Capture handler did not export a complete, valid LP shadow record');
+      const pendingOperation = (parseInt(shadow[1], 16) & 0x7c000000) >>> 26;
+      const copyAddress = hex(program.instructions.find(instruction => instruction.name === batch[0]).address);
+      const capturePoint = pendingOperation ? 'active operation' : shadow[3] === copyAddress ? 'before copy' : 'instruction boundary';
+      const report = { seed, priority: options.priority, status: pendingOperation ? 'Active oracle capture' : 'Boundary oracle capture', operations: batch,
+        cases: 0, plannedCases: program.cases.length, states: simulator.length,
+        shadow, pendingOperation, capturePoint,
+        ...(program.cases[0].deviceDiagnostics ? { deviceDiagnostics: program.cases[0].deviceDiagnostics } : {}),
+        scope: `${options.interrupted === 2 ? 'Timer-preempted' : options.interrupted === 3 ? 'Device-queued' : options.interrupted === 4 ? 'Device-signalled' : options.interrupted === 5 ? 'Memory-callback timer-event' : 'RPC-aborted'} copy and raw native shadow records; no emulator equivalence claim` };
+      writeReport(directory, report);
+      console.log(`Captured ${simulator.length} oracle states, ${capturePoint}, operation code ${pendingOperation}; no equivalence comparison`);
+      reports.push({ directory: path.relative(root, directory), ...report });
+      continue;
+    }
     let simulator;
     let identityConfiguration;
+    if (options.trapshadow || options.trapmasks || options.crossshadow) simulator = executeSimulator(directory);
+    if ([2, 4, 5].includes(options.crossshadow)) {
+      const byAddress = new Map(program.instructions.map(instruction => [hex(instruction.address), instruction]));
+      const captures = program.cases.map(entry => ({ ...entry, shadowBeforeReturn: Array(7).fill(null),
+        reactivatedShadow: Array(7).fill(null), trappedControl: Array(4).fill(null) }));
+      for (let index = 0; index + 1 < simulator.length; ++index) {
+        const state = simulator[index];
+        const instruction = byAddress.get(state[0]);
+        if (!instruction) continue;
+        if (instruction.name === 'tret') captures[instruction.owner].afterReturn = simulator[index + 1];
+        if (instruction.name === 'ldnl' && state[2] !== null) {
+          const address = parseInt(state[2], 16);
+          if (address >= 0x80006400 && address < 0x8000641c && (address & 3) === 0)
+            captures[instruction.owner].shadowBeforeReturn[(address - 0x80006400) / 4] = simulator[index + 1][2];
+          if (address >= 0x800000b0 && address < 0x800000c0 && (address & 3) === 0)
+            captures[instruction.owner].trappedControl[(address - 0x800000b0) / 4] = simulator[index + 1][2];
+          if (address >= 0x80006600 && address < 0x8000661c && (address & 3) === 0)
+            captures[instruction.owner].reactivatedShadow[(address - 0x80006600) / 4] = simulator[index + 1][2];
+        }
+      }
+      if (captures.some(entry => !entry.afterReturn)) throw new Error('Cross-priority control probe did not return for every case');
+      const report = { seed, priority: options.priority, status: 'Oracle control probe', cases: 0,
+        plannedCases: program.cases.length, captures, scope: 'edited captured LP control before/after tret; no emulator equivalence claim' };
+      writeReport(directory, report);
+      reports.push({ directory: path.relative(root, directory), ...report });
+      console.log(`Captured ${captures.length} cross-priority control returns; oracle only`);
+      continue;
+    }
     if (batch.some(name => ['ldprodid', 'lddevid'].includes(name))) {
       if (batch.length !== 1) throw new Error('ID getters require isolated model-identity configuration');
       simulator = executeSimulator(directory);
@@ -660,7 +1010,7 @@ function main() {
     }]));
     const report = { seed, priority: options.priority, policy: 'reference-defined', frozenClocks: true, identityConfiguration,
       cases: program.cases.length, instructions: program.instructions.length, byOperation, ...result };
-    fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2));
+    writeReport(directory, report);
     console.log(`${report.cases} cases, ${report.comparisons} defined-value comparisons, ${report.mismatches.length} mismatching cases`);
     console.log('Divergences: ' + Object.entries(byOperation).filter(([, counts]) => counts.mismatches)
       .map(([name, counts]) => `${name} ${counts.mismatches}/${counts.cases}`).join(', '));
@@ -669,10 +1019,11 @@ function main() {
     reports.push({ directory: path.relative(root, directory), ...report });
     failed ||= report.mismatches.length !== 0;
     } catch (error) {
-      const report = { seed, priority: options.priority, policy: 'reference-defined', frozenClocks: true,
-        cases: program ? program.cases.length : 0, instructions: program ? program.instructions.length : 0,
-        status: 'Blocked', operations: batch, scopes: Object.fromEntries(batch.map(name => [name, fixtureScope(name)])), reason: error.message };
-      fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2));
+      const report = { seed, priority: options.priority, policy: options.interrupted ? 'oracle-only' : 'reference-defined', frozenClocks: options.interrupted !== 2,
+        cases: 0, plannedCases: program ? program.cases.length : 0, instructions: program ? program.instructions.length : 0,
+        status: 'Blocked', operations: batch, scopes: Object.fromEntries(batch.map(name => [name, fixtureScope(name)])), reason: error.message,
+        ...(program?.cases[0]?.deviceDiagnostics ? { deviceDiagnostics: program.cases[0].deviceDiagnostics } : {}) };
+      writeReport(directory, report);
       console.error(`Blocked ${batch.join(',')}: ${error.message.split('\n')[0]}`);
       reports.push({ directory: path.relative(root, directory), ...report });
       blocked = true;
@@ -680,7 +1031,8 @@ function main() {
     }
     }
   }
-  console.log(`Differential loop: ${options.rounds} rounds, ${reports.length} batches, ${reports.reduce((total, report) => total + report.cases, 0)} planned cases, ${blocked ? 'INCOMPLETE' : failed ? 'FAIL' : 'PASS'}`);
+  const oracleOnly = options.interrupted || [2, 4, 5].includes(options.crossshadow);
+  console.log(`${oracleOnly ? 'Oracle probe' : 'Differential loop'}: ${options.rounds} rounds, ${reports.length} batches, ${reports.reduce((total, report) => total + (report.plannedCases ?? report.cases), 0)} planned cases, ${blocked ? 'INCOMPLETE' : failed ? 'FAIL' : oracleOnly ? 'CAPTURED' : 'PASS'}`);
   process.exitCode = blocked ? 2 : failed ? 1 : 0;
 }
 

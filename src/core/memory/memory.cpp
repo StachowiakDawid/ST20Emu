@@ -255,21 +255,23 @@ int storeBytes(uint32_t address, int nBytes, uint32_t value) {
  *
  * Returns 0 if all bytes were copied properly.
  */
-int storeByteRange(uint32_t srcAddr, uint32_t destAddr, int nBytes) {
-  for (int i = 0; i < nBytes; i++) {
+int storeByteRange(uint32_t srcAddr, uint32_t destAddr, uint32_t nBytes) {
+  for (uint32_t offset = 0; offset < nBytes;) {
+    uint32_t source = srcAddr + offset;
+    uint32_t destination = destAddr + offset;
+    int width = nBytes - offset >= 4 && ((source | destination) & 3U) == 0 ? 4 : 1;
     uint32_t cWord = 0;
 
-    /* read a single byte from the source address */
-    int result = readBytes(srcAddr + static_cast<uint32_t>(i), 1, &cWord);
+    int result = readBytes(source, width, &cWord);
     if (result != 0) {
       return result;
     }
 
-    /* store the byte to the destination address */
-    result = storeBytes(destAddr + static_cast<uint32_t>(i), 1, cWord & 0xFFU);
+    result = storeBytes(destination, width, cWord);
     if (result != 0) {
       return result;
     }
+    offset += static_cast<uint32_t>(width);
   }
 
   return 0;

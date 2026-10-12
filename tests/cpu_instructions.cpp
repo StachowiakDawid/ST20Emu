@@ -746,9 +746,88 @@ static void testUnpackSingle() {
   expect("encoded unpacksn NaN tag", cpuState.creg, 0x48d159e3);
 }
 
+static void testNativeFloatHelpers() {
+  setPortableInstructionAbi(false);
+  struct RoundCase { uint32_t guard; uint32_t fraction; uint32_t exponent; uint32_t expected; };
+  const RoundCase rounding[] = {
+      {0, 0, 0, 0}, {0, 0x80000000, 127, 0x3f800000},
+      {0, 0xc0000000, 127, 0x3fc00000}, {0, 0x80000080, 127, 0x3f800000},
+      {1, 0x80000080, 127, 0x3f800001}, {0, 0x80000180, 127, 0x3f800002},
+      {0, 0xffffff80, 254, 0x7f800000}, {0, 0x80000000, 255, 0x7f800000},
+      {0, 0x7fffff80, 0, 0x00800000}, {0, 0x00000080, 0, 0},
+      {1, 0x00000080, 0, 1}, {0xffffffff, 0x7fffffff, 0xffffffff, 0}};
+  struct NormalizeCase {
+    uint32_t guard; uint32_t fraction; uint32_t shift; uint32_t temporary;
+    uint32_t expectedGuard; uint32_t expectedFraction; uint32_t expectedExponent;
+  };
+  const NormalizeCase normalization[] = {
+      {0, 0x80000000, 0, 127, 0, 0x80000000, 127},
+      {1, 0x80000080, 1, 127, 1, 0x80000080, 126},
+      {0, 0x80000000, 0, 0, 0, 0x40000000, 0},
+      {0, 0x80000000, 0, 0xffffffe9, 0, 0x80, 0},
+      {1, 0x8000007f, 0, 0xffffffe9, 0x7f01, 0x80, 0},
+      {0xffffffff, 0xffffffff, 0, 0xffffffe8, 0, 0, 0},
+      {0x2dd23154, 0x94e811a8, 23, 21, 0x2dfa777e, 0x129d0235, 0},
+      {0x80000000, 0xffffffff, 14, 0x80000000, 0x80000000, 0xffffffff, 255},
+      {0, 0, 64, 64, 0, 0, 0}};
+  for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+    cpuState.priority = priority;
+    cpuState.wptr = 0x1c1000;
+    for (const auto &entry : rounding) {
+      reset(entry.guard, entry.fraction, entry.exponent);
+      expect("native roundsn executes", roundsn_(0) != 0, 0);
+      expect("native roundsn packed value", cpuState.areg, entry.expected);
+      expect("native roundsn B undefined", cpuState.breg, undefinedWord);
+      expect("native roundsn C undefined", cpuState.creg, undefinedWord);
+      expect("native roundsn no integer error", omrState.HP_ErrorFlag | omrState.LP_ErrorFlag, 0);
+    }
+    for (const auto &entry : normalization) {
+      reset(entry.guard, entry.fraction, entry.shift);
+      storeBytes(cpuState.wptr, 4, entry.temporary);
+      expect("native postnormsn executes", postnormsn_(0) != 0, 0);
+      expect("native postnormsn guard", cpuState.areg, entry.expectedGuard);
+      expect("native postnormsn fraction", cpuState.breg, entry.expectedFraction);
+      expect("native postnormsn exponent", cpuState.creg, entry.expectedExponent);
+      uint32_t temporary = 0;
+      readBytes(cpuState.wptr, 4, &temporary);
+      expect("native postnormsn preserves workspace", temporary, entry.temporary);
+    }
+  }
+  uint32_t seed = 0x892fe314;
+  for (int iteration = 0; iteration < 1024; ++iteration) {
+    uint64_t significand = (static_cast<uint64_t>(nextWord(seed) | 0x80000000U) << 32) | nextWord(seed);
+    significand &= ~uint64_t{0x7ff};
+    uint32_t exponent = nextWord(seed) % 255U;
+    if (exponent == 0) significand &= ~(uint64_t{1} << 63);
+    float expected = static_cast<float>(std::ldexp(static_cast<double>(significand),
+        static_cast<int>(exponent == 0 ? 1 : exponent) - 190));
+    reset(static_cast<uint32_t>(significand), static_cast<uint32_t>(significand >> 32), exponent);
+    roundsn_(0);
+    expect("native roundsn independent IEEE conversion", cpuState.areg, std::bit_cast<uint32_t>(expected));
+  }
+  reset(0x1234, 0x5678, 3);
+  cpuState.wptr = 0x6c001234;
+  expect("native postnormsn reports read failure", postnormsn_(0) == READ_UNUSED_MEM, 1);
+  expect("native postnormsn failed read preserves A", cpuState.areg, 0x1234);
+  expect("native postnormsn failed read preserves B", cpuState.breg, 0x5678);
+  expect("native postnormsn failed read preserves C", cpuState.creg, 3);
+  reset(1, 0x80000080, 0);
+  cpuState.priority = HIGH_PRIORITY;
+  cpuState.wptr = 0x1c1000;
+  cpuState.running = true;
+  cpuState.iptr = 0x8600;
+  storeBytes(cpuState.wptr, 4, 127);
+  storeBytes(0x8600, 4, 0xfd26fc26);
+  int watchFlag = 0;
+  expect("native encoded postnormsn decode", decodeNextInstr() != 0, 0);
+  expect("native encoded postnormsn executes", execInstr(&watchFlag) != 0, 0);
+  expect("native encoded postnormsn biased exponent", cpuState.creg, 127);
+  expect("native encoded roundsn decode", decodeNextInstr() != 0, 0);
+  expect("native encoded roundsn executes", execInstr(&watchFlag) != 0, 0);
+  expect("native encoded FP sequence", cpuState.areg, 0x3f800001);
+}
+
 static void testPortableFloatHelpers() {
-  reset(0, 0x80000000, 0);
-  expect("portable FP requires opt-in", roundsn_(0) == PORTABLE_ABI_DISABLED, 1);
   setPortableInstructionAbi(true);
   struct Case { uint64_t significand; int32_t exponent; uint32_t expected; };
   const Case cases[] = {{0x8000000000000000ULL, 0, 0x3f800000},
@@ -1397,6 +1476,72 @@ static void testDeviceMove() {
       state.destination[index] = 0xa5;
     }
   };
+  for (uint32_t length : {0x7fffffffU, 0x80000000U, 0xffffffffU}) {
+    prepare();
+    state.failRead = 0;
+    reset(length, destinationDevice.start, sourceDevice.start);
+    expect("move honors unsigned full-width count", move_(0) != 0, 1);
+    expect("large move attempts first source read", static_cast<uint32_t>(state.reads), 1);
+    expect("failed large move never writes", static_cast<uint32_t>(state.writes), 0);
+    expect("failed large move A undefined", cpuState.areg, undefinedWord);
+    expect("failed large move B undefined", cpuState.breg, undefinedWord);
+    expect("failed large move C undefined", cpuState.creg, undefinedWord);
+  }
+  prepare();
+  state.failRead = 0;
+  reset(0, destinationDevice.start, sourceDevice.start);
+  expect("zero move ignores failing source", move_(0) != 0, 0);
+  expect("zero move performs no bus transaction", state.events.size(), 0);
+  for (uint32_t sourceOffset = 0; sourceOffset < 4; ++sourceOffset) {
+    for (uint32_t destinationOffset = 0; destinationOffset < 4; ++destinationOffset) {
+      for (uint32_t length = 0; length <= 17; ++length) {
+        prepare();
+        reset(length, destinationDevice.start + destinationOffset, sourceDevice.start + sourceOffset);
+        expect("move MMIO copy succeeds", move_(0) != 0, 0);
+        uint32_t prefix = std::min(length, (4U - sourceOffset) % 4U);
+        uint32_t remainder = length - prefix;
+        uint32_t transactions = sourceOffset == destinationOffset
+            ? prefix + remainder / 4U + remainder % 4U : length;
+        expect("move aligned word transaction count", state.events.size(), transactions * 2U);
+        uint32_t copied = 0;
+        for (std::size_t event = 0; event + 1 < state.events.size(); event += 2) {
+          const auto &read = state.events[event];
+          const auto &write = state.events[event + 1];
+          expect("move exact source cursor", read.address, sourceDevice.start + sourceOffset + copied);
+          expect("move exact destination cursor", write.address, destinationDevice.start + destinationOffset + copied);
+          expect("move reads before writes", read.write, 0);
+          expect("move paired write", write.write, 1);
+          expect("move matched bus widths", static_cast<uint32_t>(read.width), static_cast<uint32_t>(write.width));
+          expect("move never touches beyond requested span", copied + static_cast<uint32_t>(read.width) <= length, 1);
+          copied += static_cast<uint32_t>(read.width);
+        }
+        for (uint32_t index = 0; index < 64; ++index) {
+          uint32_t expected = index >= destinationOffset && index < destinationOffset + length
+              ? state.source[sourceOffset + index - destinationOffset] : 0xa5U;
+          expect("move exact MMIO copied extent", state.destination[index], expected);
+        }
+      }
+    }
+  }
+  for (bool readFailure : {true, false}) {
+    prepare();
+    if (readFailure) state.failRead = 1;
+    else state.failWrite = 1;
+    reset(12, destinationDevice.start, sourceDevice.start);
+    expect("move reports bus failure", move_(0) != 0, 1);
+    expect("move stops at failing transaction", state.events.size(), readFailure ? 3U : 4U);
+    for (uint32_t index = 0; index < 12; ++index)
+      expect("move retains completed words only", state.destination[index], index < 4 ? state.source[index] : 0xa5U);
+  }
+  prepare();
+  reset(2, 20, 20);
+  move2dinit_(0);
+  reset(13, destinationDevice.start, sourceDevice.start);
+  expect("move2dall word bus copy succeeds", move2dall_(0) != 0, 0);
+  expect("move2dall exact row transaction count", state.events.size(), 16);
+  for (uint32_t index = 0; index < 64; ++index)
+    expect("move2dall preserves stride gaps", state.destination[index],
+        index < 13 || (index >= 20 && index < 33) ? state.source[index] : 0xa5U);
   for (uint32_t sourceOffset = 0; sourceOffset < 4; ++sourceOffset) {
     for (uint32_t destinationOffset = 0; destinationOffset < 4; ++destinationOffset) {
       for (uint32_t length = 0; length <= 17; ++length) {
@@ -1989,6 +2134,54 @@ static void testInterruptAndTimesliceControls() {
 }
 
 static void testTimerScheduler() {
+  for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+    for (unsigned scenario = 0; scenario < 4; ++scenario) {
+      bool alternative = (scenario & 1U) != 0;
+      bool existingTimer = (scenario & 2U) != 0;
+      constexpr uint32_t workspace = 0x260000;
+      schedulerFixture(workspace);
+      cpuState.priority = priority;
+      omrState.ClockRegHP = omrState.ClockRegLP = 10;
+      uint32_t front = existingTimer ? 0x261000U : NO_PROCESS;
+      if (existingTimer) {
+        storeBytes(front - 20, 4, 16);
+        storeBytes(front - 16, 4, NO_PROCESS);
+        omrState.TptrReg[priority] = front;
+        omrState.TnextReg[priority] = 16;
+      }
+      uint32_t alarm = omrState.TnextReg[priority];
+      MemoryDevice failedIptr{workspace - 4, workspace - 1, nullptr, nullptr,
+          +[](void *, uint32_t, int, uint32_t) { return WRITE_FAILURE; }};
+      expect("timer save-failure device registers", registerMemoryDevice(failedIptr) != 0, 0);
+      int result = 0;
+      if (alternative) {
+        talt_(0);
+        cpuState.areg = 1;
+        cpuState.breg = 20;
+        enbt_(0);
+        result = taltwt_(0);
+      } else {
+        cpuState.areg = 20;
+        result = tin_(0);
+      }
+      expect("timer wait propagates resume-save failure", result == WRITE_FAILURE, 1);
+      expect("failed timer save preserves running process", cpuState.running, 1);
+      expect("failed timer save preserves instruction pointer", cpuState.iptr, 0x3000);
+      expect("failed timer save does not publish waiter", omrState.TptrReg[priority], front);
+      expect("failed timer save does not change alarm", omrState.TnextReg[priority], alarm);
+      if (existingTimer) {
+        uint32_t next = 0;
+        readBytes(front - 16, 4, &next);
+        expect("failed timer save preserves existing tail", next, NO_PROCESS);
+      }
+      if (alternative) {
+        uint32_t state = 0;
+        readBytes(workspace - 12, 4, &state);
+        expect("failed timed ALT save preserves enabling state", state, ALT_ENABLING);
+      }
+      expect("timer save-failure device unregisters", unregisterMemoryDevice(failedIptr.start) != 0, 0);
+    }
+  }
   schedulerFixture(0x20000);
   omrState.ClockRegLP = 10;
   reset(10, 0, 0);
@@ -2617,6 +2810,38 @@ static void testBlockedChannelSnapshot() {
 }
 
 static void testTrapRecordsAndMasks() {
+  for (unsigned char callerPriority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+    for (unsigned char targetPriority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+      for (bool encoded : {false, true}) {
+        schedulerFixture(0xb0000, callerPriority);
+        uint32_t priorMask = 0;
+        expect("trapenb regression initializes selected mask", changeTrapMask(targetPriority, 1, true, &priorMask), 0);
+        uint32_t controlBits = omrState.Enables & ~0x3fffU;
+        cpuState.areg = 0x4006;
+        cpuState.breg = targetPriority;
+        cpuState.creg = 0x12345678;
+        if (encoded) {
+          cpuState.iptr = 0xb3000;
+          storeBytes(cpuState.iptr, 2, 0xf760);
+          expect("trapenb regression decodes", decodeNextInstr(), 0);
+          expect("trapenb regression selects handler", instrEntry[instrCode].function == trapenb_, 1);
+          int breakFlag = 0;
+          expect("trapenb regression executes", execInstr(&breakFlag), 0);
+          expect("trapenb regression advances Iptr", cpuState.iptr, 0xb3002);
+        } else {
+          expect("trapenb regression succeeds", trapenb_(0), 0);
+        }
+        expect("trapenb returns previous fourteen-bit mask", cpuState.areg, 1);
+        expect("trapenb clears upper result bits including bit fifteen", cpuState.areg & ~0x3fffU, 0);
+        expect("trapenb leaves B undefined", cpuState.breg, undefinedWord);
+        expect("trapenb leaves C undefined", cpuState.creg, undefinedWord);
+        expect("trapenb ignores reserved input bits", trapEnableMask(targetPriority), 7);
+        unsigned char otherPriority = targetPriority == HIGH_PRIORITY ? LOW_PRIORITY : HIGH_PRIORITY;
+        expect("trapenb preserves other priority mask", trapEnableMask(otherPriority), 0);
+        expect("trapenb preserves global and reserved control bits", omrState.Enables & ~0x3fffU, controlBits);
+      }
+    }
+  }
   schedulerFixture(0xb0000);
   uint32_t previous = 0;
   changeTrapMask(HIGH_PRIORITY, 0xffffffff, true, &previous);
@@ -2909,16 +3134,133 @@ static void testShadowRegisters() {
   installTrap(HIGH_PRIORITY, 0, 0x19a000, 0x9e00);
   omrState.Enables |= BREAKPOINT_TRAPENB;
   requestTrap(BREAKPOINT_TRAPENB, HIGH_PRIORITY);
+  const uint32_t trapInput[] = {0, STATUS_VALID | STATUS_TIMESLICE_ENABLE,
+      0x191000, 0x9d80, 0x4444, 0x5555, 0x6666};
+  for (uint32_t index = 0; index < 7; ++index)
+    storeBytes(0x199000 + index * 4U, 4, trapInput[index]);
   cpuState.areg = 6;
   cpuState.breg = LOW_PRIORITY;
   cpuState.creg = 0x199000;
-  expect("ldshadow rejects inactive state during trap", ldshadow_(0) == INVALID_SHADOW_ACCESS, 1);
-  expect("stshadow rejects inactive state during trap", stshadow_(0) == INVALID_SHADOW_ACCESS, 1);
-  expect("rejected shadow access preserves selector", cpuState.areg, 6);
-  expect("shadow access rejection leaves trap returnable", tret_(0) != 0, 0);
+  expect("native HP trap loads independent low state", ldshadow_(0) != 0, 0);
+  expect("native HP trap remains active after low load", trapHandlerActive(), 1);
+  cpuState.areg = 6;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199100;
+  expect("native HP trap stores independent low state", stshadow_(0) != 0, 0);
+  for (uint32_t index = 1; index < 7; ++index) {
+    readBytes(0x199100 + index * 4U, 4, &value);
+    expect("native trap shadow roundtrip value", value, trapInput[index]);
+  }
+  char trapDirectory[] = "/tmp/st20-native-trap-shadow-XXXXXX";
+  expect("native trap shadow snapshot directory", mkdtemp(trapDirectory) != nullptr, 1);
+  expect("native trap shadow snapshot saves", saveCPUState(trapDirectory) != 0, 0);
+  resetScheduler();
+  expect("native trap shadow snapshot restores", loadCPUState(trapDirectory) != 0, 0);
+  expect("native trap shadow snapshot retains handler", trapHandlerActive(), 1);
+  expect("native low edit leaves HP trap returnable", tret_(0) != 0, 0);
   stopp_(0);
-  expect("rejected shadow edit preserves low workspace", cpuState.wptr, 0x190000);
-  expect("rejected shadow edit preserves low A", cpuState.areg, 0x1111);
+  expect("native trap low edit resumes workspace", cpuState.wptr, 0x191000);
+  expect("native trap low edit resumes Iptr", cpuState.iptr, 0x9d80);
+  expect("native trap low edit resumes A", cpuState.areg, 0x4444);
+  expect("native trap low edit resumes B", cpuState.breg, 0x5555);
+  expect("native trap low edit resumes C", cpuState.creg, 0x6666);
+  std::string trapFilename = std::string(trapDirectory) + "/cpu.bin";
+  unlink(trapFilename.c_str());
+  rmdir(trapDirectory);
+
+  schedulerFixture(0x19d000, LOW_PRIORITY);
+  installTrap(HIGH_PRIORITY, TRAP_GROUP_SCHEDULER, 0x19a000, 0x9e00);
+  changeTrapMask(HIGH_PRIORITY, RUN_TRAPENB, true, &previous);
+  cpuState.areg = 0x19e000;
+  cpuState.breg = 0x1234;
+  cpuState.creg = 0x5678;
+  expect("native cross-priority runp trap enters HP", runp_(0) != 0, 0);
+  expect("native cross-priority trap priority", cpuState.priority, HIGH_PRIORITY);
+  cpuState.areg = 6;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199300;
+  expect("native captured low trap bank export", stshadow_(0) != 0, 0);
+  readBytes(0x199308, 4, &value);
+  expect("native captured export caller workspace", value, 0x19d000);
+  readBytes(0x199310, 4, &value);
+  expect("native runp captures original A", value, 0x19e000);
+  readBytes(0x199314, 4, &value);
+  expect("native runp captures original B", value, 0x1234);
+  readBytes(0x199318, 4, &value);
+  expect("native runp captures original C", value, 0x5678);
+  cpuState.areg = 6;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199000;
+  expect("native captured bank edits valid control and stack", ldshadow_(0) != 0, 0);
+  storeBytes(0x199704, 4, 0);
+  storeBytes(0x199708, 4, 0x191000);
+  storeBytes(0x19970c, 4, 0x9d80);
+  cpuState.areg = 2;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199700;
+  expect("native captured bank invalidates", ldshadow_(0) != 0, 0);
+  cpuState.areg = 6;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199800;
+  expect("native captured invalid bank exports", stshadow_(0) != 0, 0);
+  readBytes(0x199804, 4, &value);
+  expect("native captured invalid export clears valid bit", value, 0);
+  readBytes(0x199808, 4, &value);
+  expect("native captured invalid export retains workspace", value, 0x191000);
+  readBytes(0x199810, 4, &value);
+  expect("native captured invalid export retains A", value, 0x4444);
+  char invalidDirectory[] = "/tmp/st20-invalid-captured-bank-XXXXXX";
+  expect("native invalid captured snapshot directory", mkdtemp(invalidDirectory) != nullptr, 1);
+  expect("native invalid captured snapshot saves", saveCPUState(invalidDirectory) != 0, 0);
+  resetScheduler();
+  expect("native invalid captured snapshot restores", loadCPUState(invalidDirectory) != 0, 0);
+  expect("native invalid captured snapshot keeps handler active", trapHandlerActive(), 1);
+  storeBytes(0x199704, 4, STATUS_VALID | STATUS_TIMESLICE_ENABLE);
+  cpuState.areg = 2;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199700;
+  expect("native captured bank reactivates", ldshadow_(0) != 0, 0);
+  std::string invalidFilename = std::string(invalidDirectory) + "/cpu.bin";
+  unlink(invalidFilename.c_str());
+  rmdir(invalidDirectory);
+  uint32_t trapped = trapRecordAddress(HIGH_PRIORITY, TRAP_GROUP_SCHEDULER, true);
+  uint32_t savedRecord[4]{};
+  for (uint32_t index = 0; index < 4; ++index) readBytes(trapped + index * 4, 4, &savedRecord[index]);
+  storeBytes(0x199400, 4, 0x005a0022);
+  storeBytes(0x199410, 4, 0x77);
+  storeBytes(0x199414, 4, 0x88);
+  storeBytes(0x199418, 4, 0x99);
+  cpuState.areg = 5;
+  cpuState.breg = LOW_PRIORITY;
+  cpuState.creg = 0x199400;
+  expect("native captured bank loads enables and stack", ldshadow_(0) != 0, 0);
+  for (uint32_t index = 0; index < 4; ++index) {
+    readBytes(trapped + index * 4, 4, &value);
+    expect("native captured load leaves trapped control record unchanged", value, savedRecord[index]);
+  }
+  char capturedDirectory[] = "/tmp/st20-native-captured-shadow-XXXXXX";
+  expect("native captured bank snapshot directory", mkdtemp(capturedDirectory) != nullptr, 1);
+  expect("native captured bank snapshot saves", saveCPUState(capturedDirectory) != 0, 0);
+  resetScheduler();
+  expect("native captured bank snapshot restores", loadCPUState(capturedDirectory) != 0, 0);
+  expect("native captured snapshot preserves active handler", trapHandlerActive(), 1);
+  MemoryDevice unusedControl{trapped + 8, trapped + 15, nullptr,
+      +[](void *, uint32_t, int, uint32_t *) { return READ_UNUSED_MEM; }, nullptr};
+  expect("native captured unused control slots register", registerMemoryDevice(unusedControl) != 0, 0);
+  expect("native captured bank trap returns", tret_(0) != 0, 0);
+  expect("native captured unused control slots unregister", unregisterMemoryDevice(unusedControl.start) != 0, 0);
+  expect("native captured bank edited workspace resumes", cpuState.wptr, 0x191000);
+  expect("native captured bank edited Iptr resumes", cpuState.iptr, 0x9d80);
+  expect("native captured bank edited Status resumes", cpuState.status, STATUS_VALID | STATUS_TIMESLICE_ENABLE);
+  expect("native captured bank caller priority preserved", cpuState.priority, LOW_PRIORITY);
+  expect("native captured bank edited A resumes", cpuState.areg, 0x77);
+  expect("native captured bank edited B resumes", cpuState.breg, 0x88);
+  expect("native captured bank edited C resumes", cpuState.creg, 0x99);
+  expect("native captured bank restores original global enables", omrState.Enables >> 16, savedRecord[0] >> 16);
+  expect("native captured bank retains edited low trap enables", trapEnableMask(LOW_PRIORITY), 0x22);
+  std::string capturedFilename = std::string(capturedDirectory) + "/cpu.bin";
+  unlink(capturedFilename.c_str());
+  rmdir(capturedDirectory);
 
   preemptLow();
   const uint32_t edited[] = {0x005a1234, STATUS_VALID | STATUS_TIMESLICE_ENABLE,
@@ -3505,6 +3847,186 @@ static void testPortableInterruptController() {
   schedulerFixture(0x20000);
 }
 
+static void testNativeExternalChannels() {
+  setPortableInstructionAbi(false);
+  constexpr uint32_t channel = 0x80000010;
+  const uint8_t input[] = {0x12, 0x34};
+  for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+    schedulerFixture(0x250000);
+    cpuState.priority = priority;
+    expect("register native modeled channel", registerExternalChannel(channel, 8) != 0, 0);
+    expect("native channel registration keeps ABI disabled", portableInstructionAbiEnabled(), 0);
+    expect("native modeled ALT starts", alt_(0) != 0, 0);
+    cpuState.areg = 1;
+    cpuState.breg = channel;
+    expect("native modeled ALT guard enables", enbc_(0) != 0, 0);
+    expect("native modeled ALT feed", feedExternalChannel(channel, input) != 0, 0);
+    expect("native modeled ALT wait is ready", altwt_(0) != 0, 0);
+    cpuState.areg = 12;
+    cpuState.breg = 1;
+    cpuState.creg = channel;
+    expect("native modeled ALT guard disables", disc_(0) != 0, 0);
+    expect("native modeled ALT selected", cpuState.areg, 1);
+    uint32_t offset = 0;
+    readBytes(cpuState.wptr, 4, &offset);
+    expect("native modeled ALT branch offset", offset, 12);
+    cpuState.areg = channel;
+    expect("native modeled channel reset", resetch_(0) != 0, 0);
+    expect("native modeled reset no waiter", cpuState.areg, NO_PROCESS);
+    expect("native modeled ready input feed", feedExternalChannel(channel, input) != 0, 0);
+    reset(2, channel, 0x251000);
+    expect("native modeled input completes", in_(0) != 0, 0);
+    uint32_t value = 0;
+    readBytes(0x251000, 2, &value);
+    expect("native modeled input bytes", value, 0x3412);
+    reset(2, channel, 0x251000);
+    expect("native modeled output completes", out_(0) != 0, 0);
+    uint8_t output[8]{};
+    std::size_t count = 0;
+    expect("native modeled output drains", drainExternalChannel(channel, output, &count) != 0, 0);
+    expect("native modeled output count", count, 2);
+    expect("native modeled first output byte", output[0], 0x12);
+    expect("native modeled second output byte", output[1], 0x34);
+    reset(0x56, channel, 0);
+    expect("native modeled outbyte", outbyte_(0) != 0, 0);
+    reset(0x12345678, channel, 0);
+    expect("native modeled outword", outword_(0) != 0, 0);
+    drainExternalChannel(channel, output, &count);
+    expect("native modeled scalar output count", count, 5);
+    const uint8_t expected[] = {0x56, 0x78, 0x56, 0x34, 0x12};
+    for (std::size_t index = 0; index < 5; ++index)
+      expect("native modeled scalar byte order", output[index], expected[index]);
+    reset(2, channel, 0x251004);
+    expect("native modeled input blocks", in_(0) != 0, 0);
+    expect("native modeled input suspended", cpuState.running, 0);
+    char directory[] = "/tmp/st20-native-fifo-XXXXXX";
+    expect("native modeled snapshot directory", mkdtemp(directory) != nullptr, 1);
+    expect("native modeled blocked snapshot saves", saveCPUState(directory) != 0, 0);
+    reset(channel, 0, 0);
+    resetch_(0);
+    unregisterExternalChannel(channel);
+    expect("native modeled blocked snapshot restores", loadCPUState(directory) != 0, 0);
+    expect("native modeled input wakes", feedExternalChannel(channel, input) != 0, 0);
+    expect("native modeled input resumed", cpuState.running, 1);
+    expect("native modeled input has no portable continuation", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+    readBytes(0x251004, 2, &value);
+    expect("native modeled blocked input bytes", value, 0x3412);
+    std::string filename = std::string(directory) + "/cpu.bin";
+    unlink(filename.c_str());
+    rmdir(directory);
+    storeBytes(0x251008, 4, 0x01020304);
+    storeBytes(0x25100c, 4, 0x05060708);
+    reset(8, channel, 0x251008);
+    expect("native modeled output fills FIFO", out_(0) != 0, 0);
+    reset(0x5a, channel, 0);
+    expect("native modeled full output blocks", outbyte_(0) != 0, 0);
+    expect("native modeled writer suspended", cpuState.running, 0);
+    expect("native modeled drain wakes writer", drainExternalChannel(channel, output, &count) != 0, 0);
+    expect("native modeled writer resumed", cpuState.running, 1);
+    expect("native modeled writer has no portable continuation", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+    drainExternalChannel(channel, output, &count);
+    expect("native modeled blocked scalar count", count, 1);
+    expect("native modeled blocked scalar byte", output[0], 0x5a);
+    expect("native modeled failure test feeds input", feedExternalChannel(channel, input) != 0, 0);
+    for (uint32_t buffer : {0x20004000U, 0x1fffffffU}) {
+      reset(2, channel, buffer);
+      expect("native modeled input rejects peripheral span", in_(0) == DEVICE_ACCESS_UNSUPPORTED, 1);
+    }
+    uint32_t deviceTouches = 0;
+    MemoryDevice device{0x40030000, 0x40030003, &deviceTouches,
+        +[](void *context, uint32_t, int, uint32_t *) {
+          ++*static_cast<uint32_t *>(context);
+          return READ_UNUSED_MEM;
+        },
+        +[](void *context, uint32_t, int, uint32_t) {
+          ++*static_cast<uint32_t *>(context);
+          return WRITE_FAILURE;
+        }};
+    expect("native modeled RAM policy registers test device", registerMemoryDevice(device) != 0, 0);
+    for (uint32_t buffer : {device.start, device.start - 1U}) {
+      reset(2, channel, buffer);
+      expect("native modeled input rejects mapped buffer", in_(0) == DEVICE_ACCESS_UNSUPPORTED, 1);
+    }
+    expect("native modeled buffer rejection has no MMIO effect", deviceTouches, 0);
+    expect("native modeled RAM policy removes test device", unregisterMemoryDevice(device.start) != 0, 0);
+    reset(2, channel, 0xffffffff);
+    expect("native modeled input rejects wrapped span", in_(0) == INVALID_CHANNEL, 1);
+    reset(2, channel, 0x251010);
+    expect("native modeled rejected input retained FIFO", in_(0) != 0, 0);
+    readBytes(0x251010, 2, &value);
+    expect("native modeled rejected input retains exact bytes", value, 0x3412);
+    reset(2, channel, 0x6e123400);
+    expect("native modeled output reports unreadable RAM", out_(0) == READ_UNUSED_MEM, 1);
+    drainExternalChannel(channel, output, &count);
+    expect("native modeled output failure leaves FIFO empty", count, 0);
+    reset(0, channel, 0x20004000);
+    expect("native modeled zero input ignores buffer", in_(0) != 0, 0);
+    reset(0, channel, 0x20004000);
+    expect("native modeled zero output ignores buffer", out_(0) != 0, 0);
+    reset(9, channel, 0x251000);
+    expect("native modeled oversized message rejected", out_(0) == INVALID_CHANNEL, 1);
+    expect("native modeled blocked ALT starts", alt_(0) != 0, 0);
+    reset(1, channel, 0);
+    expect("native modeled blocked ALT enables", enbc_(0) != 0, 0);
+    expect("native modeled blocked ALT waits", altwt_(0) != 0, 0);
+    expect("native modeled ALT owner suspended", cpuState.running, 0);
+    expect("native modeled ALT feed wakes owner", feedExternalChannel(channel, input) != 0, 0);
+    expect("native modeled ALT owner resumed", cpuState.running, 1);
+    reset(16, 1, channel);
+    expect("native modeled awakened ALT disables", disc_(0) != 0, 0);
+    expect("native modeled awakened ALT selects", cpuState.areg, 1);
+    reset(2, channel, 0x251014);
+    expect("native modeled selected ALT input completes", in_(0) != 0, 0);
+    uint32_t previous = 0;
+    expect("native modeled completion trap enables", changeTrapMask(priority, EXTERNALCH_TRAPENB, true, &previous) != 0, 0);
+    uint32_t handlerRecord = trapRecordAddress(priority, TRAP_GROUP_SCHEDULER, false);
+    storeBytes(handlerRecord, 4, 0xffff0000);
+    storeBytes(handlerRecord + 4, 4, 0x80000000);
+    storeBytes(handlerRecord + 8, 4, 3);
+    storeBytes(handlerRecord + 12, 4, 0xa900);
+    storeBytes(0x251018, 4, 0xdeadbeef);
+    cpuState.areg = 2;
+    cpuState.breg = channel;
+    cpuState.creg = 0x251018;
+    expect("native modeled trapped input blocks", in_(0) != 0, 0);
+    expect("native modeled invalid completion handler rejected", feedExternalChannel(channel, input) == INVALID_TRAP_HANDLER, 1);
+    readBytes(0x251018, 4, &value);
+    expect("native modeled invalid handler preserves input buffer", value, 0xdeadbeef);
+    uint32_t owner = cpuState.wptr;
+    storeBytes(handlerRecord + 8, 4, 0x254000);
+    expect("native modeled completion retry enters kernel", pollTimers() != 0, 0);
+    expect("native modeled completion kernel active", trapHandlerActive(), 1);
+    expect("native modeled completion kernel descriptor", cpuState.breg, owner | priority);
+    readBytes(0x251018, 2, &value);
+    expect("native modeled data committed before kernel", value, 0x3412);
+    expect("native modeled kernel owns enqueue", omrState.ProcQueueFPtr[priority], NO_PROCESS);
+    char trapDirectory[] = "/tmp/st20-native-channel-trap-XXXXXX";
+    expect("native modeled trapped snapshot directory", mkdtemp(trapDirectory) != nullptr, 1);
+    expect("native modeled completed transfer snapshot saves", saveCPUState(trapDirectory) != 0, 0);
+    cpuState.areg = channel;
+    resetch_(0);
+    unregisterExternalChannel(channel);
+    expect("native modeled completed transfer snapshot restores", loadCPUState(trapDirectory) != 0, 0);
+    expect("native modeled kernel enqueues owner", enqueueProcess(owner, priority) != 0, 0);
+    expect("native modeled completion kernel returns", tret_(0) != 0, 0);
+    expect("native modeled post-trap scheduler dispatches", pollTimers() != 0, 0);
+    expect("native modeled completed owner resumes", cpuState.wptr, owner);
+    expect("native modeled completed owner running", cpuState.running, 1);
+    expect("native modeled trap return has no portable state", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+    filename = std::string(trapDirectory) + "/cpu.bin";
+    unlink(filename.c_str());
+    rmdir(trapDirectory);
+    reset(2, channel, 0x251010);
+    expect("native modeled reset waiter blocks", in_(0) != 0, 0);
+    reset(channel, 0, 0);
+    expect("native modeled reset cancels waiter", resetch_(0) != 0, 0);
+    expect("native modeled reset returns descriptor", cpuState.areg, cpuState.wptr | cpuState.priority);
+    expect("native modeled reset does not wake waiter", cpuState.running, 0);
+    expect("unregister native modeled channel", unregisterExternalChannel(channel) != 0, 0);
+  }
+  schedulerFixture(0x20000);
+}
+
 static void testPortableExternalChannels() {
   setPortableInstructionAbi(true);
   constexpr uint32_t channel = 0x80000010;
@@ -3989,6 +4511,80 @@ static void testTrapEntryReturn() {
   schedulerFixture(0x20000);
 }
 
+static void testCapturedInvalidReturn() {
+  setPortableInstructionAbi(false);
+  for (bool fallback : {false, true}) {
+    schedulerFixture(0x290000, LOW_PRIORITY);
+    cpuState.interruptsDisabled = true;
+    installTrap(HIGH_PRIORITY, TRAP_GROUP_SCHEDULER, 0x291000, 0xab00);
+    uint32_t previous = 0;
+    changeTrapMask(HIGH_PRIORITY, RUN_TRAPENB, true, &previous);
+    cpuState.areg = 0x292000;
+    expect("invalid captured return enters HP handler", runp_(0) != 0, 0);
+    const uint32_t invalid[] = {0x00ff0000, STATUS_TIMESLICE_ENABLE,
+        0x293001, 0x6f000000, 0x11, 0x22, 0x33};
+    for (uint32_t index = 0; index < 7; ++index) storeBytes(0x294000 + index * 4, 4, invalid[index]);
+    cpuState.areg = 7;
+    cpuState.breg = LOW_PRIORITY;
+    cpuState.creg = 0x294000;
+    expect("invalid captured return loads invalid bank", ldshadow_(0) != 0, 0);
+    storeBytes(0x294004, 4, STATUS_VALID | STATUS_TIMESLICE_ENABLE);
+    cpuState.areg = 2;
+    cpuState.breg = LOW_PRIORITY;
+    cpuState.creg = 0x294000;
+    expect("invalid captured return rejects unaligned activation", ldshadow_(0) == INVALID_SHADOW_ACCESS, 1);
+    if (fallback) {
+      storeBytes(0x295000 - 4, 4, 0xac00);
+      expect("invalid captured return queues fallback", enqueueProcess(0x295000, LOW_PRIORITY) != 0, 0);
+    }
+    expect("invalid captured return leaves handler", tret_(0) != 0, 0);
+    expect("invalid captured caller not revived", cpuState.running, 0);
+    expect("invalid captured return clears interruption disable", cpuState.interruptsDisabled, 0);
+    if (fallback) {
+      expect("invalid captured return schedules fallback", pollTimers() != 0, 0);
+      expect("invalid captured fallback running", cpuState.running, 1);
+      expect("invalid captured fallback workspace", cpuState.wptr, 0x295000);
+      expect("invalid captured fallback Iptr", cpuState.iptr, 0xac00);
+      expect("invalid captured fallback consumed once", omrState.ProcQueueFPtr[LOW_PRIORITY], NO_PROCESS);
+    } else {
+      expect("invalid captured return does not fetch stale Iptr", decodeNextInstr() == CPU_IDLE, 1);
+    }
+  }
+  schedulerFixture(0x20000);
+}
+
+static void testTrapEnableEntryRules() {
+  const uint32_t globals[] = {0, 0x1f, 0xff, 0x8000, 0xaa55, 0x55aa, 0xffff};
+  for (bool portable : {false, true}) {
+    setPortableInstructionAbi(portable);
+    for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+      for (uint32_t callerValue : globals) {
+        for (uint32_t handlerValue : globals) {
+          uint32_t callerGlobal = callerValue & (portable ? 0xffU : 0xffffU);
+          uint32_t handlerGlobal = handlerValue & (portable ? 0xffU : 0xffffU);
+          constexpr uint32_t callerTraps = BREAKPOINT_TRAPENB | INTEGER_ERR_TRAPENB | RUN_TRAPENB;
+          constexpr uint32_t handlerTraps = INTEGER_ERR_TRAPENB | SIGNAL_TRAPENB;
+          schedulerFixture(0x280000, priority);
+          installTrap(priority, 0, 0x281000, 0xa980, (handlerGlobal << 16) | handlerTraps);
+          omrState.Enables = (callerGlobal << 16) | callerTraps;
+          expect("trap enable rule enters handler", requestTrap(BREAKPOINT_TRAPENB, priority) != 0, 0);
+          expect("trap global enable rule", omrState.Enables >> 16,
+              portable ? callerGlobal & handlerGlobal : handlerGlobal);
+          expect("trap trap-enable intersection", trapEnableMask(priority), callerTraps & handlerTraps);
+          uint32_t saved = 0;
+          readBytes(trapRecordAddress(priority, 0, true), 4, &saved);
+          expect("trap saved original enable word", saved, (callerGlobal << 16) | callerTraps);
+          expect("trap enable rule returns", tret_(0) != 0, 0);
+          expect("trap return restores global enables", omrState.Enables >> 16, callerGlobal);
+          expect("trap return restores trap enables", trapEnableMask(priority), callerTraps);
+        }
+      }
+    }
+  }
+  setPortableInstructionAbi(false);
+  schedulerFixture(0x20000);
+}
+
 static void testTrapInstructionHooks() {
   struct CheckCase { int (*handler)(uint32_t); uint32_t areg; uint32_t breg; uint32_t creg; unsigned int pops; };
   const CheckCase checkCases[] = {{cb_, 128, 0x1234, 0x5678, 0},
@@ -4171,7 +4767,7 @@ static void testSchedulerTrapDelivery() {
   expect("firmware run trap returns", tret_(0) != 0, 0);
   expect("firmware trap restores caller workspace", cpuState.wptr, 0xc04307b0);
   expect("firmware trap restores caller instruction", cpuState.iptr, callerIptr);
-  expect("firmware trap restores caller status", cpuState.status, callerStatus | 0x10000U);
+  expect("firmware trap restores caller status without temporary return priority", cpuState.status, callerStatus);
   expect("firmware trap frame consumed", trapHandlerActive(), 0);
 
   schedulerFixture(0xc04307c4);
@@ -4703,6 +5299,80 @@ static void testTimedAlt() {
   schedulerFixture(0x20000);
 }
 
+static void testNativeTimedExternalAlt() {
+  setPortableInstructionAbi(false);
+  constexpr uint32_t channel = 0x8000001c;
+  const uint8_t input[] = {0x12, 0x34};
+  for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+    for (int scenario = 0; scenario < 3; ++scenario) {
+      for (bool channelFirst : {false, true}) {
+        schedulerFixture(0x270000);
+        cpuState.priority = priority;
+        omrState.ClockRegHP = omrState.ClockRegLP = scenario == 2 ? 0xfffffffeU : 0U;
+        uint32_t time = scenario == 0 ? 4096U : scenario == 1 ? 0U : 0xffffffffU;
+        expect("native timed ALT registers FIFO", registerExternalChannel(channel, 8) != 0, 0);
+        expect("native timed ALT starts", talt_(0) != 0, 0);
+        cpuState.areg = 1;
+        cpuState.breg = channel;
+        expect("native timed ALT enables FIFO", enbc_(0) != 0, 0);
+        cpuState.areg = 1;
+        cpuState.breg = time;
+        expect("native timed ALT enables timer", enbt_(0) != 0, 0);
+        expect("native timed ALT waits", taltwt_(0) != 0, 0);
+        expect("native timed ALT suspended", cpuState.running, 0);
+        if (scenario != 2)
+          expect("native timed ALT channel wakes first", feedExternalChannel(channel, input) != 0, 0);
+        expect("native timed ALT advances clocks", advanceTimers(2U * 3888U) != 0, 0);
+        if (scenario == 2)
+          expect("native timed ALT FIFO ready after timer", feedExternalChannel(channel, input) != 0, 0);
+        expect("native timed ALT owner running", cpuState.running, 1);
+        expect("native timed ALT owner workspace", cpuState.wptr, 0x270000);
+        expect("native timed ALT wakes only once", omrState.ProcQueueFPtr[priority], NO_PROCESS);
+        auto disableChannel = [&] {
+          cpuState.areg = 0x20;
+          cpuState.breg = 1;
+          cpuState.creg = channel;
+          expect("native timed ALT disables FIFO", disc_(0) != 0, 0);
+          return cpuState.areg;
+        };
+        auto disableTimer = [&] {
+          cpuState.areg = 0x10;
+          cpuState.breg = 1;
+          cpuState.creg = time;
+          expect("native timed ALT disables timer", dist_(0) != 0, 0);
+          return cpuState.areg;
+        };
+        if (channelFirst) {
+          expect("native timed ALT first FIFO selects", disableChannel(), 1);
+          expect("native timed ALT later timer cannot select", disableTimer(), 0);
+        } else {
+          expect("native timed ALT timer readiness", disableTimer(), scenario == 0 ? 0 : 1);
+          expect("native timed ALT subsequent FIFO readiness", disableChannel(), scenario == 0 ? 1 : 0);
+        }
+        uint32_t offset = 0;
+        readBytes(cpuState.wptr, 4, &offset);
+        uint32_t expectedOffset = channelFirst || scenario == 0 ? 0x20U : 0x10U;
+        expect("native timed ALT selects by disabling order", offset, expectedOffset);
+        expect("native timed ALT detaches timer", omrState.TptrReg[priority], NO_PROCESS);
+        expect("native timed ALT late clock advance", advanceTimers(uint64_t{4098} * 3888U) != 0, 0);
+        expect("native timed ALT cancelled timer never requeues", omrState.ProcQueueFPtr[priority], NO_PROCESS);
+        cpuState.areg = 2;
+        cpuState.breg = channel;
+        cpuState.creg = 0x271000;
+        expect("native timed ALT FIFO data retained", in_(0) != 0, 0);
+        uint32_t value = 0;
+        readBytes(0x271000, 2, &value);
+        expect("native timed ALT exact FIFO bytes", value, 0x3412);
+        expect("native timed ALT branch executes", altend_(0) != 0, 0);
+        expect("native timed ALT branch offset", cpuState.iptr, 0x3000 + expectedOffset);
+        expect("native timed ALT has no portable continuation", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+        expect("native timed ALT unregisters FIFO", unregisterExternalChannel(channel) != 0, 0);
+      }
+    }
+  }
+  schedulerFixture(0x20000);
+}
+
 static void testAltNotificationRaces() {
   schedulerFixture(0x125000);
   storeBytes(0x126000, 4, NO_PROCESS);
@@ -5002,6 +5672,7 @@ int main(int argc, char **argv) {
   testSignedLongProducts();
   testFractionMultiply();
   testUnpackSingle();
+  testNativeFloatHelpers();
   testInfinityAndHaltMode();
   testLoopEnd();
   testTimerClocks();
@@ -5030,6 +5701,7 @@ int main(int argc, char **argv) {
   testPortableRestartAndShadow();
   testPortableChannelCopy();
   testPortableInterruptController();
+  testNativeExternalChannels();
   testPortableExternalChannels();
   testPortableMove2d();
   testPortableExternalSnapshots();
@@ -5037,6 +5709,8 @@ int main(int argc, char **argv) {
   testShadowRegisters();
   testReadyQueueNotifications();
   testTrapEntryReturn();
+  testTrapEnableEntryRules();
+  testCapturedInvalidReturn();
   testTrapInstructionHooks();
   testSchedulerTrapDelivery();
   testTrapSnapshot();
@@ -5045,6 +5719,7 @@ int main(int argc, char **argv) {
   testVersion2AndHaltSnapshot();
   testUntimedAlt();
   testTimedAlt();
+  testNativeTimedExternalAlt();
   testAltNotificationRaces();
   testAltSnapshots();
   testAltBoundaryCases();

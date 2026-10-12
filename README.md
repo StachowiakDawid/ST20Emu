@@ -130,7 +130,9 @@ STi5518 startup installs independent ASC1 (`0x20004000`, source 9) and ASC2 (`0x
 
 Set `PORTABLE_INSTRUCTION_ABI = 0x1` in the configuration to enable the emulator-specific saved-operation and floating-point formats. The default is `0x0`, preserving the reference-oriented fallback behavior. Embedders can use `setPortableInstructionAbi(true)`.
 
-Portable mode adds resumable moves and channel copies, complete tagged shadow records, `restart`, `postnormsn`, `roundsn`, queued/nested external interrupts, and bounded external FIFO channels. It is **not a verified ST20 silicon ABI** and may be incompatible with existing firmware. The record and FP formats, host event APIs, snapshot behavior, and remaining limits are specified in [the instruction status document](docs/instruction-status.md#portable-emulator-abi).
+Portable mode adds resumable moves and channel copies, complete tagged shadow records, `restart`, alternative FP formats, and queued/nested external interrupts. It is **not a verified ST20 silicon ABI** and may be incompatible with existing firmware. The record and FP formats, host event APIs, snapshot behavior, and remaining limits are specified in [the instruction status document](docs/instruction-status.md#portable-emulator-abi). Native `postnormsn` and `roundsn` are available without this option and use the separately [simulator-verified intermediate format](docs/instruction-status.md#native-floating-point-helpers).
+
+Explicitly configured FIFO endpoints via `registerExternalChannel`, `feedExternalChannel` and `drainExternalChannel` also work in native mode, including blocking input/output, scalar sends, ALT guards and reset. Native transfers are atomic with RAM-only buffers; portable transfers retain resumable state. These host-configured endpoints are not an automatic STi5518 hardware channel map.
 
 `reboot` remains unimplemented. Exact chip-specific bus timings, alignment rules, and peripheral register-map integration are not certified by portable mode.
 

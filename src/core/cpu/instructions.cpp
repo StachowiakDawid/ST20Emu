@@ -119,11 +119,16 @@ int copy2d(Move2dFilter filter) {
   for (uint32_t row = 0; row < rows; ++row) {
     uint32_t sourceRow = source + row * sourceStride;
     uint32_t destinationRow = destination + row * destinationStride;
+    if (filter == Move2dFilter::All) {
+      int result = storeByteRange(sourceRow, destinationRow, width);
+      if (result) return result;
+      continue;
+    }
     for (uint32_t column = 0; column < width; ++column) {
       uint32_t value = 0;
       int result = readBytes(static_cast<uint32_t>(sourceRow + column), 1, &value);
       if (result) return result;
-      if (filter == Move2dFilter::All || (filter == Move2dFilter::Nonzero && value != 0) ||
+      if ((filter == Move2dFilter::Nonzero && value != 0) ||
           (filter == Move2dFilter::Zero && value == 0)) {
         result = storeBytes(static_cast<uint32_t>(destinationRow + column), 1, static_cast<uint32_t>(value));
         if (result) return result;
@@ -236,12 +241,28 @@ int testpranal_(uint32_t /*unused*/) {
 }
 
 int postnormsn_(uint32_t /*unused*/) {
-  if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
   uint32_t count = cpuState.creg;
-  if (count > BitsPerDoubleWord) return INVALID_PORTABLE_STATE;
+  if (portableInstructionAbiEnabled() && count > BitsPerDoubleWord) return INVALID_PORTABLE_STATE;
   uint32_t temporary = 0;
   int result = readWptrWord(pw::Temp, &temporary);
   if (result) return result;
+  if (!portableInstructionAbiEnabled()) {
+    int64_t exponent = static_cast<int32_t>(temporary - count);
+    if (exponent < -23) {
+      cpuState.areg = 0;
+      cpuState.breg = 0;
+      exponent = 0;
+    } else if (exponent <= 0) {
+      uint64_t significand = (static_cast<uint64_t>(cpuState.breg) << BitsPerWord) | cpuState.areg;
+      int64_t shift = 1 - exponent;
+      significand = (significand >> shift) | cpuState.areg;
+      cpuState.areg = static_cast<uint32_t>(significand);
+      cpuState.breg = static_cast<uint32_t>(significand >> BitsPerWord);
+      exponent = 0;
+    }
+    cpuState.creg = static_cast<uint32_t>(std::min<int64_t>(exponent, 255));
+    return 0;
+  }
   uint32_t word = temporary;
   int64_t exponent = static_cast<int32_t>(word << 1) / 2;
   exponent -= count;
@@ -252,7 +273,17 @@ int postnormsn_(uint32_t /*unused*/) {
 }
 
 int roundsn_(uint32_t /*unused*/) {
-  if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
+  if (!portableInstructionAbiEnabled()) {
+    uint64_t significand = (static_cast<uint64_t>(cpuState.breg & 0x7fffffffU) << BitsPerWord) | cpuState.areg;
+    uint64_t rounded = roundEvenShift(significand, 40);
+    uint32_t exponent = cpuState.creg;
+    uint32_t packed = static_cast<int32_t>(exponent) >= 255 ? 0x7f800000U
+        : (exponent << 23) + static_cast<uint32_t>(rounded);
+    cpuState.areg = packed;
+    cpuState.breg = undefinedWord;
+    cpuState.creg = undefinedWord;
+    return 0;
+  }
   uint64_t significand = (static_cast<uint64_t>(cpuState.breg) << BitsPerWord) |
                          cpuState.areg;
   uint32_t word = cpuState.creg;
@@ -1245,7 +1276,7 @@ int move_(uint32_t /*unused*/) {
   if (portableInstructionAbiEnabled())
     return beginResumableMove(1, oldAreg, oldBreg, oldCreg);
 
-  int result = storeByteRange(oldCreg, oldBreg, static_cast<int>(oldAreg));
+  int result = storeByteRange(oldCreg, oldBreg, oldAreg);
 
   compat::println("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg,
                   oldCreg, oldBreg);
@@ -1395,11 +1426,15 @@ int rev_(uint32_t /*unused*/) {
 }
 
 int runp_(uint32_t /*unused*/) {
-  uint32_t descriptor = pop();
-  pop();
-  pop();
+  uint32_t descriptor = cpuState.areg;
   unsigned char priority = static_cast<unsigned char>(descriptor & 1U);
-  if (trapEnableMask(priority) & RUN_TRAPENB)
+  bool trapped = (trapEnableMask(priority) & RUN_TRAPENB) != 0;
+  if (trapped && !portableInstructionAbiEnabled())
+    return requestTrap(RUN_TRAPENB, priority, false, descriptor);
+  pop();
+  pop();
+  pop();
+  if (trapped)
     return requestTrap(RUN_TRAPENB, priority, false, descriptor);
   int result = enqueueProcess(descriptor & WordSelectMask, static_cast<unsigned char>(descriptor & 1U));
   return result ? result : pollTimers();

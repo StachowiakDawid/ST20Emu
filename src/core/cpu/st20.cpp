@@ -478,6 +478,32 @@ int releaseExternalOwner(uint32_t descriptor) {
   return enqueueProcess(descriptor & WordSelectMask, priority);
 }
 
+int transferNativeExternalBytes(ExternalChannel &endpoint, uint32_t buffer, uint32_t length, bool input) {
+  uint64_t end = static_cast<uint64_t>(buffer) + length;
+  if (end > (uint64_t{1} << 32)) return INVALID_CHANNEL;
+  if (buffer <= PeripheralEnd && end > PeripheralStart) return DEVICE_ACCESS_UNSUPPORTED;
+  for (uint32_t offset = 0; offset < length; ++offset)
+    if (isMemoryDeviceAddress(buffer + offset)) return DEVICE_ACCESS_UNSUPPORTED;
+  std::vector<uint8_t> bytes(length);
+  if (input) {
+    std::copy_n(endpoint.input.begin(), length, bytes.begin());
+    for (uint32_t offset = 0; offset < length; ++offset) {
+      int result = storeBytes(buffer + offset, 1, bytes[offset]);
+      if (result) return result;
+    }
+    for (uint32_t offset = 0; offset < length; ++offset) endpoint.input.pop_front();
+  } else {
+    for (uint32_t offset = 0; offset < length; ++offset) {
+      uint32_t value = 0;
+      int result = readBytes(buffer + offset, 1, &value);
+      if (result) return result;
+      bytes[offset] = static_cast<uint8_t>(value);
+    }
+    endpoint.output.insert(endpoint.output.end(), bytes.begin(), bytes.end());
+  }
+  return 0;
+}
+
 int pollExternalChannels() {
   for (auto &[address, endpoint] : externalChannels) {
     (void)address;
@@ -485,6 +511,19 @@ int pollExternalChannels() {
       bool ready = endpoint.inputWait ? endpoint.input.size() >= endpoint.length
                                     : endpoint.capacity - endpoint.output.size() >= endpoint.length;
       if (ready) {
+        if (!portableInstructionAbiEnabled() && endpoint.length != 0) {
+          unsigned char priority = static_cast<unsigned char>(endpoint.waiter & 1U);
+          if (trapEnableMask(priority) & EXTERNALCH_TRAPENB) {
+            uint32_t handler = 0;
+            int result = readProcessWord(trapRecordAddress(priority, TRAP_GROUP_SCHEDULER, false), 2, handler);
+            if (result || handler == 0 || (handler & 3U)) return INVALID_TRAP_HANDLER;
+          }
+          uint32_t buffer = 0;
+          int result = readProcessWord(endpoint.waiter & WordSelectMask, pw::Pointer, buffer);
+          if (!result) result = transferNativeExternalBytes(endpoint, buffer, endpoint.length, endpoint.inputWait);
+          if (result) return result;
+          endpoint.length = 0;
+        }
         int result = releaseExternalOwner(endpoint.waiter);
         if (result == CPU_IDLE) continue;
         if (result) return result;
@@ -520,8 +559,10 @@ int prepareExternalContinuation(CPUSTATE &state, bool consume) {
     if (consume) {
       endpoint.waiter = NO_PROCESS;
       endpoint.queued = false;
+      if (!portableInstructionAbiEnabled()) endpoint.active = NO_PROCESS;
       return 0;
     }
+    if (!portableInstructionAbiEnabled()) return endpoint.length == 0 ? 0 : INVALID_CHANNEL;
     uint32_t buffer = 0;
     int result = readProcessWord(state.wptr, pw::Pointer, buffer);
     if (result) return result;
@@ -540,7 +581,6 @@ int prepareExternalContinuation(CPUSTATE &state, bool consume) {
 }
 
 int transferExternalChannel(uint32_t address, uint32_t length, uint32_t buffer, bool input) {
-  if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
   if (interruptHandlerActive()) return TRAP_HANDLER_BLOCKED;
   auto &endpoint = externalChannels.at(address);
   uint32_t descriptor = cpuState.wptr | cpuState.priority;
@@ -558,6 +598,7 @@ int transferExternalChannel(uint32_t address, uint32_t length, uint32_t buffer, 
     endpoint.inputWait = input;
     return suspendProcess();
   }
+  if (!portableInstructionAbiEnabled()) return transferNativeExternalBytes(endpoint, buffer, length, input);
   endpoint.active = descriptor;
   cpuState.move2dDestStride = address;
   cpuState.move2dSourceStride = NO_PROCESS;
@@ -772,7 +813,6 @@ int enqueueProcess(uint32_t workspace, unsigned char priority) {
 }
 
 int registerExternalChannel(uint32_t address, uint32_t capacity) {
-  if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
   if ((address & 3U) || capacity == 0 || capacity > 1048576 || externalChannels.size() >= 1024 ||
       externalChannels.contains(address) || executingInstruction) return INVALID_CHANNEL;
   externalChannels.emplace(address, ExternalChannel{capacity, {}, {}});
@@ -1162,7 +1202,9 @@ int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t
   }
   trapFrames.push_back(frame);
   selectPriority(priority);
-  omrState.Enables &= descriptorWords[0];
+  if (portableInstructionAbiEnabled()) omrState.Enables &= descriptorWords[0];
+  else omrState.Enables = (descriptorWords[0] & 0xffff0000U) |
+                         (omrState.Enables & descriptorWords[0] & 0xffffU);
   cpuState.status = descriptorWords[1];
   if (group == TRAP_GROUP_SCHEDULER)
     cpuState.status = (cpuState.status & ~0x30000U) | (static_cast<uint32_t>(frame.caller.priority) << 16);
@@ -1261,23 +1303,27 @@ int returnFromTrap() {
     return INVALID_TRAP_RETURN;
   std::array<uint32_t, 4> saved{};
   uint32_t trapped = trapRecordAddress(frame.priority, group, true);
-  for (int index = 0; index < 4; ++index) {
+  unsigned char priority = group == TRAP_GROUP_SCHEDULER ? static_cast<unsigned char>((cpuState.status >> 16) & 3U)
+                                    : frame.caller.priority;
+  if (priority > LOW_PRIORITY) return INVALID_TRAP_RETURN;
+  if (priority != frame.caller.priority) return INVALID_TRAP_RETURN;
+  bool nativeCrossPriority = !portableInstructionAbiEnabled() && priority != frame.priority;
+  for (int index = 0; index < (nativeCrossPriority ? 2 : 4); ++index) {
     int result = readProcessWord(trapped, index, saved[static_cast<std::size_t>(index)]);
     if (result) return result;
   }
-  unsigned char priority = group == TRAP_GROUP_SCHEDULER ? static_cast<unsigned char>((cpuState.status >> 16) & 3U)
-                                    : frame.caller.priority;
-  if (priority > LOW_PRIORITY || (saved[2] & 3U)) return INVALID_TRAP_RETURN;
-  if (priority != frame.caller.priority) return INVALID_TRAP_RETURN;
+  if (!nativeCrossPriority && (saved[2] & 3U)) return INVALID_TRAP_RETURN;
   uint32_t enablesMask = portableInstructionAbiEnabled() ? 0x00ff3fffU : 0xffff3fffU;
   omrState.Enables = (omrState.Enables & ~enablesMask) | (saved[0] & enablesMask);
   omrState.TrapEnables[frame.priority] = saved[0] & 0x3fffU;
   selectPriority(priority);
   if (priority != frame.priority) cpuState = frame.caller;
   cpuState.priority = priority;
-  cpuState.status = saved[1] & ~frame.cause;
+  if (!nativeCrossPriority) cpuState.status = saved[1] & ~frame.cause;
+  if (!portableInstructionAbiEnabled() && !nativeCrossPriority && group == TRAP_GROUP_SCHEDULER)
+    cpuState.status = (cpuState.status & ~0x30000U) | (frame.caller.status & 0x30000U);
   cpuState.interruptsDisabled = frame.caller.interruptsDisabled;
-  cpuState.timeslicePeriods = saved[2] == frame.caller.wptr ? frame.caller.timeslicePeriods : 0;
+  cpuState.timeslicePeriods = nativeCrossPriority || saved[2] == frame.caller.wptr ? frame.caller.timeslicePeriods : 0;
   cpuState.moveRowWidth = frame.caller.moveRowWidth;
   cpuState.moveBufferedWord = frame.caller.moveBufferedWord;
   cpuState.move2dBlockLength = frame.caller.move2dBlockLength;
@@ -1285,11 +1331,14 @@ int returnFromTrap() {
   cpuState.move2dSourceStride = frame.caller.move2dSourceStride;
   if (frame.generated)
     cpuState.status = (cpuState.status & ~0x8000U) | (frame.caller.status & 0x8000U);
-  cpuState.wptr = saved[2];
-  cpuState.iptr = saved[3];
+  if (!nativeCrossPriority) {
+    cpuState.wptr = saved[2];
+    cpuState.iptr = saved[3];
+  }
   cpuState.nWptr = frame.caller.nWptr;
-  cpuState.running = (saved[1] & STATUS_VALID) != 0 || frame.caller.running || saved[2] != frame.caller.wptr ||
-                     saved[3] != static_cast<uint32_t>(frame.caller.iptr);
+  cpuState.running = nativeCrossPriority ? frame.caller.running
+      : (saved[1] & STATUS_VALID) != 0 || frame.caller.running || saved[2] != frame.caller.wptr ||
+        saved[3] != static_cast<uint32_t>(frame.caller.iptr);
   if (cpuState.running) queueEmptyReported[cpuState.priority] = false;
   trapFrames.pop_back();
   return 0;
@@ -1682,16 +1731,12 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
   bool portable = portableInstructionAbiEnabled();
   if (selection == 0) return 0;
   if (load && priority == cpuState.priority && (selection & 7U)) return INVALID_SHADOW_ACCESS;
-  if ((selection & 6U) && priority != cpuState.priority &&
-      ((priority != LOW_PRIORITY && !portable) || (trapHandlerActive() && !portable))) return INVALID_SHADOW_ACCESS;
-    CPUSTATE *bank = priority == cpuState.priority ? &cpuState : priority == LOW_PRIORITY ? &lowPriorityShadow : &highPriorityShadow;
-    bool bankValid = priority == cpuState.priority ? cpuState.running : priority == LOW_PRIORITY ? lowPriorityShadowValid : highPriorityShadowValid;
-  if ((selection & 8U) && !portable) {
-    if (priority != cpuState.priority && priority != LOW_PRIORITY) return INVALID_SHADOW_ACCESS;
-    if (bank->status & STATUS_INTERRUPTED_OPERATION_MASK) return INTERRUPTED_OPERATION_UNSUPPORTED;
-  }
+  if ((selection & 6U) && priority != cpuState.priority && !portable && priority != LOW_PRIORITY)
+    return INVALID_SHADOW_ACCESS;
+  CPUSTATE *bank = priority == cpuState.priority ? &cpuState : priority == LOW_PRIORITY ? &lowPriorityShadow : &highPriorityShadow;
+  bool bankValid = priority == cpuState.priority ? cpuState.running : priority == LOW_PRIORITY ? lowPriorityShadowValid : highPriorityShadowValid;
   TrapFrame *savedFrame = nullptr;
-  if (portable && priority != cpuState.priority) {
+  if (priority != cpuState.priority) {
     for (auto frame = trapFrames.rbegin(); frame != trapFrames.rend(); ++frame) {
       if (frame->caller.priority == priority) {
         bank = &frame->caller;
@@ -1700,6 +1745,10 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
         break;
       }
     }
+  }
+  if ((selection & 8U) && !portable) {
+    if (priority != cpuState.priority && priority != LOW_PRIORITY) return INVALID_SHADOW_ACCESS;
+    if (bank->status & STATUS_INTERRUPTED_OPERATION_MASK) return INTERRUPTED_OPERATION_UNSUPPORTED;
   }
   auto selectedWord = [selection](std::size_t index) {
     return (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
@@ -1735,6 +1784,7 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
       updated.timeslicePeriods = 0;
       valid = (words[1] & STATUS_VALID) != 0;
       updated.running = valid;
+      if (!portable && !valid) updated.interruptsDisabled = false;
     }
     if (selection & 4U) {
       updated.areg = words[4];
@@ -1749,7 +1799,7 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
       updated.moveBufferedWord = words[11];
     }
     if (!validPendingOperation(updated)) return INVALID_PORTABLE_STATE;
-    if (savedFrame && (selection & 3U)) {
+    if (portable && savedFrame && (selection & 3U)) {
       uint32_t address = trapRecordAddress(savedFrame->priority, trapGroup(savedFrame->cause), true);
       if (selection & 1U) {
         uint32_t enables = 0;
@@ -1782,7 +1832,7 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
   }
   CPUSTATE source = *bank;
   bool valid = bankValid;
-  if (!valid) {
+  if (!valid && (portable || !savedFrame)) {
     source = {undefinedWord, undefinedWord,
               undefinedWord, undefinedWord, 0,
               static_cast<unsigned char>(priority), NO_PROCESS, false, 0, 0, 0,
@@ -1867,7 +1917,8 @@ int waitTimer(uint32_t time, bool alternative) {
     result = readProcessWord(next, pw::TLink, next);
     if (result) return result;
   }
-  int result = writeProcessWord(cpuState.wptr, pw::State, alternative ? ALT_WAITING : ALT_ENABLING);
+  int result = writeProcessWord(cpuState.wptr, pw::Iptr, cpuState.iptr);
+  if (!result) result = writeProcessWord(cpuState.wptr, pw::State, alternative ? ALT_WAITING : ALT_ENABLING);
   if (!result) result = writeProcessWord(cpuState.wptr, pw::Time, deadline);
   if (!result) result = writeProcessWord(cpuState.wptr, pw::TLink, next);
   if (result) return result;
@@ -1878,7 +1929,7 @@ int waitTimer(uint32_t time, bool alternative) {
     result = writeProcessWord(previous, pw::TLink, cpuState.wptr);
     if (result) return result;
   }
-  return suspendProcess();
+  return suspendSavedProcess();
 }
 
 int swapTimerList(unsigned char priority, uint32_t front, uint32_t *previous) {

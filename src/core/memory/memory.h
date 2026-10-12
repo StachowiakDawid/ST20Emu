@@ -50,7 +50,7 @@ int readBytes(uint32_t address, int nBytes, uint32_t *value);
 int readInvBytes(uint32_t address, int nBytes, uint32_t *value);
 int storeBytes(uint32_t address, int nBytes, uint32_t value);
 int allocBytes(uint32_t address, int nBytes);
-int storeByteRange(uint32_t srcAddr, uint32_t destAddr, int nBytes);
+int storeByteRange(uint32_t srcAddr, uint32_t destAddr, uint32_t nBytes);
 int copyDeviceBytes(uint32_t source, uint32_t destination, uint32_t length);
 int validateDeviceMoveRange(uint32_t source, uint32_t destination, uint32_t length);
 int bulkLoadBytes(uint32_t address, const char *byteFileName, char *usedFileName, uint32_t *dataLength);
