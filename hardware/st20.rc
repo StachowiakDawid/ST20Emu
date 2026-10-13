@@ -1,0 +1,2 @@
+parse ("directory "+(getenv ST20ROOT)+"/board\n")
+parse ("include boardprocs.cfg\n")
