@@ -56,7 +56,11 @@ Native `move` accepts the full unsigned 32-bit count. `move` and `move2dall`
 use aligned four-byte transfers when both cursors permit them, with byte
 prefixes, tails and a byte fallback for differing alignments. Transfers stay
 within each requested span and row; errors retain only completed writes.
-Filtered 2D copies remain byte-based because the write decision is per byte.
+Filtered 2D copies use aligned word reads when source and destination can reach
+the simulator's word boundary with the same byte prefix. Fully matching words
+use one word write; mixed words are re-read bytewise and only matching bytes
+are written. Differently aligned rows use byte accesses. Exact silicon bus
+scheduling remains unverified.
 Exact silicon bus schedules and native interrupted-operation restart remain
 unverified, so these instructions are still Partial.
 
@@ -216,8 +220,8 @@ does not mean those portable implementations are absent.
 | `move` | Partial | Full unsigned count, aligned word copying and exact byte prefixes/tails; differing alignments use byte fallback. Native interrupted restart and exact bus timing remain unsupported. |
 | `move2dall` | Partial | Strided copies with wrapping addresses, aligned word transfers and exact row tails; native interrupted restart and exact bus/timing behavior remain unsupported. |
 | `move2dinit` | Implemented | Sets row count and byte strides in process state, preserved by shadowing and snapshots. |
-| `move2dnonzero` | Partial | Copies only nonzero bytes and preserves skipped destination bytes; interruptible restart and exact bus behavior unsupported. |
-| `move2dzero` | Partial | Copies only zero bytes and preserves skipped destination bytes; interruptible restart and exact bus behavior unsupported. |
+| `move2dnonzero` | Partial | Copies only nonzero bytes; aligned fully nonzero groups use word transfers, mixed groups fall back to byte checks. Native interrupted restart and exact silicon timing remain unsupported. |
+| `move2dzero` | Partial | Copies only zero bytes; aligned zero groups use word transfers, mixed groups fall back to byte checks. Native interrupted restart and exact silicon timing remain unsupported. |
 | `mul` | Implemented | Checked signed product with overflow delivery and safe host arithmetic. |
 | `nop` | Implemented | - |
 | `norm` | Implemented | Normalizes B:A as an unsigned double word; returns leading-zero count in C. |
@@ -376,7 +380,9 @@ The six device load/store instructions use the shared [memory bus](../src/core/m
 
 Mapped ranges take precedence over backing RAM without modifying it. Overlapping registrations, unsupported access directions, and transfers straddling a range boundary (including address-space wraparound) are rejected. Callback errors propagate rather than falling back to RAM, including `READ_UNUSED_MEM`. Unregistered addresses retain the existing sparse-RAM behavior; device loads of uninitialized RAM still return the undefined-word marker for compatibility.
 
-This implements the core device-instruction dispatch contract, not every peripheral on a particular chip. No built-in STi5518 peripheral model is registered by this change. Peripheral state, address-map configuration, and host callback pointers are not serialized in CPU or RAM snapshots; device owners must manage those separately. Exact bus timings and hardware-specific alignment rules remain device-model responsibilities. `move` and `move2dall` batch aligned word transfers with exact byte prefixes/tails, while filtered 2D copies remain byte-based. This does not provide native restartability or certify hardware-minimum transactions for differing alignments. Ordered `devmove` behavior is described below.
+This implements the core device-instruction dispatch contract, not every peripheral on a particular chip. No built-in STi5518 peripheral model is registered by this change. Peripheral state, address-map configuration, and host callback pointers are not serialized in CPU or RAM snapshots; device owners must manage those separately.
+
+Exact bus timings and hardware-specific alignment rules remain device-model responsibilities. `move` and `move2dall` batch aligned word transfers with exact byte prefixes/tails. Filtered 2D copies use word transfers for aligned, fully matching four-byte groups; mixed groups fall back to byte reads and selective writes. This does not provide native restartability or certify silicon timing or hardware-minimum transactions for differing alignments. Ordered `devmove` behavior is described below.
 
 ## Ordered device copy
 

@@ -124,19 +124,65 @@ int copy2d(Move2dFilter filter) {
       if (result) return result;
       continue;
     }
-    for (uint32_t column = 0; column < width; ++column) {
+    auto shouldCopy = [filter](uint32_t value) {
+      return filter == Move2dFilter::Nonzero ? value != 0 : value == 0;
+    };
+    auto copyByte = [&](uint32_t column) {
       uint32_t value = 0;
       int result = readBytes(static_cast<uint32_t>(sourceRow + column), 1, &value);
+      if (!result && shouldCopy(value)) {
+        result = storeBytes(static_cast<uint32_t>(destinationRow + column), 1, value);
+      }
+      return result;
+    };
+    auto copyWord = [&](uint32_t column) {
+      uint32_t value = 0;
+      int result = readBytes(static_cast<uint32_t>(sourceRow + column), BytesPerWord, &value);
       if (result) return result;
-      if ((filter == Move2dFilter::Nonzero && value != 0) ||
+
+      bool hasZeroByte = false;
+      for (uint32_t byte = 0; byte < BytesPerWord; ++byte)
+        hasZeroByte |= ((value >> (byte * BitsPerByte)) & 0xffU) == 0;
+
+      if ((filter == Move2dFilter::Nonzero && !hasZeroByte) ||
           (filter == Move2dFilter::Zero && value == 0)) {
-        result = storeBytes(static_cast<uint32_t>(destinationRow + column), 1, static_cast<uint32_t>(value));
+        return storeBytes(static_cast<uint32_t>(destinationRow + column), BytesPerWord, value);
+      }
+      if ((filter == Move2dFilter::Nonzero && value == 0) ||
+          (filter == Move2dFilter::Zero && !hasZeroByte))
+        return 0;
+
+      for (uint32_t byte = 0; byte < BytesPerWord; ++byte) {
+        result = copyByte(column + byte);
         if (result) return result;
       }
+      return 0;
+    };
+
+    uint32_t column = 0;
+    uint32_t sourcePrefix = (BytesPerWord - (sourceRow & 0xfU)) & 0xfU;
+    uint32_t destinationPrefix = (BytesPerWord - (destinationRow & 0xfU)) & 0xfU;
+    if (sourcePrefix == destinationPrefix) {
+      uint32_t prefixLength = std::min(width, sourcePrefix);
+      for (; column < prefixLength; ++column) {
+        int result = copyByte(column);
+        if (result) return result;
+      }
+      uint32_t wordLength = (width - column) & ~(BytesPerWord - 1U);
+      for (uint32_t offset = 0; offset < wordLength; offset += BytesPerWord) {
+        int result = copyWord(column + offset);
+        if (result) return result;
+      }
+      column += wordLength;
+    }
+    for (; column < width; ++column) {
+      int result = copyByte(column);
+      if (result) return result;
     }
   }
   return 0;
 }
+
 }
 
 void setDeviceAccessObserver(DeviceAccessObserver observer) {

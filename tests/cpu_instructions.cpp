@@ -2720,6 +2720,99 @@ static void testMove2d() {
     expect("move2d clears B", cpuState.breg, undefinedWord);
     expect("move2d clears C", cpuState.creg, undefinedWord);
   }
+  struct FilteredMoveBus {
+    unsigned char source[24]{};
+    unsigned char destination[24]{};
+    struct Event { uint32_t address; int width; bool write; };
+    std::vector<Event> events;
+  } bus;
+  constexpr uint32_t filteredSource = 0x40030000;
+  constexpr uint32_t filteredDestination = 0x40040000;
+  MemoryDevice filteredSourceDevice{filteredSource, filteredSource + 23, &bus,
+      +[](void *context, uint32_t address, int width, uint32_t *value) {
+        auto &state = *static_cast<FilteredMoveBus *>(context);
+        state.events.push_back({address, width, false});
+        *value = 0;
+        for (int byte = 0; byte < width; ++byte)
+          *value |= static_cast<uint32_t>(state.source[address - filteredSource + static_cast<uint32_t>(byte)])
+                    << (static_cast<unsigned int>(byte) * BitsPerByte);
+        return 0;
+      }, nullptr};
+  MemoryDevice filteredDestinationDevice{filteredDestination, filteredDestination + 23, &bus, nullptr,
+      +[](void *context, uint32_t address, int width, uint32_t value) {
+        auto &state = *static_cast<FilteredMoveBus *>(context);
+        state.events.push_back({address, width, true});
+        for (int byte = 0; byte < width; ++byte)
+          state.destination[address - filteredDestination + static_cast<uint32_t>(byte)] =
+              static_cast<unsigned char>(value >> (static_cast<unsigned int>(byte) * BitsPerByte));
+        return 0;
+      }};
+  expect("register filtered 2D source", registerMemoryDevice(filteredSourceDevice) != 0, 0);
+  expect("register filtered 2D destination", registerMemoryDevice(filteredDestinationDevice) != 0, 0);
+  auto countEvents = [&bus](bool write, uint32_t address, int width) {
+    uint32_t count = 0;
+    for (const auto &event : bus.events)
+      if (event.write == write && event.address == address && (width == 0 || event.width == width))
+        ++count;
+    return count;
+  };
+  for (int mode = 1; mode < 3; ++mode) {
+    const unsigned char sourceBytes[] = {1, 0, 2, 3, 1, 2, 0, 4, 0, 0, 0, 0, 5, 6, 7, 8};
+    std::copy(std::begin(sourceBytes), std::end(sourceBytes), bus.source);
+    std::fill(std::begin(bus.destination), std::end(bus.destination), 0xaa);
+    bus.events.clear();
+    cpuState.areg = 1;
+    cpuState.breg = 16;
+    cpuState.creg = 16;
+    move2dinit_(0);
+    cpuState.areg = 16;
+    cpuState.breg = filteredDestination;
+    cpuState.creg = filteredSource;
+    expect("filtered move2d MMIO succeeds", copies[mode](0) != 0, 0);
+    expect("filtered move2d aligned word read", countEvents(false, filteredSource + 8, BytesPerWord), 1);
+    expect("filtered move2d mixed word read", countEvents(false, filteredSource + 4, BytesPerWord), 1);
+    for (uint32_t byte = 4; byte < 8; ++byte)
+      expect("filtered move2d mixed word byte reread", countEvents(false, filteredSource + byte, 1), 1);
+    expect("filtered move2d fully matching word read", countEvents(false, filteredSource + 12, BytesPerWord), 1);
+    if (mode == 2) {
+      expect("zero move2d full matching word write", countEvents(true, filteredDestination + 8, BytesPerWord), 1);
+      expect("zero move2d skips nonzero word write", countEvents(true, filteredDestination + 12, 0), 0);
+    } else {
+      expect("nonzero move2d skips empty word write", countEvents(true, filteredDestination + 8, 0), 0);
+      expect("nonzero move2d fully matching word write", countEvents(true, filteredDestination + 12, BytesPerWord), 1);
+      expect("nonzero move2d optimized transaction count", bus.events.size(), 18);
+    }
+    if (mode == 2)
+      expect("zero move2d optimized transaction count", bus.events.size(), 14);
+    for (uint32_t index = 0; index < 24; ++index) {
+      bool copied = index < 16 && (mode == 1 ? bus.source[index] != 0 : bus.source[index] == 0);
+      expect("filtered move2d optimized data", bus.destination[index],
+             copied ? bus.source[index] : 0xaa);
+    }
+  }
+  std::fill(std::begin(bus.destination), std::end(bus.destination), 0xaa);
+  bus.events.clear();
+  cpuState.areg = 1;
+  cpuState.breg = 16;
+  cpuState.creg = 16;
+  move2dinit_(0);
+  cpuState.areg = 16;
+  cpuState.breg = filteredDestination + 4;
+  cpuState.creg = filteredSource;
+  expect("misaligned filtered move2d succeeds", move2dnonzero_(0) != 0, 0);
+  expect("misaligned filtered move2d byte transactions", bus.events.size(), 26);
+  for (const auto &event : bus.events)
+    expect("misaligned filtered move2d avoids word transaction", event.width == 1, 1);
+  for (uint32_t index = 0; index < 24; ++index) {
+    bool inCopySpan = index >= 4 && index < 20;
+    uint32_t sourceIndex = inCopySpan ? index - 4 : 0;
+    bool copied = inCopySpan && bus.source[sourceIndex] != 0;
+    expect("misaligned filtered move2d data", bus.destination[index],
+           copied ? bus.source[sourceIndex] : 0xaa);
+  }
+  expect("unregister filtered 2D source", unregisterMemoryDevice(filteredSource) != 0, 0);
+  expect("unregister filtered 2D destination", unregisterMemoryDevice(filteredDestination) != 0, 0);
+
   cpuState.move2dBlockLength = 0;
   cpuState.areg = 4;
   cpuState.breg = 0x70006000;
