@@ -465,5 +465,8 @@ int main(int argc, char **argv) {
   }
 
   compat::println("Finished\n");
+
+  freeAllMemory();
+
   return 0;
 }

@@ -658,6 +658,16 @@ int loadMemory(const char *dirName) {
   return 0;
 }
 
+void freeAllMemory() {
+  MEMBLK* current = memoryMap;
+  while (current != nullptr) {
+    MEMBLK* next = current->next;
+    delete current;
+    current = next;
+  }
+  memoryMap = nullptr;
+}
+
 const char *memoryError(int error) {
   switch (error) {
   case INVALID_BYTE_FILENAME:
