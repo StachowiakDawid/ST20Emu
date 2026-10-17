@@ -339,11 +339,10 @@ MEMBLK *getMemBlk(uint32_t address, bool create_flag) {
   }
 
   /* allocate memory for a new memory block */
-  blk = static_cast<MEMBLK *>(malloc(sizeof(MEMBLK)));
+  blk = new (std::nothrow) MEMBLK{};
   if (blk == nullptr) {
     return nullptr;
   }
-  memset(blk, 0, sizeof(MEMBLK));
 
   /* save this block in the list of blocks */
   blk->next = *lastBlk;
