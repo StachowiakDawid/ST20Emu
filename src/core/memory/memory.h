@@ -56,6 +56,7 @@ int validateDeviceMoveRange(uint32_t source, uint32_t destination, uint32_t leng
 int bulkLoadBytes(uint32_t address, const char *byteFileName, char *usedFileName, uint32_t *dataLength);
 int saveMemory(const char *dirName);
 int loadMemory(const char *dirName);
+void freeAllMemory();
 const char *memoryError(int error);
 
 #endif // MEMORY_H
