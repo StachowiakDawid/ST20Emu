@@ -352,7 +352,10 @@ int main(int argc, char **argv) {
   // TODO: refactor this to bool when possible
   int watchTripped{0};
   uint64_t instrCount{0};
-  bool instructionReady{true};
+  // this cannot be true, it just cannot
+  // instruction is ready only when the first instruction is fetched, not before the loop
+  // otherwise it would start at 0x7ffffffc instead of 0x7ffffffe
+  bool instructionReady{false};
   PARMS userParms{};
   cli::CliEngine cli;
 
