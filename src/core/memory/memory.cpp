@@ -20,6 +20,11 @@
 #include <regex>
 #include <vector>
 
+// O_BINARY is Windows-only, but it would be preferable to use std for files manipulation
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
 /* this structure holds the state of the memory */
 struct MEMBLK {
   uint32_t startAddr;
@@ -390,7 +395,7 @@ int bulkLoadBytes(uint32_t address, const char *byteFile, char *usedFile, uint32
   *totalBytes = 0;
 
   /* check if the byte file can be opened properly */
-  if ((byteFd = open(byteFile, O_RDONLY)) < 0) {
+  if ((byteFd = open(byteFile, O_RDONLY | O_BINARY)) < 0) {
     perror("Memory file cannot be opened");
     return INVALID_BYTE_FILE;
   }
@@ -398,7 +403,7 @@ int bulkLoadBytes(uint32_t address, const char *byteFile, char *usedFile, uint32
   /* check the name of the used file */
   if (usedFile == nullptr || *usedFile == '\0') {
     usedFd = -1;
-  } else if ((usedFd = open(usedFile, O_RDONLY)) < 0) {
+  } else if ((usedFd = open(usedFile, O_RDONLY | O_BINARY)) < 0) {
     /* check if the used file can be opened properly */
     perror("Used memory file cannot be opened");
     close(byteFd);
