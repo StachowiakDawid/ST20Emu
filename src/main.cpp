@@ -322,7 +322,13 @@ int main(int argc, char **argv) {
     auto now = std::chrono::system_clock::now();
     std::time_t time = std::chrono::system_clock::to_time_t(now);
     std::tm localTime{};
+
+#ifdef _WIN32
+    localtime_s(&localTime, &time);
+#else
     localtime_r(&time, &localTime);
+#endif
+
     char timestamp[32]{};
     std::strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &localTime);
     std::string logPath = std::format("st20emu-log-{}.txt", timestamp);
