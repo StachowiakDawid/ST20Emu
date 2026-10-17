@@ -8,7 +8,6 @@
 // posix / linux
 #include <dirent.h>
 #include <fcntl.h>
-#include <fnmatch.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -484,7 +483,11 @@ int saveMemory(const char *dirName) {
   }
 
   /* create the directory */
+#ifdef _WIN32
+  if (mkdir(dirName) < 0) {
+#else
   if (mkdir(dirName, S_IRWXU) < 0) {
+#endif
     return INVALID_DIR;
   }
 
