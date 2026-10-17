@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <regex>
 #include <vector>
 
 /* this structure holds the state of the memory */
@@ -598,9 +599,12 @@ int loadMemory(const char *dirName) {
   }
   compat::println("opendir succeeded");
 
+  // exactly 7 chars, then "0.bin"
+  std::regex filePattern("^.......0\\.bin$");
+
   struct dirent *entry = nullptr;
   while ((entry = readdir(dirBlk)) != nullptr) { /* for each file */
-    if (fnmatch("???????0.bin", entry->d_name, 0) != 0) {
+    if (!std::regex_match(entry->d_name, filePattern)) {
       continue; // skip non-matching files
     }
 
