@@ -55,8 +55,7 @@ static void expect(const char *name, uint64_t actual, uint64_t expected) {
   ++failures;
   if (failures <= 20) {
     std::fprintf(stderr, "FAIL %s: actual=0x%" PRIx64 " expected=0x%" PRIx64 "\n", name,
-                 static_cast<uint64_t>(actual),
-                 static_cast<uint64_t>(expected));
+                 actual, expected);
   }
 }
 
@@ -465,7 +464,7 @@ static void testBitInstructions() {
   expect("xword too many bits policy", cpuState.areg, UNDEFINED_WORD_OLD);
 
   for (uint32_t value : {0U, 1U, 0x7fffU, 0x8000U, 0xffffU}) {
-    storeBytes(0x7fff, 2, static_cast<uint32_t>(value));
+    storeBytes(0x7fff, 2, value);
     reset(0x7fff, 0x1234, 0x5678);
     expect("lsx success", static_cast<uint32_t>(lsx_(0)), 0);
     uint32_t extended = value < 0x8000 ? value : value | 0xffff0000U;
@@ -983,8 +982,8 @@ static void testLoopEnd() {
     for (uint32_t index : {0U, 0x7fffffffU, 0xffffffffU}) {
       reset(0x20, 0x9000, 0x1234);
       cpuState.iptr = 0x1000;
-      storeBytes(0x9000, 4, static_cast<uint32_t>(index));
-      storeBytes(0x9004, 4, static_cast<uint32_t>(count));
+      storeBytes(0x9000, 4, index);
+      storeBytes(0x9004, 4, count);
       expect("lend succeeds", static_cast<uint32_t>(lend_(0)), 0);
       bool repeats = count > 1 && count < 0x80000000U;
       uint32_t actual = 0;
@@ -1075,7 +1074,7 @@ static void testLegacySnapshot() {
   expect("legacy rejection preserves C", cpuState.creg, 0x3333);
   expect("legacy rejection preserves Iptr", cpuState.iptr, 0x6020);
   expect("legacy rejection preserves workspace", static_cast<uint32_t>(cpuState.nWptr), 7);
-  expect("legacy rejection preserves trailing address", static_cast<uint32_t>(wptrEndAddr), static_cast<uint32_t>(previousEndAddress));
+  expect("legacy rejection preserves trailing address", wptrEndAddr, previousEndAddress);
   expect("legacy rejection preserves watch", checkWatch(), previousWatch);
   allocWptr(2);
   expect("workspace deallocation", static_cast<uint32_t>(cpuState.nWptr), 5);
@@ -1144,14 +1143,14 @@ static void testMemoryReaders() {
     expect("little-endian read success", readBytes(address, width, &little) != 0, 0);
     expect("big-endian read success", readInvBytes(address, width, &big) != 0, 0);
     expect("little-endian read value", little, littleExpected[width - 1]);
-    expect("big-endian read value", static_cast<uint32_t>(big), bigExpected[width - 1]);
+    expect("big-endian read value", big, bigExpected[width - 1]);
   }
   uint32_t big = 0;
   expect("big-endian null output", readInvBytes(address, 4, nullptr) == READ_UNUSED_MEM, 1);
   expect("big-endian oversized read", readInvBytes(address, 5, &big) == READ_TOO_LARGE, 1);
-  expect("big-endian oversized sentinel", static_cast<uint32_t>(big), undefinedWord);
+  expect("big-endian oversized sentinel", big, undefinedWord);
   expect("big-endian partial missing read", readInvBytes(address + 2, 4, &big) == READ_UNUSED_MEM, 1);
-  expect("big-endian missing sentinel", static_cast<uint32_t>(big), undefinedWord);
+  expect("big-endian missing sentinel", big, undefinedWord);
 
   uint32_t wrapped = 0;
   expect("word write wraps guest address space", storeBytes(WordMask, BytesPerWord, 0x88776655) != 0, 0);
@@ -1174,8 +1173,8 @@ static void testMemoryReaders() {
 static void testRuntimeDefaults() {
   PARMS parms{1, {TIMER_GUESS_CH}, {"0x12345678"}};
   st20Init(&parms);
-  expect("configured high priority clock", static_cast<uint32_t>(omrState.ClockRegHP), 0x12345678);
-  expect("configured low priority clock", static_cast<uint32_t>(omrState.ClockRegLP), 0x12345678);
+  expect("configured high priority clock", omrState.ClockRegHP, 0x12345678);
+  expect("configured low priority clock", omrState.ClockRegLP, 0x12345678);
   undefinedWord = 0xa5a5a5a5;
   reset(32, 1, 2);
   shl_(0);
@@ -1719,11 +1718,11 @@ static void testRealWorkspace() {
   setWptr(0x10000);
   uint32_t address = 0;
   expect("workspace address outside old allocation", addrWptrWord(100, &address) != 0, 0);
-  expect("workspace address arithmetic", static_cast<uint32_t>(address), 0x10190);
+  expect("workspace address arithmetic", address, 0x10190);
   storeWptrWord(100, 0x12345678);
   uint32_t value = 0;
   expect("workspace load outside old allocation", readWptrWord(100, &value) != 0, 0);
-  expect("workspace memory value", static_cast<uint32_t>(value), 0x12345678);
+  expect("workspace memory value", value, 0x12345678);
   allocWptr(0x10000);
   expect("ajw not restricted by allocation count", cpuState.wptr, 0x50000);
   allocWptr(static_cast<uint32_t>(-0x10000));
@@ -1745,9 +1744,9 @@ static void testRealWorkspace() {
   readBytes(0x11000, 4, &stored);
   expect("gajw does not overwrite workspace", stored, 0x87654321);
   expect("gajw workspace offset beyond display count", addrWptrWord(100, &address) != 0, 0);
-  expect("gajw workspace offset address", static_cast<uint32_t>(address), 0x11190);
+  expect("gajw workspace offset address", address, 0x11190);
   expect("gajw negative workspace offset", addrWptrWord(WordMask, &address) != 0, 0);
-  expect("gajw negative workspace address", static_cast<uint32_t>(address), 0x10ffc);
+  expect("gajw negative workspace address", address, 0x10ffc);
   expect("gajw exchange back succeeds", gajw_(0) != 0, 0);
   expect("gajw exchange back pointer", cpuState.wptr, 0x10000);
   expect("gajw exchange back A", cpuState.areg, 0x11000);
@@ -2692,7 +2691,7 @@ static void testMove2d() {
     for (uint32_t row = 0; row < 3; ++row) {
       for (uint32_t column = 0; column < 5; ++column) {
         uint32_t value = column % 2 == 0 ? 0 : row * 10 + column;
-        storeBytes(source + row * 7 + column, 1, static_cast<uint32_t>(value));
+        storeBytes(source + row * 7 + column, 1, value);
       }
     }
     cpuState.areg = 3;
@@ -2941,7 +2940,7 @@ static void testTrapRecordsAndMasks() {
   expect("high-priority trap masks independent", trapEnableMask(HIGH_PRIORITY), 0x3fff);
   expect("low-priority trap masks unchanged", trapEnableMask(LOW_PRIORITY), 0);
   changeTrapMask(LOW_PRIORITY, INTEGER_OVF_TRAPENB, true, &previous);
-  expect("active-priority mask reflected in enables", static_cast<uint32_t>(omrState.Enables) & 0x3fff, INTEGER_OVF_TRAPENB);
+  expect("active-priority mask reflected in enables", omrState.Enables & 0x3fff, INTEGER_OVF_TRAPENB);
   changeTrapMask(HIGH_PRIORITY, 0x3fff, false, &previous);
   expect("trap disable returns previous priority mask", previous, 0x3fff);
   expect("trap disable preserves other priority", trapEnableMask(LOW_PRIORITY), INTEGER_OVF_TRAPENB);
@@ -2973,10 +2972,10 @@ static void testTrapRecordsAndMasks() {
 static void installTrap(unsigned char priority, uint32_t group, uint32_t workspace, uint32_t iptr,
                         uint32_t enables = 0xffffc000U) {
   uint32_t address = trapRecordAddress(priority, group, false);
-  storeBytes(address, 4, static_cast<uint32_t>(enables));
-  storeBytes(address + 4, 4, static_cast<uint32_t>(group << 18));
-  storeBytes(address + 8, 4, static_cast<uint32_t>(workspace));
-  storeBytes(address + 12, 4, static_cast<uint32_t>(iptr));
+  storeBytes(address, 4, enables);
+  storeBytes(address + 4, 4, group << 18);
+  storeBytes(address + 8, 4, workspace);
+  storeBytes(address + 12, 4, iptr);
 }
 
 static void testShadowRegisters() {
@@ -4976,7 +4975,7 @@ static void testTrapSnapshot() {
   uint32_t enables = 0;
   uint32_t saved = trapRecordAddress(LOW_PRIORITY, 1, true);
   readBytes(saved, 4, &enables);
-  storeBytes(saved, 4, static_cast<uint32_t>(enables | TIMER_TRAPENB));
+  storeBytes(saved, 4, enables | TIMER_TRAPENB);
   expect("snapshot inside trap saves", saveCPUState(directory) != 0, 0);
   resetScheduler();
   omrState = {};

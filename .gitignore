@@ -132,3 +132,4 @@ $RECYCLE.BIN/
 # build artifacts
 obj
 st20emu
+st20emu-release

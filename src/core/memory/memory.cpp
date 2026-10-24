@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <regex>
 #include <vector>
 
@@ -35,6 +36,11 @@ struct MEMBLK {
 
 /* this will hold the state of the memory */
 static MEMBLK *memoryMap = nullptr;
+
+/* direct lookup of every allocated block by address >> BLKSHIFT, so reads
+ * don't walk the sorted memoryMap list (which is kept for save/load) */
+static constexpr int BLKSHIFT = std::countr_zero(BLKSIZE);
+static MEMBLK *blockIndex[(UINT64_C(1) << 32) >> BLKSHIFT]{};
 
 namespace {
 std::vector<MemoryDevice> memoryDevices;
@@ -153,13 +159,13 @@ int readBytes(uint32_t address, int nBytes, uint32_t *value) {
   }
 
   const MemoryDevice *mappedDevice = nullptr;
-  int deviceResult = deviceForAccess(static_cast<uint32_t>(address), nBytes, &mappedDevice);
+  int deviceResult = deviceForAccess(address, nBytes, &mappedDevice);
   if (deviceResult) return deviceResult;
   if (mappedDevice) {
     MemoryDevice device = *mappedDevice;
     if (!device.read) return DEVICE_ACCESS_UNSUPPORTED;
     uint32_t word = 0;
-    deviceResult = device.read(device.context, static_cast<uint32_t>(address), nBytes, &word);
+    deviceResult = device.read(device.context, address, nBytes, &word);
     if (deviceResult) return deviceResult;
     uint32_t mask = nBytes == 4 ? UINT32_MAX : (1U << (nBytes * 8)) - 1U;
     *value = word & mask;
@@ -202,7 +208,7 @@ int readInvBytes(uint32_t address, int nBytes, uint32_t *value) {
 
   uint32_t word = 0;
   int result = readBytes(address, nBytes, &word);
-  *value = static_cast<uint32_t>(result ? word : std::byteswap(static_cast<uint32_t>(word)));
+  *value = result ? word : std::byteswap(word);
   return result;
 }
 
@@ -217,17 +223,16 @@ int storeBytes(uint32_t address, int nBytes, uint32_t value) {
     return 0; // preferably the appropriate non-zero error code
   }
 
-  uint32_t cWord = static_cast<uint32_t>(value);
+  uint32_t cWord = value;
 
   const MemoryDevice *mappedDevice = nullptr;
-  int deviceResult = deviceForAccess(static_cast<uint32_t>(address), nBytes, &mappedDevice);
+  int deviceResult = deviceForAccess(address, nBytes, &mappedDevice);
   if (deviceResult) return deviceResult;
   if (mappedDevice) {
     MemoryDevice device = *mappedDevice;
     if (!device.write) return DEVICE_ACCESS_UNSUPPORTED;
     uint32_t mask = nBytes == 4 ? UINT32_MAX : (1U << (nBytes * 8)) - 1U;
-    return device.write(device.context, static_cast<uint32_t>(address), nBytes,
-                        static_cast<uint32_t>(value) & mask);
+    return device.write(device.context, address, nBytes, value & mask);
   }
 
   for (int i = 0; i < nBytes; i++) {
@@ -305,9 +310,9 @@ int copyDeviceBytes(uint32_t source, uint32_t destination, uint32_t length) {
     uint32_t remaining = length - offset;
     int width = remaining < 4 ? static_cast<int>(remaining) : 4;
     uint32_t value = 0;
-    int result = readBytes(static_cast<uint32_t>(source + offset), width, &value);
+    int result = readBytes(source + offset, width, &value);
     if (result) return result;
-    result = storeBytes(static_cast<uint32_t>(destination + offset), width, static_cast<uint32_t>(value));
+    result = storeBytes(destination + offset, width, value);
     if (result) return result;
     offset += static_cast<uint32_t>(width);
   }
@@ -324,16 +329,12 @@ int allocBytes(uint32_t address, int nBytes) {
  * created if there is no memory block with the address.
  */
 MEMBLK *getMemBlk(uint32_t address, bool create_flag) {
-  MEMBLK *blk = nullptr;
+  MEMBLK *blk = blockIndex[address >> BLKSHIFT];
   MEMBLK **lastBlk = nullptr;
 
   /* check if the necessary block already exists */
-  for (lastBlk = &memoryMap; *lastBlk != nullptr; lastBlk = &(*lastBlk)->next) {
-    if ((*lastBlk)->startAddr == (address & ADDR_OF_BLK_MASK)) {
-      return *lastBlk;
-    } else if ((*lastBlk)->startAddr > (address & ADDR_OF_BLK_MASK)) {
-      break;
-    }
+  if (blk != nullptr) {
+    return blk;
   }
 
   /* The requested block wasn't found.
@@ -341,6 +342,13 @@ MEMBLK *getMemBlk(uint32_t address, bool create_flag) {
    */
   if (!create_flag) {
     return nullptr;
+  }
+
+  /* find where the new block goes in the sorted list */
+  for (lastBlk = &memoryMap; *lastBlk != nullptr; lastBlk = &(*lastBlk)->next) {
+    if ((*lastBlk)->startAddr > (address & ADDR_OF_BLK_MASK)) {
+      break;
+    }
   }
 
   /* allocate memory for a new memory block */
@@ -355,6 +363,7 @@ MEMBLK *getMemBlk(uint32_t address, bool create_flag) {
 
   /* store the starting address for this block of memory */
   blk->startAddr = address & ADDR_OF_BLK_MASK;
+  blockIndex[address >> BLKSHIFT] = blk;
 
   return blk;
 }
@@ -497,7 +506,7 @@ int saveMemory(const char *dirName) {
   }
 
   for (cBlk = memoryMap; cBlk != nullptr; cBlk = cBlk->next) {
-    auto blkAddr = static_cast<uint32_t>(cBlk->startAddr);
+    auto blkAddr = cBlk->startAddr;
 
     /* omit the ROM code addresses */
     /*	 if (cBlk->startAddr >= 0x7FF80000 && cBlk->startAddr <= 0x7FFFFFFF) {
@@ -667,6 +676,7 @@ void freeAllMemory() {
   MEMBLK* current = memoryMap;
   while (current != nullptr) {
     MEMBLK* next = current->next;
+    blockIndex[current->startAddr >> BLKSHIFT] = nullptr;
     delete current;
     current = next;
   }

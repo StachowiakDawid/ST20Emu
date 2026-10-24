@@ -24,9 +24,12 @@ LDFLAGS_BASE  = -pthread
 BUILD ?= debug
 
 ifeq ($(BUILD), release)
-  CFLAGS   = $(CFLAGS_BASE) -O3 -DNDEBUG
-  CXXFLAGS = $(CXXFLAGS_BASE) -O3 -DNDEBUG
-  LDFLAGS  = $(LDFLAGS_BASE)
+  # separate objects and binary so release and debug builds don't overwrite each other
+  OBJ_DIR  = obj/release
+  TARGET   = st20emu-release
+  CFLAGS   = $(CFLAGS_BASE) -O3 -DNDEBUG -flto
+  CXXFLAGS = $(CXXFLAGS_BASE) -O3 -DNDEBUG -flto
+  LDFLAGS  = $(LDFLAGS_BASE) -O3 -flto
   MSG      = "Building in RELEASE mode..."
 else
   CFLAGS   = $(CFLAGS_BASE) -O0 -g -fsanitize=address,undefined
@@ -36,6 +39,9 @@ else
 endif
 
 all: $(TARGET)
+
+release:
+	$(MAKE) BUILD=release
 
 test: $(CPU_TEST)
 	./$(CPU_TEST)
@@ -70,4 +76,4 @@ clean:
 	@echo "Cleaning up build artifacts..."
 	rm -rf $(OBJ_DIR) $(TARGET)
 
-.PHONY: all clean test test-st20sim
+.PHONY: all release clean test test-st20sim

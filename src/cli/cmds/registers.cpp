@@ -70,7 +70,7 @@ CliError cmd_query_db(CliEngine & /*engine*/, std::span<const std::string_view> 
   if (args.empty() || !parseHex(std::string(args[0]), n))
     return CliError::BadParameter;
 
-  soc::sti5518::search_for_reg(static_cast<uint32_t>(n));
+  soc::sti5518::search_for_reg(n);
   return CliError::Success;
 }
 

@@ -141,7 +141,7 @@ uint32_t trapGroup(uint32_t cause) {
 }
 
 void selectPriority(unsigned char priority) {
-  omrState.TrapEnables[cpuState.priority] = static_cast<uint32_t>(omrState.Enables) & 0x3fffU;
+  omrState.TrapEnables[cpuState.priority] = omrState.Enables & 0x3fffU;
   cpuState.priority = priority;
   omrState.Enables = (omrState.Enables & ~0x3fffU) | omrState.TrapEnables[priority];
 }
@@ -197,7 +197,7 @@ RuntimeSnapshot captureRuntime() {
           omrState.ClockRegHP, omrState.ClockRegLP,
           static_cast<uint32_t>(omrState.ClockPhaseHP), static_cast<uint32_t>(omrState.ClockPhaseHP >> 32),
           static_cast<uint32_t>(omrState.ClockPhaseLP), static_cast<uint32_t>(omrState.ClockPhaseLP >> 32),
-          static_cast<uint32_t>(omrState.Enables), omrState.ClockEnables, omrState.HP_ErrorFlag,
+          omrState.Enables, omrState.ClockEnables, omrState.HP_ErrorFlag,
           omrState.LP_ErrorFlag, omrState.HaltOnErrorFlag,
           omrState.ProcQueueFPtr[0], omrState.ProcQueueFPtr[1],
           omrState.ProcQueueBPtr[0], omrState.ProcQueueBPtr[1],
@@ -386,7 +386,7 @@ void restoreRuntime(const RuntimeSnapshot &snapshot) {
   omrState.HaltOnErrorFlag = static_cast<unsigned char>(snapshot[RuntimeHaltError]);
   omrState.TrapEnables[0] = snapshot[RuntimeTrapEnableHP];
   omrState.TrapEnables[1] = snapshot[RuntimeTrapEnableLP];
-  omrState.TrapEnables[cpuState.priority] = static_cast<uint32_t>(omrState.Enables) & 0x3fffU;
+  omrState.TrapEnables[cpuState.priority] = omrState.Enables & 0x3fffU;
   omrState.halted = snapshot[RuntimeHalted] != 0;
   omrState.analysedOnReset = snapshot[RuntimeAnalysedOnReset] != 0;
   cpuState.interruptsDisabled = snapshot[RuntimeInterruptsDisabled] != 0;
@@ -456,14 +456,14 @@ bool timeReached(uint32_t clock, uint32_t time) {
 
 int readProcessWord(uint32_t workspace, int32_t offset, uint32_t &value) {
   uint32_t word = 0;
-  int result = readBytes(static_cast<uint32_t>(workspace + static_cast<uint32_t>(offset) * BytesPerWord), BytesPerWord, &word);
-  value = static_cast<uint32_t>(word);
+  int result = readBytes(workspace + static_cast<uint32_t>(offset) * BytesPerWord, BytesPerWord, &word);
+  value = word;
   return result;
 }
 
 int writeProcessWord(uint32_t workspace, int32_t offset, uint32_t value) {
-  return storeBytes(static_cast<uint32_t>(workspace + static_cast<uint32_t>(offset) * BytesPerWord), BytesPerWord,
-                    static_cast<uint32_t>(value));
+  return storeBytes(workspace + static_cast<uint32_t>(offset) * BytesPerWord, BytesPerWord,
+                    value);
 }
 
 int releaseExternalOwner(uint32_t descriptor) {
@@ -607,7 +607,7 @@ int transferExternalChannel(uint32_t address, uint32_t length, uint32_t buffer, 
 
 bool softwareChannelAddress(uint32_t address) {
   bool peripheral = address >= PeripheralStart && address <= PeripheralEnd;
-  bool coreReserved = address >= 0x80000000U && address < static_cast<uint32_t>(memStartVal);
+  bool coreReserved = address >= 0x80000000U && address < memStartVal;
   return !peripheral && !coreReserved;
 }
 
@@ -650,7 +650,7 @@ int dispatchProcess() {
   if (result) return result;
   bool interrupted = cpuState.running && cpuState.priority == LOW_PRIORITY && priority == HIGH_PRIORITY;
   CPUSTATE nextState{undefinedWord, undefinedWord,
-      undefinedWord, static_cast<uint32_t>(iptr), 0, priority, workspace, true};
+      undefinedWord, iptr, 0, priority, workspace, true};
   result = prepareExternalContinuation(nextState, false);
   if (result) return result;
   if (cpuState.running) {
@@ -683,7 +683,7 @@ int releaseTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t tic
       uint32_t time = 0;
       int result = readProcessWord(workspace, pw::Time, time);
       if (result) return result;
-      if (!timeReached(oldClock, time) && ticks < static_cast<uint32_t>(time - oldClock)) break;
+      if (!timeReached(oldClock, time) && ticks < time - oldClock) break;
       uint32_t state = 0;
       int stateResult = readProcessWord(workspace, pw::State, state);
       bool alternative = stateResult == 0 && (state == ALT_WAITING || state == ALT_READY);
@@ -979,7 +979,7 @@ int endParallel(uint32_t workspace) {
     result = readProcessWord(workspace, pp::IptrSucc, iptr);
     if (result) return result;
     cpuState.wptr = workspace;
-    cpuState.iptr = static_cast<uint32_t>(iptr);
+    cpuState.iptr = iptr;
     cpuState.running = true;
   } else {
     result = writeProcessWord(workspace, pp::Count, count - 1U);
@@ -1086,7 +1086,7 @@ int resumePendingOperation() {
         }
       } else result = readBytes(cpuState.creg, static_cast<int>(width), &value);
       if (result) return result;
-      cpuState.moveBufferedWord = static_cast<uint32_t>(value);
+      cpuState.moveBufferedWord = value;
       cpuState.status = (cpuState.status & ~STATUS_BUFFER_WIDTH) | STATUS_BUFFERED_WORD | ((width - 1) << 22);
     } else width = ((cpuState.status & STATUS_BUFFER_WIDTH) >> 22) + 1;
     bool write = (operation != 4 && operation != 5) ||
@@ -1097,12 +1097,12 @@ int resumePendingOperation() {
         if (endpoint->second.capacity - endpoint->second.output.size() < width) return INVALID_CHANNEL;
         for (uint32_t index = 0; index < width; ++index)
           endpoint->second.output.push_back(static_cast<uint8_t>(cpuState.moveBufferedWord >> (index * 8U)));
-      } else result = storeBytes(cpuState.breg, static_cast<int>(width), static_cast<uint32_t>(cpuState.moveBufferedWord));
+      } else result = storeBytes(cpuState.breg, static_cast<int>(width), cpuState.moveBufferedWord);
       if (result) return result;
     }
     cpuState.areg = remaining - width;
-    cpuState.breg = static_cast<uint32_t>(cpuState.breg + width);
-    cpuState.creg = static_cast<uint32_t>(cpuState.creg + width);
+    cpuState.breg = cpuState.breg + width;
+    cpuState.creg = cpuState.creg + width;
     cpuState.status &= ~(STATUS_BUFFERED_WORD | STATUS_BUFFER_WIDTH);
     if (cpuState.areg == 0) {
       --cpuState.move2dBlockLength;
@@ -1112,8 +1112,8 @@ int resumePendingOperation() {
         cpuState.areg = cpuState.breg = cpuState.creg = undefinedWord;
         return 0;
       }
-      cpuState.breg = static_cast<uint32_t>(cpuState.breg - cpuState.moveRowWidth + cpuState.move2dDestStride);
-      cpuState.creg = static_cast<uint32_t>(cpuState.creg - cpuState.moveRowWidth + cpuState.move2dSourceStride);
+      cpuState.breg = cpuState.breg - cpuState.moveRowWidth + cpuState.move2dDestStride;
+      cpuState.creg = cpuState.creg - cpuState.moveRowWidth + cpuState.move2dSourceStride;
       cpuState.areg = cpuState.moveRowWidth;
     }
     int result = advanceTimers(write ? 2 : 1);
@@ -1187,7 +1187,7 @@ int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t
   }
   if (descriptorWords[2] == 0 || (descriptorWords[2] & 3U)) return INVALID_TRAP_HANDLER;
   TrapFrame frame{cause, priority, generated, cpuState};
-  uint32_t enables = (static_cast<uint32_t>(omrState.Enables) & ~0x3fffU) | trapEnableMask(priority);
+  uint32_t enables = (omrState.Enables & ~0x3fffU) | trapEnableMask(priority);
   uint32_t status = cpuState.status | cause | (generated ? 0x8000U : 0U);
   if (group == TRAP_GROUP_SCHEDULER) status = (status & ~0x30000U) | (static_cast<uint32_t>(cpuState.priority) << 16);
   std::array<uint32_t, 4> saved{enables, status, cpuState.wptr, cpuState.iptr};
@@ -1212,7 +1212,7 @@ int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t
   cpuState.iptr = descriptorWords[3];
   cpuState.nWptr = 0;
   cpuState.running = true;
-  if (descriptor != NO_PROCESS) cpuState.breg = static_cast<uint32_t>(descriptor);
+  if (descriptor != NO_PROCESS) cpuState.breg = descriptor;
   return 0;
 }
 
@@ -1523,7 +1523,7 @@ int disableAltTimer(uint32_t offset, bool enabled, uint32_t time, uint32_t *sele
 int finishAlternative() {
   uint32_t offset = 0;
   int result = readProcessWord(cpuState.wptr, pw::Temp, offset);
-  if (!result) cpuState.iptr = static_cast<uint32_t>(cpuState.iptr + offset);
+  if (!result) cpuState.iptr = cpuState.iptr + offset;
   return result;
 }
 
@@ -1637,8 +1637,8 @@ int transferChannel(uint32_t channel, uint32_t length, uint32_t buffer, bool inp
   }
   for (uint32_t offset = 0; offset < length; ++offset) {
     uint32_t value = 0;
-    result = readBytes(static_cast<uint32_t>(source + offset), 1, &value);
-    if (!result) result = storeBytes(static_cast<uint32_t>(destination + offset), 1, static_cast<uint32_t>(value));
+    result = readBytes(source + offset, 1, &value);
+    if (!result) result = storeBytes(destination + offset, 1, value);
     if (result) return result;
   }
   result = writeProcessWord(channel, 0, NO_PROCESS);
@@ -1694,7 +1694,7 @@ uint32_t trapRecordAddress(unsigned char priority, uint32_t group, bool trapped)
 }
 
 uint32_t trapEnableMask(unsigned char priority) {
-  return priority == cpuState.priority ? static_cast<uint32_t>(omrState.Enables) & 0x3fffU
+  return priority == cpuState.priority ? omrState.Enables & 0x3fffU
                                        : omrState.TrapEnables[priority];
 }
 
@@ -1850,10 +1850,10 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
   if (portable) words[1] = (words[1] & ~STATUS_PORTABLE_INTDIS) | STATUS_PORTABLE_ABI |
                           (source.interruptsDisabled ? STATUS_PORTABLE_INTDIS : 0U);
   words[2] = source.wptr;
-  words[3] = static_cast<uint32_t>(source.iptr);
-  words[4] = static_cast<uint32_t>(source.areg);
-  words[5] = static_cast<uint32_t>(source.breg);
-  words[6] = static_cast<uint32_t>(source.creg);
+  words[3] = source.iptr;
+  words[4] = source.areg;
+  words[5] = source.breg;
+  words[6] = source.creg;
   words[7] = source.moveRowWidth;
   words[8] = source.move2dBlockLength;
   words[9] = source.move2dDestStride;
@@ -2002,7 +2002,7 @@ int initCPUState(bool analysed) {
 
   /* prepare to start the processing at 0x7FFFFFFE */
   instrCode = 0;
-  operand = static_cast<uint32_t>(startAddr);
+  operand = startAddr;
   instrLength = 0;
 
   /* initialize the state of the processor */
@@ -2010,7 +2010,7 @@ int initCPUState(bool analysed) {
   cpuState.priority = LOW_PRIORITY;
   cpuState.running = true;
   cpuState.status = STATUS_TIMESLICE_ENABLE;
-  cpuState.wptr = static_cast<uint32_t>(wptrEndAddr) + 1U - 28U;
+  cpuState.wptr = wptrEndAddr + 1U - 28U;
   addrWptrWord(0, &address);
   result = allocBytes(address, 4 * 7);
   cpuState.areg = cpuState.breg = cpuState.creg = undefinedWord;
@@ -2224,10 +2224,10 @@ int loadCPUState(const char *dirName) {
   externalChannels = std::move(loadedChannels);
   wptrEndAddr = loadedEndAddress;
   watch = loadedWatch;
-  cpuState = {static_cast<uint32_t>(snapshot.areg),
-              static_cast<uint32_t>(snapshot.breg),
-              static_cast<uint32_t>(snapshot.creg),
-              static_cast<uint32_t>(snapshot.iptr), snapshot.nWptr};
+  cpuState = {snapshot.areg,
+              snapshot.breg,
+              snapshot.creg,
+              snapshot.iptr, snapshot.nWptr};
   restoreRuntime(runtime);
   close(cpuFileFd);
   return 0;
@@ -2479,7 +2479,7 @@ int decodeNextInstr() {
 
     /* extract the data part of the current instruction byte */
     operand <<= 4;
-    operand += static_cast<uint32_t>(cByte & 0x0F);
+    operand += cByte & 0x0F;
 
     /* extract the instruction part of the current byte */
     instrCode = cByte & 0xF0;
@@ -2635,12 +2635,12 @@ int execInstr(int *breakFlag) {
     *breakFlag = checkWatch();
     return result;
   }
-  cpuState.iptr = static_cast<uint32_t>(instructionAddress + static_cast<uint32_t>(instrLength));
+  cpuState.iptr = instructionAddress + static_cast<uint32_t>(instrLength);
 
   executingInstruction = true;
   result = advanceTimers(instrEntry[instrCode].cpucycles);
   if (!result) result = instrEntry[instrCode].function(operand);
-  else cpuState.iptr = static_cast<uint32_t>(instructionAddress);
+  else cpuState.iptr = instructionAddress;
   executingInstruction = false;
   if (!result) result = pollTimers();
 
@@ -2665,7 +2665,7 @@ int readWptrWord(uint32_t index, uint32_t *value) {
 /**************************
  */
 int addrWptrWord(uint32_t index, uint32_t *address) {
-  *address = static_cast<uint32_t>(cpuState.wptr + static_cast<uint32_t>(index) * BytesPerWord);
+  *address = cpuState.wptr + index * BytesPerWord;
 
   return 0;
 }
@@ -2724,7 +2724,7 @@ int allocWptr(uint32_t adjustment) {
 }
 
 int setWptr(uint32_t value) {
-  cpuState.wptr = static_cast<uint32_t>(value);
+  cpuState.wptr = value;
   return 0;
 }
 
@@ -2740,7 +2740,7 @@ uint32_t pop(void) {
 int push(uint32_t value) {
   cpuState.creg = cpuState.breg;
   cpuState.breg = cpuState.areg;
-  cpuState.areg = static_cast<uint32_t>(value);
+  cpuState.areg = value;
 
   return 0;
 }
@@ -2829,8 +2829,8 @@ const char *st20Error(int error) {
 
 int initTimer() {
   // init the timer fields:
-  omrState.ClockRegHP = static_cast<uint32_t>(timerGuess);
-  omrState.ClockRegLP = static_cast<uint32_t>(timerGuess);
+  omrState.ClockRegHP = timerGuess;
+  omrState.ClockRegLP = timerGuess;
   omrState.ClockPhaseHP = 0;
   omrState.ClockPhaseLP = 0;
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0

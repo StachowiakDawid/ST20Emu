@@ -7,7 +7,7 @@
 
 inline constexpr uint32_t BLKSIZE = 8 * 1024;
 inline constexpr uint32_t ADDR_IN_BLK_MASK = BLKSIZE - 1U;
-inline constexpr uint32_t ADDR_OF_BLK_MASK = static_cast<uint32_t>(0xFFFFFFFFU) - ADDR_IN_BLK_MASK;
+inline constexpr uint32_t ADDR_OF_BLK_MASK = ~ADDR_IN_BLK_MASK;
 
 /* Error codes from memory subsystem */
 inline constexpr int MEMORY_ERROR_START = -1000;

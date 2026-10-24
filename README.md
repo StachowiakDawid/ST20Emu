@@ -17,11 +17,14 @@ Build a debug version:
 make clean && make
 ```
 
-Build a release version (it's too broken for now anyway and will silence runtime errors):
+Build an optimized release version (`-O3`, link-time optimization, no sanitizers) as
+`st20emu-release`, with its objects in `obj/release`, so it doesn't overwrite the debug build:
 
 ```bash
-BUILD=release make clean && make
+make release
 ```
+
+Use the release build for long firmware runs; the sanitized debug build is many times slower.
 
 Run the CPU instruction tests:
 

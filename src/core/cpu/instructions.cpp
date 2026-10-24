@@ -37,7 +37,7 @@ int deviceAccess(int width, bool writeAccess, const char *mnemonic) {
   if (writeAccess) {
     uint32_t mask = width == BytesPerWord ? WordMask : (1U << (width * BitsPerByte)) - 1U;
     value = pop() & mask;
-    result = storeBytes(address, width, static_cast<uint32_t>(value));
+    result = storeBytes(address, width, value);
   } else {
     result = readBytes(address, width, &value);
     push(value);
@@ -49,7 +49,7 @@ int deviceAccess(int width, bool writeAccess, const char *mnemonic) {
   if (!writeAccess && !mappedDevice)
     compat::println("Value of A register is questionable");
   if (deviceAccessObserver)
-    deviceAccessObserver(static_cast<uint32_t>(address));
+    deviceAccessObserver(address);
 
   if (result && (mappedDevice || writeAccess || result != READ_UNUSED_MEM)) {
     compat::println("ERROR: {}", memoryError(result));
@@ -70,7 +70,7 @@ uint32_t reverseWord(uint32_t value) {
 int saveReadyQueue(unsigned char priority) {
   uint32_t address = cpuState.areg;
   int result = storeBytes(address, BytesPerWord, omrState.ProcQueueFPtr[priority]);
-  if (!result) result = storeBytes(static_cast<uint32_t>(address + BytesPerWord), BytesPerWord, omrState.ProcQueueBPtr[priority]);
+  if (!result) result = storeBytes(address + BytesPerWord, BytesPerWord, omrState.ProcQueueBPtr[priority]);
   if (!result) pop();
   return result;
 }
@@ -129,15 +129,15 @@ int copy2d(Move2dFilter filter) {
     };
     auto copyByte = [&](uint32_t column) {
       uint32_t value = 0;
-      int result = readBytes(static_cast<uint32_t>(sourceRow + column), 1, &value);
+      int result = readBytes(sourceRow + column, 1, &value);
       if (!result && shouldCopy(value)) {
-        result = storeBytes(static_cast<uint32_t>(destinationRow + column), 1, value);
+        result = storeBytes(destinationRow + column, 1, value);
       }
       return result;
     };
     auto copyWord = [&](uint32_t column) {
       uint32_t value = 0;
-      int result = readBytes(static_cast<uint32_t>(sourceRow + column), BytesPerWord, &value);
+      int result = readBytes(sourceRow + column, BytesPerWord, &value);
       if (result) return result;
 
       bool hasZeroByte = false;
@@ -146,7 +146,7 @@ int copy2d(Move2dFilter filter) {
 
       if ((filter == Move2dFilter::Nonzero && !hasZeroByte) ||
           (filter == Move2dFilter::Zero && value == 0)) {
-        return storeBytes(static_cast<uint32_t>(destinationRow + column), BytesPerWord, value);
+        return storeBytes(destinationRow + column, BytesPerWord, value);
       }
       if ((filter == Move2dFilter::Nonzero && value == 0) ||
           (filter == Move2dFilter::Zero && !hasZeroByte))
@@ -277,7 +277,7 @@ int unpacksn_(uint32_t /*unused*/) {
   cpuState.areg = exponent == 0xffU ? undefinedWord
       : (fraction << 8) | (exponent != 0 ? WordSignBit : 0U);
   cpuState.breg = exponent == 0 && fraction != 0 ? 1U : exponent;
-  cpuState.creg = static_cast<uint32_t>((oldBreg << 2) + type);
+  cpuState.creg = (oldBreg << 2) + type;
   return 0;
 }
 
@@ -1184,8 +1184,7 @@ int lmul_(uint32_t /*operand*/) {
 
 // C= A+B with carry set if overflow
 uint32_t N_Add(uint32_t A, uint32_t B, uint32_t *C) {
-  uint64_t sum = static_cast<uint64_t>(static_cast<uint32_t>(A)) +
-                 static_cast<uint32_t>(B);
+  uint64_t sum = static_cast<uint64_t>(A) + B;
   *C = static_cast<uint32_t>(sum);
   return static_cast<uint32_t>(sum >> BitsPerWord);
 }
@@ -1642,8 +1641,8 @@ int startp_(uint32_t /*unused*/) {
   uint32_t workspace = pop();
   uint32_t offset = pop();
   pop();
-  int result = storeBytes(static_cast<uint32_t>(workspace + static_cast<uint32_t>(pw::Iptr) * BytesPerWord), BytesPerWord,
-                          static_cast<uint32_t>(cpuState.iptr + offset));
+  int result = storeBytes(workspace + static_cast<uint32_t>(pw::Iptr) * BytesPerWord, BytesPerWord,
+                          cpuState.iptr + offset);
   if (!result && (trapEnableMask(cpuState.priority) & RUN_TRAPENB))
     return requestTrap(RUN_TRAPENB, cpuState.priority, false, workspace | cpuState.priority);
   if (!result) result = enqueueProcess(workspace, cpuState.priority);
@@ -1673,9 +1672,9 @@ int stclock_(uint32_t /*unused*/) {
                   (oldAreg & 1) ? "low priority" : "high priority");
 
   if (oldAreg & 1)
-    omrState.ClockRegLP = static_cast<uint32_t>(oldBreg);
+    omrState.ClockRegLP = oldBreg;
   else
-    omrState.ClockRegHP = static_cast<uint32_t>(oldBreg);
+    omrState.ClockRegHP = oldBreg;
 
   // omrState.Enables|=HPTIMER_MASK; // set bit0
   // omrState.Enables|=LPTIMER_MASK; // set bit1
@@ -1708,7 +1707,7 @@ int stnl_(uint32_t offset) {
   uint32_t oldAreg = pop();
   uint32_t oldBreg = pop();
 
-  int result = storeBytes(oldAreg + offset * BytesPerWord, BytesPerWord, static_cast<uint32_t>(oldBreg));
+  int result = storeBytes(oldAreg + offset * BytesPerWord, BytesPerWord, oldBreg);
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
@@ -2075,7 +2074,7 @@ Error signals: none
 int gintdis_(uint32_t /*unused*/) {
   uint32_t mask = (pop() & 0xffffU) << 16;
   uint32_t oldEnables = omrState.Enables >> 16;
-  omrState.Enables &= ~static_cast<uint32_t>(mask);
+  omrState.Enables &= ~mask;
   push(oldEnables);
 
   return 0;
@@ -2094,7 +2093,7 @@ Error signals: none
 int gintenb_(uint32_t /*unused*/) {
   uint32_t mask = (pop() & 0xffffU) << 16;
   uint32_t oldEnables = omrState.Enables >> 16;
-  omrState.Enables |= static_cast<uint32_t>(mask);
+  omrState.Enables |= mask;
   push(oldEnables);
 
   return 0;
