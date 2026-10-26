@@ -92,6 +92,7 @@ int ldnlp_(uint32_t);
 int ldpi_(uint32_t);
 int ldpri_(uint32_t);
 int ldprodid_(uint32_t);
+int reboot_(uint32_t);
 int ldshadow_(uint32_t);
 int ldtimer_(uint32_t);
 int ldtraph_(uint32_t);

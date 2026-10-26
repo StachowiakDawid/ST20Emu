@@ -400,7 +400,7 @@ INSTRENTRY instrEntry[] = {
     {"invalidop", invalidOp_, 0},
     {"invalidop", invalidOp_, 0},
     {"ldprodid", ldprodid_, 1},
-    {"reboot", invalidOp_, 0},
+    {"reboot", reboot_, 1},
     {"invalidop", invalidOp_, 0},
     {"invalidop", invalidOp_, 0},
     /*180*/ {"invalidop", invalidOp_, 0},

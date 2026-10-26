@@ -7,6 +7,7 @@
 #include "../src/core/memory/memory.h"
 #include "../src/soc/sti5518/STi5518_Devices.h"
 #include "../src/soc/sti5512/STi5512_Devices.h"
+#include "../src/soc/common/STi55xx_Ssc.h"
 
 #include <cstdint>
 #include <bit>
@@ -1125,6 +1126,20 @@ static void testLegacySnapshot() {
   }
   std::remove(filename.c_str());
   rmdir(directory);
+}
+
+static void testZeroFillMemory() {
+  uint32_t value = 0;
+  expect("unwritten memory traps by default", readBytes(0xc7400008U, 4, &value) == READ_UNUSED_MEM, 1);
+  setZeroFillRange(0xc7400000U, 0xc740000bU);
+  expect("unwritten zero-fill memory reads", readBytes(0xc7400008U, 4, &value) != 0, 0);
+  expect("unwritten zero-fill memory value", value, 0U);
+  storeBytes(0xc7400009U, 1, 0xabU);
+  expect("partly written zero-fill memory reads", readBytes(0xc7400008U, 4, &value) != 0, 0);
+  expect("partly written zero-fill memory value", value, 0x0000ab00U);
+  expect("read past zero-fill range traps", readBytes(0xc740000aU, 4, &value) == READ_UNUSED_MEM, 1);
+  setZeroFillRange(1, 0);
+  expect("disabled zero-fill traps again", readBytes(0xc7400004U, 4, &value) == READ_UNUSED_MEM, 1);
 }
 
 static void testMemoryReaders() {
@@ -2969,6 +2984,13 @@ static void testTrapRecordsAndMasks() {
   schedulerFixture(0x20000);
 }
 
+/* scheduler trap descriptor, read from the handler's entry workspace word 0 */
+static uint32_t trapEntryDescriptor() {
+  uint32_t descriptor = 0;
+  readBytes(cpuState.wptr, 4, &descriptor);
+  return descriptor;
+}
+
 static void installTrap(unsigned char priority, uint32_t group, uint32_t workspace, uint32_t iptr,
                         uint32_t enables = 0xffffc000U) {
   uint32_t address = trapRecordAddress(priority, group, false);
@@ -3039,7 +3061,7 @@ static void testShadowRegisters() {
     const uint32_t expected[] = {0xffa50006U,
         STATUS_VALID | STATUS_TIMESLICE_ENABLE | 0x40U, 0x190000, 0x3000, 0x1111, 0x2222, 0x3333};
     for (uint32_t index = 0; index < 12; ++index) {
-            bool selected = (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
+            bool selected = index < 11 && (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
       uint32_t value = 0;
       readBytes(0x194000 + index * 4U, 4, &value);
             expect("stshadow only writes selected words", value,
@@ -3388,10 +3410,12 @@ static void testShadowRegisters() {
   storeBytes(cpuState.iptr, 2, 0xfd60);
   expect("firmware block stshadow decode", decodeNextInstr() != 0, 0);
   expect("firmware block stshadow executes", execInstr(&watchFlag) != 0, 0);
-  for (uint32_t index = 7; index < 12; ++index) {
+  for (uint32_t index = 7; index < 11; ++index) {
     expect("firmware block save readable", readBytes(0xc042a2e8 + index * 4U, 4, &value) != 0, 0);
     expect("firmware idle block save undefined", value, undefinedWord);
   }
+  expect("native block save stops at word 10 (OS20 NO_MOVE2D_WORDS)",
+         readBytes(0xc042a2e8 + 11 * 4U, 4, &value) == READ_UNUSED_MEM, 1);
   expect("firmware block save preserves active trap", trapHandlerActive(), 1);
   expect("firmware block save trap returns", tret_(0) != 0, 0);
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY),
@@ -3435,7 +3459,11 @@ static void testSti5512Devices() {
   schedulerFixture(0x180000);
   expect("initialize STi5512 devices", initSti5512Devices() != 0, 0);
   expect("STi5512 revision mapped", isMemoryDeviceAddress(0x78), 1);
-  expect("STi5512 does not install ASC2", isMemoryDeviceAddress(0x20005000), 0);
+  for (uint32_t base : {0x20003000U, 0x20004000U, 0x20005000U, 0x20006000U})
+    expect("STi5512 installs ASC0-3", isMemoryDeviceAddress(base), 1);
+  expect("STi5512 installs INC", isMemoryDeviceAddress(0x20000100), 1);
+  expect("STi5512 installs INL", isMemoryDeviceAddress(0x2001107c), 1);
+  expect("STi5512 has no STi5518 INL extension", isMemoryDeviceAddress(0x200111bc), 0);
   uint32_t value = 0xffffffffU;
   expect("STi5512 revision byte readable", readBytes(0x78, 1, &value) != 0, 0);
   expect("STi5512 synthetic default revision", value, 0);
@@ -3445,15 +3473,270 @@ static void testSti5512Devices() {
   expect("STi5512 devlb revision", cpuState.areg, 0xaa);
   expect("STi5512 devlb preserves B", cpuState.breg, 0x11223344);
   expect("STi5512 devlb preserves C", cpuState.creg, 0x55667788);
-  expect("STi5512 revision rejects writes", storeBytes(0x78, 1, 0x55) == DEVICE_ACCESS_UNSUPPORTED, 1);
-  expect("STi5512 revision rejects wide reads", readBytes(0x78, 4, &value) == INVALID_DEVICE_ACCESS, 1);
+  expect("STi5512 revision ignores writes", storeBytes(0x78, 1, 0x55) != 0, 0);
   readBytes(0x78, 1, &value);
-  expect("STi5512 rejected write preserves revision", value, 0xaa);
+  expect("STi5512 ignored write preserves revision", value, 0xaa);
+  expect("STi5512 register block wide read", readBytes(0x78, 4, &value) != 0, 0);
+  expect("STi5512 wide read byte lanes", value, 0xaa);
+  readBytes(0x90, 1, &value);
+  expect("STi5512 VID_OUT reset", value, 0x0c);
+  readBytes(0x30, 1, &value);
+  expect("STi5512 CKG_PLL reset", value, 0x80);
+  readBytes(0x64, 2, &value);
+  expect("STi5512 VID_STA reset", value, 0x1c23);
+  readBytes(0x1800, 1, &value);
+  expect("STi5512 DEN_CFG0 reset", value, 0x92);
+  storeBytes(0x3a, 1, 0x1b);
+  readBytes(0x3a, 1, &value);
+  expect("STi5512 CFG_GCF read/write", value, 0x1b);
+  storeBytes(0x64, 1, 0);
+  readBytes(0x64, 1, &value);
+  expect("STi5512 read-only VID_STA ignores writes", value, 0x23);
+  storeBytes(0x5000, 2, 0x1234);
+  readBytes(0x5000, 1, &value);
+  expect("STi5512 MPEG_control low byte", value, 0x34);
+  readBytes(0x5001, 1, &value);
+  expect("STi5512 MPEG_control high byte", value, 0x12);
+  expect("STi5512 register blocks end before unmapped space", isMemoryDeviceAddress(0x5004), 0);
+  storeBytes(0x830, 1, 1);
+  storeBytes(0x81e, 1, 0x3f);
+  storeBytes(0x840, 1, 1);
+  readBytes(0x840, 1, &value);
+  expect("STi5512 AUD_RES resets automatically", value, 0);
+  readBytes(0x81e, 1, &value);
+  expect("STi5512 AUD_RES resets audio registers", value, 0);
+  readBytes(0x830, 1, &value);
+  expect("STi5512 AUD_RES keeps AUD_MUT", value, 1);
+  storeBytes(0x1800, 1, 0x11);
+  storeBytes(0x1811, 1, 0x00);
+  storeBytes(0x1806, 1, 0x90);
+  readBytes(0x1806, 1, &value);
+  expect("STi5512 DENC softreset bit resets automatically", value, 0x10);
+  readBytes(0x1811, 1, &value);
+  expect("STi5512 DENC softreset restores DAC13", value, 0x88);
+  readBytes(0x1800, 1, &value);
+  expect("STi5512 DENC softreset keeps CFG0", value, 0x11);
   shutdownSti5512Devices();
   expect("STi5512 shutdown removes revision", isMemoryDeviceAddress(0x78), 0);
+  expect("STi5512 shutdown removes ASC3", isMemoryDeviceAddress(0x20006000), 0);
   expect("STi5512 can initialize again", initSti5512Devices(0xff) != 0, 0);
   readBytes(0x78, 1, &value);
   expect("STi5512 maximum revision byte", value, 0xff);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static uint32_t sscFrame(uint32_t base, uint32_t frame) {
+  uint32_t value = 0;
+  storeBytes(base + 4, 2, frame);
+  pollSti5512Devices();
+  pollSti5512Devices();
+  readBytes(base + 8, 2, &value);
+  return value;
+}
+
+static void testSti5512I2c() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5512 SSC devices", initSti5512Devices() != 0, 0);
+  static I2cRegisterDevice slave{0xaa};
+  slave.registers = {};
+  slave.registers[0] = 0x5a;
+  expect("attach I2C slave to SSC1", attachSti5512I2cDevice(1, &slave) != 0, 0);
+  expect("reject I2C slave on missing SSC", attachSti5512I2cDevice(2, &slave) == INVALID_MEMORY_DEVICE, 1);
+  constexpr uint32_t ssc1 = 0x2000a000;
+  uint32_t value = 0;
+  readBytes(ssc1 + 0x14, 2, &value);
+  expect("SSC status reset", value, 2);
+  storeBytes(ssc1 + 0x0c, 2, 0x318);
+  storeBytes(ssc1 + 0x10, 2, 0x141);
+  storeBytes(ssc1 + 0x18, 2, 0xb);
+  readBytes(ssc1 + 0x14, 2, &value);
+  expect("STRTG alone leaves bus idle", value & 0x200, 0);
+  expect("write address acknowledged", sscFrame(ssc1, (0xaa << 1) | 1), 0xaa << 1);
+  readBytes(0x2001107c, 4, &value);
+  expect("SSC1 frame raises interrupt six", value & (1U << 6), 1U << 6);
+  readBytes(ssc1 + 0x14, 2, &value);
+  expect("bus busy after START", value & 0x200, 0x200);
+  storeBytes(ssc1 + 0x18, 2, 9);
+  expect("register byte acknowledged", sscFrame(ssc1, (0x09 << 1) | 1), 0x09 << 1);
+  expect("data byte acknowledged", sscFrame(ssc1, (0x37 << 1) | 1), 0x37 << 1);
+  expect("slave register written", slave.registers[9], 0x37);
+  storeBytes(ssc1 + 0x18, 2, 0xd);
+  readBytes(ssc1 + 0x14, 2, &value);
+  expect("STOP releases bus and flags STOP", value & 0x280, 0x80);
+  readBytes(ssc1 + 0x14, 2, &value);
+  expect("STOP flag cleared by status read", value & 0x80, 0);
+  storeBytes(ssc1 + 0x18, 2, 0xb);
+  sscFrame(ssc1, (0xaa << 1) | 1);
+  storeBytes(ssc1 + 0x18, 2, 9);
+  sscFrame(ssc1, 1);
+  storeBytes(ssc1 + 0x18, 2, 0xd);
+  storeBytes(ssc1 + 0x18, 2, 0xb);
+  expect("read address acknowledged", sscFrame(ssc1, (0xaa << 1) | 3), (0xab << 1));
+  storeBytes(ssc1 + 0x18, 2, 1);
+  expect("read returns identity without master ack", sscFrame(ssc1, 0x1ff), (0x5a << 1) | 1);
+  storeBytes(ssc1 + 0x18, 2, 0xd);
+  storeBytes(ssc1 + 0x18, 2, 0xb);
+  expect("missing slave does not acknowledge", sscFrame(ssc1, (0x80 << 1) | 1) & 1, 1);
+  storeBytes(ssc1 + 0x0c, 2, 0x398);
+  readBytes(ssc1 + 0x14, 2, &value);
+  expect("soft reset releases bus", value, 2);
+  expect("SSC rejects byte access", readBytes(ssc1 + 0x14, 1, &value) == INVALID_DEVICE_ACCESS, 1);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static void testSti5512PtiDma() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5512 PTI DMA", initSti5512Devices() != 0, 0);
+  constexpr uint32_t pti = 0x20031000;
+  uint32_t value = 0;
+  storeBytes(pti + 0x50, 4, 0xd);
+  storeBytes(pti + 0x04, 4, 0x7ff6254c);
+  storeBytes(pti + 0x14, 4, 0);
+  storeBytes(pti + 0x24, 4, 0x7ff6254c + 100);
+  storeBytes(pti + 0x34, 4, 0x7ff6254c);
+  pollSti5512Devices();
+  readBytes(pti + 0x34, 4, &value);
+  expect("disabled DMA channel keeps read pointer", value, 0x7ff6254c);
+  storeBytes(pti + 0x50, 4, 0xf);
+  pollSti5512Devices();
+  readBytes(pti + 0x34, 4, &value);
+  expect("video DMA advances read pointer", value, 0x7ff6254c + 64);
+  pollSti5512Devices();
+  readBytes(pti + 0x34, 4, &value);
+  expect("video DMA stops at write pointer", value, 0x7ff6254c + 100);
+  storeBytes(pti + 0x08, 4, 0x1000);
+  storeBytes(pti + 0x18, 4, 0x100f);
+  storeBytes(pti + 0x38, 4, 0x100e);
+  storeBytes(pti + 0x28, 4, 0x1002);
+  pollSti5512Devices();
+  readBytes(pti + 0x38, 4, &value);
+  expect("audio DMA wraps from top to base", value, 0x1002);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static void testSti5512Pwm() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5512 PWM", initSti5512Devices() != 0, 0);
+  constexpr uint32_t pwm = 0x2000b000;
+  uint32_t value = 0;
+  storeBytes(pwm + 0x54, 4, 0x21);
+  storeBytes(pwm + 0x20, 4, 100);
+  storeBytes(pwm + 0x50, 4, 0x7cf);
+  pollSti5512Devices();
+  advanceTimers(16 * 255);
+  pollSti5512Devices();
+  readBytes(pwm + 0x58, 4, &value);
+  expect("PWM counter below overflow", value & 1, 0);
+  readBytes(pwm + 0x60, 4, &value);
+  expect("PWM counter prescaled by 16", value, 255);
+  advanceTimers(16);
+  pollSti5512Devices();
+  readBytes(pwm + 0x58, 4, &value);
+  expect("PWM overflow interrupt", value & 1, 1);
+  readBytes(0x2001107c, 4, &value);
+  expect("PWM is input interrupt eleven", value & (1U << 11), 1U << 11);
+  storeBytes(pwm + 0x5c, 4, 1);
+  readBytes(pwm + 0x58, 4, &value);
+  expect("PWM interrupt acknowledged", value & 1, 0);
+  readBytes(pwm + 0x64, 4, &value);
+  expect("capture counter prescaled by 29", value, (16 * 256) / 29);
+  expect("compare 0 matched", readBytes(pwm + 0x58, 4, &value) == 0 && (value & 0x20) != 0, 1);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static int rebootObserverCalls = 0;
+static int countReboot() {
+  ++rebootObserverCalls;
+  return 0;
+}
+
+static void testReboot() {
+  schedulerFixture(0x180000);
+  storeBytes(0xc7400000U, 4, 0x20000113U);
+  cpuState.priority = HIGH_PRIORITY;
+  cpuState.areg = 1;
+  omrState.Enables = 0;
+  omrState.TrapEnables[LOW_PRIORITY] = 0xff;
+  omrState.halted = false;
+  rebootObserverCalls = 0;
+  setRebootObserver(countReboot);
+  expect("reboot succeeds", reboot_(0) != 0, 0);
+  expect("reboot restarts at START_ADDR", cpuState.iptr, START_ADDR);
+  expect("reboot returns to low priority", cpuState.priority, LOW_PRIORITY);
+  expect("reboot resets Areg", cpuState.areg, undefinedWord);
+  expect("reboot resets enables", omrState.Enables, 0xffffc000U);
+  expect("reboot clears trap enables", omrState.TrapEnables[LOW_PRIORITY], 0);
+  expect("reboot empties ready queue", omrState.ProcQueueFPtr[LOW_PRIORITY], NO_PROCESS);
+  expect("reboot notifies SoC", rebootObserverCalls, 1);
+  uint32_t value = 0;
+  readBytes(0xc7400000U, 4, &value);
+  expect("reboot keeps RAM", value, 0x20000113U);
+  setRebootObserver(nullptr);
+  schedulerFixture(0x20000);
+}
+
+static void testSti5512Interrupts() {
+  schedulerFixture(0x180000);
+  setPortableInstructionAbi(false);
+  expect("initialize STi5512 interrupt devices", initSti5512Devices() != 0, 0);
+  uint32_t value = 0xffffffffU;
+  storeBytes(0x184018, 4, 0x80000000);
+  storeBytes(0x18401c, 4, 0x9400);
+  storeBytes(0x20000018, 4, 0x184021);
+  storeBytes(0x20000058, 4, 1);
+  storeBytes(0x2001101c, 4, 6);
+  storeBytes(0x2000600c, 4, 0x189);
+  storeBytes(0x20006010, 4, 2);
+  omrState.Enables |= LP_EXTERNALEVENT_ENB;
+  storeBytes(0x200000c4, 4, 0x40);
+  expect("STi5512 ASC3 poll without GloEn", pollSti5512Devices() != 0, 0);
+  expect("STi5512 GloEn clear defers IRQ", interruptHandlerActive(), 0);
+  readBytes(0x2001107c, 4, &value);
+  expect("STi5512 ASC3 is input interrupt seven", value, 1U << 7);
+  storeBytes(0x200000c4, 4, 0x10000);
+  readBytes(0x200000c0, 4, &value);
+  expect("STi5512 set mask keeps channel bits", value, 0x10040);
+  expect("STi5512 ASC3 TX ready enters IRQ", pollSti5512Devices() != 0, 0);
+  expect("STi5512 ASC3 IRQ level six", activeExternalInterruptLevel() == 6, 1);
+  expect("STi5512 ASC3 IRQ workspace", cpuState.wptr, 0x184000);
+  readBytes(0x20000100, 4, &value);
+  expect("STi5512 executing register", value, 0x40);
+  storeBytes(0x20006004, 4, 0x4f);
+  storeBytes(0x20006010, 4, 0);
+  expect("STi5512 ASC3 IRQ return", iret_(0) != 0, 0);
+  readBytes(0x20000100, 4, &value);
+  expect("STi5512 iret acknowledges controller", value, 0);
+  auto bytes = takeSti5512AscTransmit(3);
+  expect("STi5512 ASC3 captures byte", bytes.size(), 1);
+  if (bytes.size() == 1) expect("STi5512 ASC3 captured value", bytes[0], 0x4f);
+  expect("STi5512 ASC0 capture separate", takeSti5512AscTransmit(0).empty(), 1);
+  expect("STi5512 INL input status read only", storeBytes(0x2001107c, 4, 0) == DEVICE_ACCESS_UNSUPPORTED, 1);
+  storeBytes(0x20011000, 4, 0xff);
+  readBytes(0x20011000, 4, &value);
+  expect("STi5512 INL priority is three bits", value, 7);
+  storeBytes(0x200000c8, 4, 0x10000);
+  readBytes(0x200000c0, 4, &value);
+  expect("STi5512 clear mask removes only GloEn", value, 0x40);
+  storeBytes(0x2000600c, 4, 0x189);
+  storeBytes(0x20006004, 4, 0x50);
+  expect("STi5512 reboot", rebootProcessor() != 0, 0);
+  readBytes(0x200000c0, 4, &value);
+  expect("STi5512 reboot clears INC mask", value, 0);
+  readBytes(0x2001101c, 4, &value);
+  expect("STi5512 reboot clears INL priority", value, 0);
+  readBytes(0x2000600c, 4, &value);
+  expect("STi5512 reboot resets ASC3 control", value, 0);
+  readBytes(0x20006014, 4, &value);
+  expect("STi5512 reboot resets ASC3 status", value, 3);
+  expect("STi5512 reboot keeps sent bytes", takeSti5512AscTransmit(3).size(), 1);
+  storeBytes(0x3a, 1, 0x1b);
+  rebootProcessor();
+  readBytes(0x3a, 1, &value);
+  expect("STi5512 reboot resets CFG_GCF", value, 0);
   shutdownSti5512Devices();
   schedulerFixture(0x20000);
 }
@@ -3581,6 +3864,11 @@ static void testSti5518Devices() {
 
 static void testInterruptReturns() {
   testSti5512Devices();
+  testSti5512Interrupts();
+  testSti5512I2c();
+  testSti5512PtiDma();
+  testSti5512Pwm();
+  testReboot();
   testSti5518Devices();
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
     schedulerFixture(0x180000, priority);
@@ -4088,7 +4376,7 @@ static void testNativeExternalChannels() {
     storeBytes(handlerRecord + 8, 4, 0x254000);
     expect("native modeled completion retry enters kernel", pollTimers() != 0, 0);
     expect("native modeled completion kernel active", trapHandlerActive(), 1);
-    expect("native modeled completion kernel descriptor", cpuState.breg, owner | priority);
+    expect("native modeled completion kernel descriptor", trapEntryDescriptor(), owner | priority);
     readBytes(0x251018, 2, &value);
     expect("native modeled data committed before kernel", value, 0x3412);
     expect("native modeled kernel owns enqueue", omrState.ProcQueueFPtr[priority], NO_PROCESS);
@@ -4376,8 +4664,8 @@ static void testPeriodicTimeslicing() {
   advanceTimers(period * 2);
   expect("periodic j delivers scheduler trap", j_(1) != 0, 0);
   expect("periodic scheduler handler", cpuState.wptr, 0x1b3000);
-  expect("periodic scheduler caller descriptor", cpuState.breg, 0x1b0001);
-  cpuState.areg = cpuState.breg;
+  expect("periodic scheduler caller descriptor", trapEntryDescriptor(), 0x1b0001);
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   pollTimers();
@@ -4394,9 +4682,9 @@ static void testTimesliceTrapsAndSnapshots() {
     enqueueProcess(0x178000, priority);
     expect("timeslice scheduler trap enters", timeslice_(0) != 0, 0);
     expect("timeslice handler selected", cpuState.wptr, 0x177000);
-    expect("timeslice kernel caller descriptor", cpuState.breg, 0x176000U | priority);
+    expect("timeslice kernel caller descriptor", trapEntryDescriptor(), 0x176000U | priority);
     expect("timeslice kernel owns enqueue", omrState.ProcQueueBPtr[priority], 0x178000);
-    cpuState.areg = cpuState.breg;
+    cpuState.areg = trapEntryDescriptor();
     expect("timeslice kernel can enqueue caller", runp_(0) != 0, 0);
     expect("timeslice kernel cannot timeslice", timeslice_(0) == TRAP_HANDLER_BLOCKED, 1);
     expect("timeslice kernel return", tret_(0) != 0, 0);
@@ -4479,7 +4767,7 @@ static void testTimesliceTrapsAndSnapshots() {
   intenb_(0);
   expect("intenb releases pending high timer kernel", pollTimers() != 0, 0);
   expect("pending timer kernel selected after intenb", cpuState.wptr, 0x17e000);
-  expect("pending timer descriptor retained", cpuState.breg, 0x17f000);
+  expect("pending timer descriptor retained", trapEntryDescriptor(), 0x17f000);
   expect("pending timer kernel returns", tret_(0) != 0, 0);
   schedulerFixture(0x20000);
 }
@@ -4776,6 +5064,19 @@ static void testTrapInstructionHooks() {
 }
 
 static void testSchedulerTrapDelivery() {
+  schedulerFixture(0xc9000);
+  installTrap(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, 0xca000, 0x5400);
+  omrState.Enables |= RUN_TRAPENB;
+  cpuState.areg = 0x11111111;
+  cpuState.breg = 0x22222222;
+  cpuState.creg = 0x33333333;
+  expect("asynchronous run trap enters handler", requestTrap(RUN_TRAPENB, LOW_PRIORITY, false, 0xcb001) != 0, 0);
+  expect("scheduler trap handler selected", cpuState.wptr, 0xca000);
+  expect("scheduler trap keeps Areg", cpuState.areg, 0x11111111);
+  expect("scheduler trap keeps Breg", cpuState.breg, 0x22222222);
+  expect("scheduler trap keeps Creg", cpuState.creg, 0x33333333);
+  expect("scheduler trap descriptor in entry workspace", trapEntryDescriptor(), 0xcb001);
+  tret_(0);
   uint32_t previous = 0;
   schedulerFixture(0xc9000);
   installTrap(LOW_PRIORITY, 3, 0xca000, 0x5400);
@@ -4784,9 +5085,9 @@ static void testSchedulerTrapDelivery() {
   tin_(0);
   expect("timer expiry enters handler", advanceTimers(3888) != 0, 0);
   expect("timer handler runs while caller was idle", cpuState.wptr, 0xca000);
-  expect("timer handler receives waiting descriptor", cpuState.breg, 0xc9001);
+  expect("timer handler receives waiting descriptor", trapEntryDescriptor(), 0xc9001);
   expect("timer waiter detached for software scheduling", omrState.TptrReg[LOW_PRIORITY], NO_PROCESS);
-  cpuState.areg = cpuState.breg;
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   pollTimers();
@@ -4799,9 +5100,9 @@ static void testSchedulerTrapDelivery() {
   cpuState.areg = 0xcd000;
   expect("run trap crosses to selected priority", runp_(0) != 0, 0);
   expect("run kernel priority", cpuState.priority, HIGH_PRIORITY);
-  expect("run kernel receives process", cpuState.breg, 0xcd000);
+  expect("run kernel receives process", trapEntryDescriptor(), 0xcd000);
   expect("run trap does not pre-enqueue process", omrState.ProcQueueFPtr[HIGH_PRIORITY], NO_PROCESS);
-  cpuState.areg = cpuState.breg;
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   expect("scheduler trap restores caller priority", cpuState.priority, LOW_PRIORITY);
@@ -4845,7 +5146,7 @@ static void testSchedulerTrapDelivery() {
   cpuState.areg = 0xc04047ed;
   expect("firmware run trap enters handler", runp_(0) != 0, 0);
   expect("firmware handler preserves installed status", cpuState.status, 0x80010000);
-  expect("firmware run trap retains B descriptor", cpuState.breg, 0xc04047ed);
+  expect("firmware run trap entry descriptor", trapEntryDescriptor(), 0xc04047ed);
   expect("firmware handler adjusts workspace", ajw_(static_cast<uint32_t>(-6)) != 0, 0);
   expect("firmware handler loads scheduler parameter", ldl_(6) != 0, 0);
   expect("firmware handler receives descriptor in entry workspace", cpuState.areg, 0xc04047ed);
@@ -4988,8 +5289,8 @@ static void testTrapSnapshot() {
   expect("restored trap returns caller Status", cpuState.status, 0x2000000);
   pollTimers();
   expect("snapshot retains pending timer trap", cpuState.wptr, 0xe3000);
-  expect("snapshot pending timer descriptor", cpuState.breg, 0xe2001);
-  cpuState.areg = cpuState.breg;
+  expect("snapshot pending timer descriptor", trapEntryDescriptor(), 0xe2001);
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   std::string filename = std::string(directory) + "/cpu.bin";
@@ -5071,12 +5372,12 @@ static void testSignalAndChannelDelivery() {
   changeTrapMask(LOW_PRIORITY, SIGNAL_TRAPENB, true, &previous);
   expect("signal trap delivers waiter to kernel", signal_(0) != 0, 0);
   expect("signal handler selected", cpuState.wptr, 0xf1000);
-  expect("signal handler waiter parameter", cpuState.breg, 0xf0001);
+  expect("signal handler waiter parameter", trapEntryDescriptor(), 0xf0001);
   uint32_t word = 0;
   readBytes(0xf2004, 4, &word);
   expect("signal trap detaches waiter", word, NO_PROCESS);
   expect("signal kernel owns enqueue decision", omrState.ProcQueueFPtr[LOW_PRIORITY], NO_PROCESS);
-  cpuState.areg = cpuState.breg;
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   stopp_(0);
@@ -5098,12 +5399,12 @@ static void testSignalAndChannelDelivery() {
   cpuState.breg = 0xf6000;
   expect("channel trap delivers completed communication", outword_(0) != 0, 0);
   expect("channel handler priority", cpuState.priority, LOW_PRIORITY);
-  expect("channel handler peer descriptor", cpuState.breg, 0xf4001);
+  expect("channel handler peer descriptor", trapEntryDescriptor(), 0xf4001);
   readBytes(0xf7000, 4, &word);
   expect("channel data copied before scheduling trap", word, 0x11223344);
   readBytes(0xf6000, 4, &word);
   expect("channel reset before scheduling trap", word, NO_PROCESS);
-  cpuState.areg = cpuState.breg;
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   expect("cross-priority channel trap returns sender", cpuState.wptr, 0xf8000);
@@ -5613,8 +5914,8 @@ static void testAltBoundaryCases() {
   taltwt_(0);
   expect("timed ALT expiry reaches timer kernel", advanceTimers(3888) != 0, 0);
   expect("timed ALT timer handler selected", cpuState.wptr, 0x146000);
-  expect("timed ALT timer descriptor", cpuState.breg, 0x145001);
-  cpuState.areg = cpuState.breg;
+  expect("timed ALT timer descriptor", trapEntryDescriptor(), 0x145001);
+  cpuState.areg = trapEntryDescriptor();
   runp_(0);
   tret_(0);
   pollTimers();
@@ -5773,6 +6074,7 @@ int main(int argc, char **argv) {
   testDeviceMemory();
   testDeviceMove();
   testMemoryReaders();
+  testZeroFillMemory();
   testLegacySnapshot();
   testRealWorkspace();
   testReadyQueueControls();

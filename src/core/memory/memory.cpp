@@ -45,6 +45,14 @@ static MEMBLK *blockIndex[(UINT64_C(1) << 32) >> BLKSHIFT]{};
 namespace {
 std::vector<MemoryDevice> memoryDevices;
 
+/* unwritten bytes in this inclusive range read as zero (SDRAM); disabled while start > end */
+uint32_t zeroFillStart = 1;
+uint32_t zeroFillEnd = 0;
+
+bool isZeroFillAddress(uint32_t address) {
+  return address >= zeroFillStart && address <= zeroFillEnd;
+}
+
 int deviceForAccess(uint32_t address, int width, const MemoryDevice **device) {
   *device = nullptr;
   if (width <= 0) return 0;
@@ -85,6 +93,11 @@ bool isMemoryDeviceAddress(uint32_t address) {
     if (address >= device.start && address <= device.end) return true;
   }
   return false;
+}
+
+void setZeroFillRange(uint32_t start, uint32_t end) {
+  zeroFillStart = start;
+  zeroFillEnd = end;
 }
 
 MEMBLK *getMemBlk(uint32_t address, bool create_flag);
@@ -176,16 +189,15 @@ int readBytes(uint32_t address, int nBytes, uint32_t *value) {
   for (int i = 0; i < nBytes; i++) {
 
     /* get the block that the current byte is in */
-    cBlk = getMemBlk(address + static_cast<uint32_t>(i), false);
-    if (cBlk == nullptr) {
-      return READ_UNUSED_MEM;
-    }
+    uint32_t byteAddr = address + static_cast<uint32_t>(i);
+    cBlk = getMemBlk(byteAddr, false);
 
     /* get the offset of the byte in the block */
-    int offset = static_cast<int>((address + static_cast<uint32_t>(i)) & ADDR_IN_BLK_MASK);
+    int offset = static_cast<int>(byteAddr & ADDR_IN_BLK_MASK);
 
-    /* if the byte isn't defined, return error */
-    if (!byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
+    /* if the byte isn't defined, return error (zero-filled memory reads as 0) */
+    if (cBlk == nullptr || !byteUsedBit(cBlk, offset, DONT_ALTER_BIT)) {
+      if (isZeroFillAddress(byteAddr)) continue;
       return READ_UNUSED_MEM;
     }
 

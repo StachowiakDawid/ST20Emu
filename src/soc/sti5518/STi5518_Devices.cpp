@@ -1,20 +1,14 @@
 #include "STi5518_Devices.h"
 #include "../../core/cpu/st20.h"
 #include "../../core/memory/memory.h"
+#include "../common/STi55xx_Asc.h"
+#include "../common/STi55xx_Inc.h"
 
 #include <array>
 #include <bit>
 #include <utility>
 
 namespace {
-struct AscDevice {
-  uint32_t base;
-  uint32_t source;
-  std::array<uint32_t, 11> registers{};
-  bool previousSource = false;
-  uint32_t transmitDelay = 0;
-  std::vector<uint8_t> transmitted{};
-};
 std::array<AscDevice, 2> ascDevices{{{0x20004000U, 9}, {0x20005000U, 8}}};
 constexpr uint32_t controllerBase = 0x20000000U;
 constexpr uint32_t routingBase = 0x20011000U;
@@ -25,69 +19,15 @@ bool initialized = false;
 uint32_t softwarePending = 0;
 uint32_t hardwarePending = 0;
 
-bool triggered(uint32_t mode, bool current, bool previous) {
-  switch (mode & 7U) {
-    case 1: return current;
-    case 2: return !current;
-    case 3: return current && !previous;
-    case 4: return !current && previous;
-    case 5: return current != previous;
-    default: return false;
-  }
-}
-
-int checkAccess(uint32_t address, int width) {
-  return width != 4 || (address & 3U) ? INVALID_DEVICE_ACCESS : 0;
-}
-
-int readAsc(void *context, uint32_t address, int width, uint32_t *value) {
-  int result = checkAccess(address, width);
-  if (result) return result;
-  auto &device = *static_cast<AscDevice *>(context);
-  auto &asc = device.registers;
-  uint32_t offset = address - device.base;
-  if (offset == 4 || offset == 0x20 || offset == 0x24) return DEVICE_ACCESS_UNSUPPORTED;
-  *value = asc[offset / 4];
-  if (offset == 8) asc[0x14 / 4] &= ~0x21U;
-  return 0;
-}
-
-int writeAsc(void *context, uint32_t address, int width, uint32_t value) {
-  int result = checkAccess(address, width);
-  if (result) return result;
-  auto &device = *static_cast<AscDevice *>(context);
-  auto &asc = device.registers;
-  uint32_t offset = address - device.base;
-  if (offset == 8 || offset == 0x14) return DEVICE_ACCESS_UNSUPPORTED;
-  if (offset == 4) {
-    asc[1] = value & 0x1ffU;
-    if (asc[3] & 0x80U) {
-      device.transmitted.push_back(static_cast<uint8_t>(value));
-      device.transmitDelay = 2;
-      asc[5] &= ~6U;
-    }
-  } else if (offset == 0x20) {
-    device.transmitDelay = 0;
-    asc[5] |= 6U;
-  } else if (offset == 0x24) {
-    asc[2] = 0;
-    asc[5] &= ~0x21U;
-  } else {
-    uint32_t mask = offset == 0 ? 0xffffU : offset == 0xc ? 0x1fffU : offset == 0x10 ? 0x1ffU : 0xffU;
-    asc[offset / 4] = value & mask;
-  }
-  return 0;
-}
-
 int readController(void *, uint32_t address, int width, uint32_t *value) {
-  int result = checkAccess(address, width);
+  int result = checkWordAccess(address, width);
   if (result) return result;
   *value = controller[(address - controllerBase) / 4];
   return 0;
 }
 
 int writeController(void *, uint32_t address, int width, uint32_t value) {
-  int result = checkAccess(address, width);
+  int result = checkWordAccess(address, width);
   if (result) return result;
   uint32_t offset = address - controllerBase;
   uint32_t bits = value & 0x10000U ? 0xffU : value & 0xffU;
@@ -105,14 +45,14 @@ int writeController(void *, uint32_t address, int width, uint32_t value) {
 }
 
 int readRouting(void *, uint32_t address, int width, uint32_t *value) {
-  int result = checkAccess(address, width);
+  int result = checkWordAccess(address, width);
   if (result) return result;
   *value = routing[(address - routingBase) / 4];
   return 0;
 }
 
 int writeRouting(void *, uint32_t address, int width, uint32_t value) {
-  int result = checkAccess(address, width);
+  int result = checkWordAccess(address, width);
   if (result) return result;
   uint32_t offset = address - routingBase;
   if (offset == 0x1b8) routing[0x1bc / 4] |= value & 0x7fffffffU;
@@ -128,6 +68,17 @@ void acknowledgeInterrupt() {
     if (level > activeExternalInterruptLevel()) executing &= ~(1U << level);
   }
 }
+
+int resetDevices() {
+  for (auto &device : ascDevices) resetAsc(device);
+  controller = {};
+  routing = {};
+  routing[0x1bc / 4] = 0x7fffffffU;
+  for (uint32_t source = 0; source < 31; ++source) routing[0x100 / 4 + source] = 1;
+  previousLevels = {};
+  softwarePending = hardwarePending = 0;
+  return 0;
+}
 }
 
 int pollSti5518Devices() {
@@ -135,10 +86,7 @@ int pollSti5518Devices() {
   uint32_t rawSources = 0;
   uint32_t routedLevels = 0;
   for (auto &device : ascDevices) {
-    auto &asc = device.registers;
-    if (device.transmitDelay && --device.transmitDelay == 0) asc[5] |= 6U;
-    if (device.transmitDelay == 0 && (asc[3] & 0x80U)) asc[5] |= 6U;
-    bool source = (asc[3] & 0x80U) && (asc[5] & asc[4]);
+    bool source = tickAsc(device);
     if (source) rawSources |= 1U << device.source;
     bool enabledSource = (routing[0x1bc / 4] & (1U << device.source)) != 0;
     bool routed = enabledSource && triggered(routing[0x100 / 4 + device.source], source, device.previousSource);
@@ -177,7 +125,7 @@ int initSti5518Devices() {
   if (!initialized) {
     std::size_t registered = 0;
     for (auto &device : ascDevices) {
-      int result = registerMemoryDevice({device.base, device.base + 0x2b, &device, readAsc, writeAsc});
+      int result = registerMemoryDevice({device.base, device.base + ascRegisterEnd, &device, readAsc, writeAsc});
       if (result) {
         for (std::size_t index = 0; index < registered; ++index) unregisterMemoryDevice(ascDevices[index].base);
         return result;
@@ -196,23 +144,12 @@ int initSti5518Devices() {
       return result;
     }
   }
-  for (auto &device : ascDevices) {
-    device.registers = {};
-    device.registers[5] = 3;
-    device.registers[10] = 1;
-    device.previousSource = false;
-    device.transmitDelay = 0;
-    device.transmitted.clear();
-  }
-  controller = {};
-  routing = {};
-  routing[0x1bc / 4] = 0x7fffffffU;
-  for (uint32_t source = 0; source < 31; ++source) routing[0x100 / 4 + source] = 1;
-  previousLevels = {};
-  softwarePending = hardwarePending = 0;
+  resetDevices();
+  for (auto &device : ascDevices) device.transmitted.clear();
   initialized = true;
   setPeripheralPoller(pollSti5518Devices);
   setInterruptReturnObserver(acknowledgeInterrupt);
+  setRebootObserver(resetDevices);
   return 0;
 }
 
@@ -223,6 +160,7 @@ void shutdownSti5518Devices() {
   unregisterMemoryDevice(routingBase);
   setPeripheralPoller(nullptr);
   setInterruptReturnObserver(nullptr);
+  setRebootObserver(nullptr);
   initialized = false;
 }
 

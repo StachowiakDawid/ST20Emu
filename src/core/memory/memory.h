@@ -46,6 +46,7 @@ inline constexpr int DONT_ALTER_BIT = 3;
 
 /* routines used to update the state of the memory */
 int memoryInit();
+void setZeroFillRange(uint32_t start, uint32_t end);
 int readBytes(uint32_t address, int nBytes, uint32_t *value);
 int readInvBytes(uint32_t address, int nBytes, uint32_t *value);
 int storeBytes(uint32_t address, int nBytes, uint32_t value);

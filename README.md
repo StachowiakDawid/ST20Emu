@@ -100,6 +100,8 @@ l firmware/6300.bin
 
 The emulator reads configuration values from `st20emu.ini`, which must reside in the same directory as the executable. The settings in this file are straightforward and self-explanatory.
 
+`ZERO_FILL_START`/`ZERO_FILL_END` (inclusive, hexadecimal) set an address range whose unwritten bytes read as zero instead of stopping with an uninitialised-memory error. The shipped file covers SDRAM `0xc0000000`-`0xc07fffff`, where boot loaders such as the DSR9500's read a warm-restart mailbox before anything has written it. Remove both lines to trap on every unwritten byte.
+
 ### SoC Selection
 
 Use `--soc sti5518` (the default) or `--soc sti5512` to select the device model.
@@ -109,19 +111,57 @@ The selected SoC is printed at startup and included in batch logs.
 ./st20emu --soc sti5512 --soc-revision 0xaa --firmware firmware/wsad.bin.bak --batch
 ```
 
-The minimal STi5512 model implements only `VID_REV` at `0x00000078` as an
-8-bit, read-only register. `--soc-revision HEX` selects its value (00 to ff)
-and is accepted only with STi5512. The default `0x00` is a synthetic emulator
-value, not a documented silicon reset value; the example `0xaa` is a firmware
-comparison value, not a verified revision for the target board. The register
-is defined in the STi5512 Register Manual (7145562 B), pages 189-190, with
-`VideoBaseAddress = 0` in Table 1.
+`VID_REV` at `0x00000078` is a read-only byte. `--soc-revision HEX` selects its value (00
+to ff) and is accepted only with STi5512. The default `0x00` is a synthetic emulator value,
+not a documented silicon reset value; the example `0xaa` is a firmware comparison value, not
+a verified revision for the target board. The register is defined in the STi5512 Register
+Manual (7145562 B), pages 189-190, with `VideoBaseAddress = 0` in Table 1.
 
-STi5512 selection does not install the STi5518 ASC or interrupt-controller
-models. Other STi5512 peripherals, external RAM reset contents, and device
-snapshots remain unimplemented. In particular, this does not resolve the
-separate unwritten-memory read at `0x40000000`. The interactive `vra` register
-descriptions remain STi5518-specific.
+STi5512 startup also installs ASC0-ASC3 (`0x20003000`-`0x20006000`, interrupts 10, 9, 8
+and 7, from the STi5512 datasheet 7145560 B, Table 50), the interrupt controller (INC,
+`0x20000000`) and the STi5512 interrupt level controller (INL, `0x20011000`: per-interrupt
+priorities and `InputInterrupts`, without the STi5518 trigger-mode and enable extensions).
+Unlike the STi5518 model, the INC honours the `GloEn` mask bit (bit 16). The ASC
+transmitter model is shared with the STi5518 (`src/soc/common`);
+`takeSti5512AscTransmit(port)` returns each port's captured bytes. The register blocks below `0x8000` (video and configuration
+`0x0000`, audio `0x0800`, sub-picture `0x1000`, DENC `0x1800`, EMI `0x2000`, cache `0x4000`
+and MPEG control `0x5000`) are byte register files with the manual's reset values; writes to
+read-only registers are ignored, and decoder, clock and display side effects are not modelled.
+The windows follow the datasheet memory map, so reserved locations inside them are storage
+too; command bits that the manual says reset automatically read back as 0, and the audio and
+DENC soft resets restore reset values.
+
+Further STi5512 devices:
+
+- SSC0/SSC1 (`0x20009000`/`0x2000a000`, interrupts 5 and 6) as I2C masters: START with the
+  next TBUF write, 9-bit frames (`(byte << 1) | ack`), STOP, BUSY and soft reset. Slaves are
+  register files attached with `attachSti5512I2cDevice`; a missing slave does not acknowledge.
+  Slave mode, SPI, arbitration and 10-bit addressing are not modelled.
+- PTI DMA channels 1-3 (`0x20031000`): the read pointer advances to the write pointer,
+  wrapping from top to base; the decoders are not modelled, so the data is discarded.
+- PWM and capture/compare counters (`0x2000b000`, interrupt 11), clocked from the CPU cycle
+  count through their prescalers: PWM overflow and compare interrupts. Capture inputs (the IR
+  receiver) are not modelled.
+
+PIO, the transport controller, smart card, teletext, the decoders, external RAM reset contents
+and device snapshots remain unimplemented. The interactive `vra` register descriptions remain
+STi5518-specific.
+
+### Boards
+
+`--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's I2C chips as register
+files: the QPSK demodulator (`0xaa` on SSC1, identity `0x5a` in register 0), the CI controller
+(`0x80`) and the RF modulator (`0xca`) on SSC0. There is no tuner, signal, CI module or RF
+model. The DSR9500 main firmware boots with:
+
+```bash
+./st20emu-release --soc sti5512 --board dsr9500 --firmware firmware/dsr9500mcmain.bin --batch
+```
+
+### Serial Console
+
+Bytes the firmware sends through the ASC ports are printed line by line as `ASCn> text`
+(to the terminal, or to the batch log).
 
 ### Native STi5518 Devices
 
@@ -137,7 +177,7 @@ Portable mode adds resumable moves and channel copies, complete tagged shadow re
 
 Explicitly configured FIFO endpoints via `registerExternalChannel`, `feedExternalChannel` and `drainExternalChannel` also work in native mode, including blocking input/output, scalar sends, ALT guards and reset. Native transfers are atomic with RAM-only buffers; portable transfers retain resumable state. These host-configured endpoints are not an automatic STi5518 hardware channel map.
 
-`reboot` remains unimplemented. Exact chip-specific bus timings, alignment rules, and peripheral register-map integration are not certified by portable mode.
+`reboot` performs a boot-from-ROM cold reset: processor and device-model state return to their reset values, memory is kept, and execution restarts at `START_ADDR`. Exact chip-specific bus timings, alignment rules, and peripheral register-map integration are not certified by portable mode.
 
 > **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
 

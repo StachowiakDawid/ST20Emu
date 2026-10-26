@@ -5,10 +5,12 @@
 #include "common/defines.h"
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
+#include "board/DSR9500.h"
 #include "soc/sti5512/STi5512_Devices.h"
 #include "soc/sti5518/STi5518_Devices.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
@@ -78,6 +80,8 @@ void readParms(PARMS *userParms) {
 }
 
 void st20emuInit(const PARMS *userParms) {
+  uint32_t zeroFillStart{1};
+  uint32_t zeroFillEnd{0};
   for (int i{0}; i < userParms->nParms; ++i) {
     uint64_t value{0};
     std::string_view valStr{userParms->value[i]};
@@ -97,12 +101,45 @@ void st20emuInit(const PARMS *userParms) {
         warnInstr = value;
       } else if (!std::strcmp(userParms->parameter[i], UNDEFINED_WORD_CH)) {
         undefinedWord = static_cast<uint32_t>(value);
+      } else if (!std::strcmp(userParms->parameter[i], ZERO_FILL_START_CH)) {
+        zeroFillStart = static_cast<uint32_t>(value);
+      } else if (!std::strcmp(userParms->parameter[i], ZERO_FILL_END_CH)) {
+        zeroFillEnd = static_cast<uint32_t>(value);
       }
     }
   }
 
+  setZeroFillRange(zeroFillStart, zeroFillEnd);
   compat::println("MAX_UNPROMPTED_INSTR={}\nWARN_UNPROMPTED_INSTR={}\nUNDEFINED_WORD=0x{:08x}",
                   maxInstr, warnInstr, undefinedWord);
+  if (zeroFillStart <= zeroFillEnd)
+    compat::println("ZERO_FILL=0x{:08x}-0x{:08x}", zeroFillStart, zeroFillEnd);
+}
+
+/* serial (ASC) output of the emulated SoC, printed one line at a time as "ASCn> text" */
+static bool serialSti5512 = false;
+static std::array<std::string, 4> serialLines;
+
+static void printSerialOutput(bool flush) {
+  for (int port = 0; port < 4; ++port) {
+    std::vector<uint8_t> bytes;
+    if (serialSti5512) bytes = takeSti5512AscTransmit(port);
+    else if (port == 1) bytes = takeSti5518Asc1Transmit();
+    else if (port == 2) bytes = takeSti5518Asc2Transmit();
+    std::string &line = serialLines[static_cast<std::size_t>(port)];
+    for (uint8_t byte : bytes) {
+      if (byte == '\n') {
+        compat::println("ASC{}> {}", port, line);
+        line.clear();
+      } else if (byte != '\r') {
+        line.push_back(static_cast<char>(byte));
+      }
+    }
+    if (flush && !line.empty()) {
+      compat::println("ASC{}> {}", port, line);
+      line.clear();
+    }
+  }
 }
 
 static const char *cpuErrorText(int error) {
@@ -210,6 +247,7 @@ public:
 
 static int runBatch() {
   constexpr uint64_t LOG_INTERVAL = 100000;
+  constexpr uint64_t SERIAL_INTERVAL = 1000;
   std::fflush(stdout);
   BatchLogWriter writer;
   BatchLogChunk chunk;
@@ -227,6 +265,7 @@ static int runBatch() {
       result = execInstr(&watchTripped);
       ++instrCount;
     }
+    if (result || instrCount % SERIAL_INTERVAL == 0) printSerialOutput(result != 0);
 
     record.count = instrCount;
     record.diagnostics.swap(logBuffer);
@@ -262,12 +301,14 @@ int main(int argc, char **argv) {
   std::string_view soc = "sti5518";
   uint32_t socRevision = 0;
   bool revisionSpecified = false;
+  std::string_view board;
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--firmware FILE] [--address HEX] [--batch]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500] [--firmware FILE] [--address HEX] [--batch]\n"
               "  --soc NAME       Emulated SoC (default: sti5518)\n"
               "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
+              "  --board NAME     Board parts outside the SoC: dsr9500 (STi5512 only)\n"
                       "  --firmware FILE  Load raw firmware at startup\n"
                       "  --address HEX    Load and entry address (0/default: auto-place, START_ADDR entry)\n"
                       "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt",
@@ -280,6 +321,12 @@ int main(int argc, char **argv) {
       soc = argv[++index];
       if (soc != "sti5518" && soc != "sti5512") {
         compat::println(stderr, "Invalid SoC: {} (expected sti5518 or sti5512)", soc);
+        return 2;
+      }
+    } else if (option == "--board" && index + 1 < argc) {
+      board = argv[++index];
+      if (board != "dsr9500") {
+        compat::println(stderr, "Invalid board: {} (expected dsr9500)", board);
         return 2;
       }
     } else if (option == "--soc-revision" && index + 1 < argc) {
@@ -308,6 +355,10 @@ int main(int argc, char **argv) {
       compat::println(stderr, "Unknown option or missing value: {} (use --help)", option);
       return 2;
     }
+  }
+  if (board == "dsr9500" && soc != "sti5512") {
+    compat::println(stderr, "--board dsr9500 requires --soc sti5512");
+    return 2;
   }
   if (revisionSpecified && soc != "sti5512") {
     compat::println(stderr, "--soc-revision requires --soc sti5512");
@@ -366,11 +417,19 @@ int main(int argc, char **argv) {
   memoryInit();
   compat::println("SoC: {}", soc);
   if (soc == "sti5512") compat::println("VID_REV: 0x{:02x}", socRevision);
+  serialSti5512 = soc == "sti5512";
   int deviceResult = soc == "sti5512" ? initSti5512Devices(static_cast<uint8_t>(socRevision))
                                      : initSti5518Devices();
   if (deviceResult) {
     compat::println(stderr, "Cannot initialize {} devices: {}", soc, memoryError(deviceResult));
     return 1;
+  }
+  if (board == "dsr9500") {
+    compat::println("Board: {}", board);
+    if (initDsr9500Board()) {
+      compat::println(stderr, "Cannot initialize board {}", board);
+      return 1;
+    }
   }
 
   if (!firmware.empty()) {
@@ -389,10 +448,13 @@ int main(int argc, char **argv) {
 
   // throttle how often we ask the OS for keyboard input
   constexpr uint64_t KEY_POLL_INTERVAL = 1000;
+  constexpr uint64_t SERIAL_INTERVAL = 1000;
+  uint64_t serialCount = 0;
 
   while (!cli.is_quit_requested()) {
     if (instructionReady) {
       int result = execInstr(&watchTripped);
+      if (result || ++serialCount % SERIAL_INTERVAL == 0) printSerialOutput(result != 0);
       if (result) {
         compat::println("Execution stopped: {}", cpuErrorText(result));
         cli.set_need_prompt(true);

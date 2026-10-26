@@ -12,7 +12,7 @@ Implementation: [instruction handlers](../src/core/cpu/instructions.cpp), [dispa
 - **Stub**: the handler changes stack state or prints a message without implementing the instruction's main effect.
 - **Not implemented**: dispatch uses `invalidOp_`, or no usable encoding has been established. Independently corroborated encodings are noted when the primary reference is defective.
 
-The 171 reference instructions comprise **151 implemented**, **19 partial**, **0 stubs**, and **1 not implemented**. Encoding components are listed separately below. The only instruction without a handler is reboot, deliberately excluded from this implementation. Partial includes functional portable-mode behavior whose silicon-specific conventions remain unverified.
+The 171 reference instructions comprise **151 implemented**, **20 partial**, **0 stubs**, and **0 not implemented**. Encoding components are listed separately below. Partial includes functional portable-mode behavior whose silicon-specific conventions remain unverified.
 
 Instruction timing remains approximate. Newly added handlers use a baseline cycle count of one, not a hardware-verified timing value. Undefined bit-reversal widths and invalid `xword` inputs use the existing undefined-word marker, 0xcccccccc; this is an emulator policy, not a claim about silicon-specific undefined behavior.
 
@@ -32,7 +32,8 @@ separately from completed comparisons.
 The oracle does not decode `lddevid`. Standalone `iret` requires controller
 context: initializing its previously unmapped pointer removes that fault,
 but the controller returns from level -1 and goes idle rather than reading
-the prepared frame. `reboot` remains deliberately excluded. All five copy
+the prepared frame. `reboot` (now a boot-from-ROM cold reset) has not been
+compared with the simulator. All five copy
 families still yield only boundary captures with operation code zero and
 undefined auxiliary words in DLL queue/signal probes. Timer-event-file
 probes crash simulator 7.32 with internal `sig=11`; the new `--interrupted 5`
@@ -108,7 +109,7 @@ Portable FIFO transfers retain the resumable copy and cached-read behavior descr
 
 Version-11 snapshots use 32-bit CPU/register words in the prefix and a 550-word fixed runtime extension: timing data, cached move fields, inactive high state, eight pending IRQ requests and up to eight IRQ frames. An optional EXCH extension serializes FIFO bytes, capacities, active/waiting descriptors, and ALT notification state. Limits are 1024 endpoints, 1 MiB capacity per endpoint, and 16 MiB total queued data per snapshot; malformed state is validated before restoring the live machine. Only version 11 is supported; unversioned files, all other versions (including version 10), and incomplete runtime blocks are rejected without changing live state. Portable ABI configuration and arbitrary MMIO callback objects are board configuration and are not serialized. Guest RAM still must be saved/restored separately; native byte order, boolean representation, and structure padding keep files host-ABI dependent.
 
-Native five-word register interpretation, exact bus/timing behavior, chip-specific event registers, and interrupted native operation codes remain unverified. They are not hidden by the portable implementation. The native FP helpers above are separate from the opt-in portable FP format. reboot is untouched.
+Native five-word register interpretation, exact bus/timing behavior, chip-specific event registers, and interrupted native operation codes remain unverified. They are not hidden by the portable implementation. The native FP helpers above are separate from the opt-in portable FP format.
 
 Timer-driven st20sim probes reach the high-priority capture process for all five copy families, but only before the copy executes: the saved operation code is zero and all five block words are undefined. These boundary captures do not establish native in-progress microcode or its restart layout; the partial classifications remain unchanged.
 
@@ -204,7 +205,7 @@ does not mean those portable implementations are absent.
 | `ldpi` | Implemented | - |
 | `ldpri` | Implemented | Loads the explicit current-process priority. |
 | `ldprodid` | Implemented | Loads the configured product ID. |
-| `ldshadow` | Partial | Loads selected enables, ordinary low-shadow context/stack and idle block records, including captured LP control/register edits, invalidation and reactivation in HP traps. Interrupted native operations remain unsupported. |
+| `ldshadow` | Partial | Loads selected enables, ordinary low-shadow context/stack and idle block records, including captured LP control/register edits, invalidation and reactivation in HP traps. Interrupted native operations remain unsupported. Native block records are words 7-10. |
 | `ldtimer` | Implemented | Selects the current process priority's clock independently of workspace bookkeeping. |
 | `ldtraph` | Implemented | Installs four descriptor words or enters the enabled LoadTrap monitor without copying. |
 | `ldtrapped` | Implemented | Installs four trapped-process words using the reference's group/priority selectors; LoadTrap monitoring supported. |
@@ -233,10 +234,10 @@ does not mean those portable implementations are absent.
 | `pop` | Implemented | - |
 | `postnormsn` | Implemented | Native wrapping biased-exponent correction, retained denormal guards and underflow cutoff; opt-in portable exponent/sign format retained separately. |
 | `prod` | Implemented | Unchecked wrapped product without host signed overflow. |
-| `reboot` | Not implemented | - |
+| `reboot` | Partial | Cold boot from ROM: resets CPU, scheduler, trap, timer and OMR state, lets the SoC reset its device models (`setRebootObserver`), keeps all memory (external RAM survives, as warm-restart mailboxes expect) and restarts at `START_ADDR`. Boot from link (BootFromRom low) is not modelled. |
 | `rem` | Implemented | Signed B modulo A; division by zero signals overflow. Follows the description rather than the reversed printed formula. |
 | `resetch` | Partial | Resets software words or configured FIFO state and returns the canceled descriptor without waking it; physical hardware-channel reset remains unverified. |
-| `restart` | Partial | Restores native records with no interrupted operation, or complete tagged portable records including pending operations; native interrupted-operation format remains unverified. |
+| `restart` | Partial | Restores native records with no interrupted operation, or complete tagged portable records including pending operations; native interrupted-operation format remains unverified. A native restart reads only record words 0-6. |
 | `ret` | Implemented | Restores Iptr from the call frame and advances the real workspace pointer. |
 | `rev` | Implemented | - |
 | `roundsn` | Implemented | Native integer nearest-even fraction packing, subnormal carry and overflow; opt-in portable signed/unbiased format retained separately. |
@@ -266,7 +267,7 @@ does not mean those portable implementations are absent.
 | `stnl` | Implemented | - |
 | `stoperr` | Implemented | Saves Iptr and deschedules only when the current error flag is set. |
 | `stopp` | Implemented | Saves Iptr and deschedules, dispatching a ready process or restoring low-priority shadow state. |
-| `stshadow` | Partial | Stores selected enable/context/stack groups and idle block records, including captured LP callers in HP traps. Native enable words are fully written; portable mode preserves reserved bits. Active native block records remain unsupported. |
+| `stshadow` | Partial | Stores selected enable/context/stack groups and idle block records, including captured LP callers in HP traps. Native enable words are fully written; portable mode preserves reserved bits. Active native block records remain unsupported. The native block group is words 7-10 (four words, as OS20's `NO_MOVE2D_WORDS` states against the manual's 7-11); word 11 is portable-only. |
 | `sttimer` | Implemented | Initializes and enables both clocks and services due timer alarms and ready processes. |
 | `sttraph` | Implemented | Exports four handler words or enters the enabled StoreTrap monitor without copying. |
 | `sttrapped` | Implemented | Exports four trapped-process words; StoreTrap monitoring supported. |
@@ -406,7 +407,7 @@ The default C2 trap area follows the existing implementation and the TP2 memory-
 
 Enabled native delivery saves the interrupted record and loads the handler's Status/Wptr/Iptr. It loads the handler's full global-enable field (bits 16-31), but ANDs trap-enable bits with the handler mask. Independent `gintdis 0`/`trapdis 0` probes inside handlers and after `tret` agree with ST's simulator 6.8 at both priorities, including the documented event bits 16-23 and upper global bits. The manuals' blanket wording about ANDing Enables conflicts with this measured split; the native emulator follows the simulator contract, not a claim of physical-silicon certification. Portable mode retains its prior full-word AND policy.
 
-Trap return selects the group from the active trap frame, without requiring the installed handler Status to encode it in bits 18-19. Scheduler return priority is recorded in bits 16-17; native same-priority return restores the pre-trap values for those bits instead of leaking the temporary overlay. Native cross-priority return instead uses the captured bank's Status and control fields, including verified edits. Saved global enables and the trap bank's saved mask are restored. Scheduler traps carrying a descriptor also write it to handler entry workspace word 0 and retain it in Breg. This workspace-slot convention is firmware-derived compatibility behavior, not verified silicon behavior. A/B/C are not automatically saved for same-priority handlers. Cross-priority scheduler delivery preserves the calling register bank. Missing/null or unaligned handler workspaces, same-group reentry, malformed returns, and handler attempts to block are reported explicitly. Different groups may nest; asynchronous timer requests wait for active handlers to return.
+Trap return selects the group from the active trap frame, without requiring the installed handler Status to encode it in bits 18-19. Scheduler return priority is recorded in bits 16-17; native same-priority return restores the pre-trap values for those bits instead of leaking the temporary overlay. Native cross-priority return instead uses the captured bank's Status and control fields, including verified edits. Saved global enables and the trap bank's saved mask are restored. Scheduler traps carrying a descriptor write it to handler entry workspace word 0; this workspace-slot convention is firmware-derived (OS20 reads it with `ldl` after `ajw`), not verified silicon behavior. A/B/C are neither saved nor changed on trap entry, so the handler sees the trapped process's evaluation stack (ST20-TP2 datasheet 42-1674-04, section 3.6.3); OS20's scheduler kernel stores them for a later `restart`. Cross-priority scheduler delivery preserves the calling register bank. Missing/null or unaligned handler workspaces, same-group reentry, malformed returns, and handler attempts to block are reported explicitly. Different groups may nest; asynchronous timer requests wait for active handlers to return.
 
 The engine handles breakpoint, arithmetic overflow, truly illegal opcodes, monitored descriptor access, timer, run/start, signal, internal-channel, priority-interrupt, and queue-empty sources. `causeerror` can generate all fourteen enabled cause bits. Legal-but-unimplemented opcodes are not mislabeled as illegal. Disabled arithmetic traps set the current error flag; halt-on-error latches a processor halt and prevents fetch, execution, or scheduling from replacing the fault context.
 

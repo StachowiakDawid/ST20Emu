@@ -1098,6 +1098,13 @@ int ldpri_(uint32_t /*unused*/) {
   return 0;
 }
 
+/*	Code: 68 FD
+  Description: Perform a cold boot. Reset all machine states to the initial state and
+  execute the boot microcode (boot from ROM: jump to the ROM entry point). */
+int reboot_(uint32_t /*unused*/) {
+  return rebootProcessor();
+}
+
 int ldprodid_(uint32_t /*unused*/) {
   /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
           st20ProductId); */

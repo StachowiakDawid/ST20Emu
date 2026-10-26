@@ -68,6 +68,7 @@ uint32_t startAddr = START_ADDR;
 uint32_t wptrEndAddr = WPTR_END_ADDR;
 
 int initTimer();
+void resetTimers();
 
 extern INSTRENTRY instrEntry[];
 
@@ -87,6 +88,8 @@ CPUSTATE highPriorityShadow;
 bool highPriorityShadowValid = false;
 InterruptReturnObserver interruptReturnObserver = nullptr;
 PeripheralPoller peripheralPoller = nullptr;
+RebootObserver rebootObserver = nullptr;
+uint64_t cpuCycles = 0;
 bool portableInstructionAbi = false;
 struct ExternalChannel {
   uint32_t capacity;
@@ -1212,7 +1215,8 @@ int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t
   cpuState.iptr = descriptorWords[3];
   cpuState.nWptr = 0;
   cpuState.running = true;
-  if (descriptor != NO_PROCESS) cpuState.breg = descriptor;
+  /* Areg, Breg and Creg are not saved and keep the trapped process's values (ST20-TP2
+   * datasheet 3.6.3); the descriptor is passed in the handler's entry workspace word 0. */
   return 0;
 }
 
@@ -1230,6 +1234,23 @@ void setInterruptReturnObserver(InterruptReturnObserver observer) {
 
 void setPeripheralPoller(PeripheralPoller poller) {
   peripheralPoller = poller;
+}
+
+void setRebootObserver(RebootObserver observer) {
+  rebootObserver = observer;
+}
+
+/* Cold boot as by reboot: every processor state returns to its reset value and execution
+ * restarts at START_ADDR (boot from ROM). Memory, including external RAM, is kept. */
+int rebootProcessor() {
+  omrState = {};
+  cpuState = {};
+  int result = initCPUState(false);
+  resetTimers();
+  if (!result && rebootObserver) result = rebootObserver();
+  cpuState.iptr = startAddr;
+  compat::println("NOTE: reboot, restarting at 0x{:08x}", startAddr);
+  return result;
 }
 
 int returnFromInterrupt() {
@@ -1750,8 +1771,13 @@ int transferShadowRegisters(uint32_t selection, uint32_t priority, uint32_t buff
     if (priority != cpuState.priority && priority != LOW_PRIORITY) return INVALID_SHADOW_ACCESS;
     if (bank->status & STATUS_INTERRUPTED_OPERATION_MASK) return INTERRUPTED_OPERATION_UNSUPPORTED;
   }
-  auto selectedWord = [selection](std::size_t index) {
-    return (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
+  /* The C2 core transfers four block-move words (7-10), not the five (7-11) the instruction
+   * set manual lists: OS20 (os20i.h NO_MOVE2D_WORDS, "Instruction set manual wrong") packs its
+   * per-priority queues so that word 11 belongs to the next queue. Word 11 is portable-only. */
+  const std::size_t recordWords = portable ? 12 : 11;
+  auto selectedWord = [selection, recordWords](std::size_t index) {
+    return index < recordWords &&
+           (selection & (index == 0 ? 1U : index <= 3 ? 2U : index <= 6 ? 4U : 8U)) != 0;
   };
   const uint32_t enablesMask = portable ? 0x00ff3fffU : 0xffff3fffU;
   const uint32_t globalMask = enablesMask & 0xffff0000U;
@@ -1874,7 +1900,9 @@ int restartProcess(uint32_t record) {
   if (interruptHandlerActive()) return TRAP_HANDLER_BLOCKED;
   bool portable = portableInstructionAbiEnabled();
   std::array<uint32_t, 12> words{};
-  for (int index = 0; index < 12; ++index) {
+  /* a native restart uses only the enables, control and evaluation-stack words */
+  int recordWords = portable ? 12 : 7;
+  for (int index = 0; index < recordWords; ++index) {
     int result = readProcessWord(record, index, words[static_cast<std::size_t>(index)]);
     if (result) return result;
   }
@@ -2582,7 +2610,12 @@ int printNextInstr(const CPUTrace &trace) {
 //					EXEC DECODED INSTRUCTION
 //				(Here the we tick the timers too)
 //////////////////////////////////////////////////////////////////////////
+uint64_t elapsedCpuCycles() {
+  return cpuCycles;
+}
+
 int advanceTimers(uint64_t cycles) {
+  cpuCycles += cycles;
   auto advanceClock = [cycles](uint32_t &clock, uint64_t &phase, uint32_t frequency) {
     uint64_t elapsed = phase + (cycles % CPU_CLOCK) * frequency;
     uint64_t ticks = (cycles / CPU_CLOCK) * frequency + elapsed / CPU_CLOCK;
@@ -2827,8 +2860,7 @@ const char *st20Error(int error) {
   }
 }
 
-int initTimer() {
-  // init the timer fields:
+void resetTimers() {
   omrState.ClockRegHP = timerGuess;
   omrState.ClockRegLP = timerGuess;
   omrState.ClockPhaseHP = 0;
@@ -2838,6 +2870,10 @@ int initTimer() {
   omrState.Enables = 0xffffc000;         // the initial state, see omr.h
                                          // bit 14 and 15 are reserved but set to 1
   //'ticking' code is into execInstr() subroutine
+}
+
+int initTimer() {
+  resetTimers();
   compat::println("CPU_CLOCK={:d} Hz\n HPTimer={:d} Hz\n LPTimer={:d} Hz",
                   CPU_CLOCK, HP_TIMER_HZ, LP_TIMER_HZ);
 

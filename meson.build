@@ -17,12 +17,18 @@ core_sources = files(
   'src/core/cpu/instructions.cpp',
   'src/core/cpu/st20.cpp',
   'src/core/memory/memory.cpp',
+  'src/soc/common/STi55xx_Asc.cpp',
+  'src/soc/common/STi55xx_Ssc.cpp',
   'src/soc/sti5512/STi5512_Devices.cpp',
+  'src/soc/sti5512/STi5512_PtiDma.cpp',
+  'src/soc/sti5512/STi5512_Pwm.cpp',
+  'src/soc/sti5512/STi5512_RegisterBlocks.cpp',
   'src/soc/sti5518/STi5518_Devices.cpp',
 )
 
 sources = core_sources + files(
   'src/main.cpp',
+  'src/board/DSR9500.cpp',
   'src/cli/cli_commands.cpp',
   'src/cli/cli_engine.cpp',
   'src/cli/cmds/control.cpp',

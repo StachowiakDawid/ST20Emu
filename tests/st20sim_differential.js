@@ -73,7 +73,7 @@ function fixtureScope(name) {
   if (name === 'causeerror') return 'enabled causes with group handlers; unexpected core control flow blocks completion';
   if (name === 'postnormsn') return 'native workspace exponent, shifts 0..64, denormal guards, exponent wrap/clamp and norm/postnormsn/roundsn composition';
   if (name === 'roundsn') return 'native biased exponent, nearest-even ties, sticky guards, subnormal carry and overflow';
-  if (nativeUnavailable.has(name)) return name === 'reboot' ? 'bounded probe; emulator deliberately excludes reboot' : 'zero native FP probe; emulator native FP format is unsupported';
+  if (nativeUnavailable.has(name)) return name === 'reboot' ? 'bounded probe; emulator reboot restarts at START_ADDR (boot from ROM), not compared' : 'zero native FP probe; emulator native FP format is unsupported';
   return 'boundary and seeded operands in native mode; defined architectural results only';
 }
 const boundaries = [0, 1, 2, 31, 32, 127, 128, 255, 256, 32767, 32768, 65535,

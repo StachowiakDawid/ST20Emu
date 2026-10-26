@@ -1,0 +1,55 @@
+#include "STi5512_PtiDma.h"
+#include "../common/STi55xx_Asc.h"
+
+#include <array>
+
+/*
+ * STi5512 Register Manual (7145562 B), section 20.1. The decoders are not modelled: an
+ * enabled channel 1-3 always finds its decoder requesting data, so the read pointer moves
+ * towards the write pointer (wrapping from top to base) and the data is discarded. Channel
+ * 0 is written by the transport controller, which is not modelled.
+ */
+namespace {
+constexpr uint32_t dmaBase = 0x20031000U;
+constexpr uint32_t dmaEnd = 0x20031063U;
+constexpr uint32_t baseRegister = 0x00 / 4;
+constexpr uint32_t topRegister = 0x10 / 4;
+constexpr uint32_t writeRegister = 0x20 / 4;
+constexpr uint32_t readRegister = 0x30 / 4;
+constexpr uint32_t enableRegister = 0x50 / 4;
+constexpr uint32_t bytesPerTick = 64;
+
+std::array<uint32_t, (dmaEnd + 1 - dmaBase) / 4> dma{};
+
+int readDma(void *, uint32_t address, int width, uint32_t *value) {
+  int result = checkWordAccess(address, width);
+  if (result) return result;
+  *value = dma[(address - dmaBase) / 4];
+  return 0;
+}
+
+int writeDma(void *, uint32_t address, int width, uint32_t value) {
+  int result = checkWordAccess(address, width);
+  if (result) return result;
+  dma[(address - dmaBase) / 4] = value;
+  return 0;
+}
+}
+
+MemoryDevice sti5512PtiDmaDevice() {
+  return {dmaBase, dmaEnd, nullptr, readDma, writeDma};
+}
+
+void resetSti5512PtiDma() {
+  dma = {};
+}
+
+void tickSti5512PtiDma() {
+  for (uint32_t channel = 1; channel < 4; ++channel) {
+    if (!(dma[enableRegister] & (1U << channel))) continue;
+    uint32_t &read = dma[readRegister + channel];
+    uint32_t write = dma[writeRegister + channel];
+    for (uint32_t count = 0; count < bytesPerTick && read != write; ++count)
+      read = read == dma[topRegister + channel] ? dma[baseRegister + channel] : read + 1;
+  }
+}

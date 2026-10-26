@@ -142,6 +142,12 @@ using InterruptReturnObserver = void (*)();
 using PeripheralPoller = int (*)();
 void setPeripheralPoller(PeripheralPoller poller);
 void setInterruptReturnObserver(InterruptReturnObserver observer);
+using RebootObserver = int (*)();
+/* called by rebootProcessor() so the SoC can return its devices to their reset state */
+void setRebootObserver(RebootObserver observer);
+int rebootProcessor();
+/* processor cycles counted by advanceTimers() since startup, for peripheral timing */
+uint64_t elapsedCpuCycles();
 int queueExternalInterrupt(uint32_t level, uint32_t workspace, uint32_t iptr, uint32_t status = 0);
 int serviceNativeInterrupt(uint32_t level, uint32_t handlerDescriptor, bool *accepted);
 bool interruptHandlerActive();
