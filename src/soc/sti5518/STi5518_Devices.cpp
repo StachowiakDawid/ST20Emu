@@ -8,6 +8,8 @@
 #include <utility>
 
 namespace {
+constexpr uint32_t sdramStart = 0xc0000000U;
+constexpr uint32_t sdramEnd = 0xc07fffffU;
 std::array<AscDevice, 2> ascDevices{{{0x20004000U, 9}, {0x20005000U, 8}}};
 constexpr uint32_t controllerBase = 0x20000000U;
 constexpr uint32_t routingBase = 0x20011000U;
@@ -87,6 +89,9 @@ int initSti5518Devices() {
   }
   resetDevices();
   for (auto &device : ascDevices) device.transmitted.clear();
+  /* unwritten shared SDRAM reads as zero: boot loaders (the DSR9500's among them) read a
+   * warm-restart mailbox there before anything has written it */
+  setZeroFillRange(sdramStart, sdramEnd);
   initialized = true;
   setPeripheralPoller(pollSti5518Devices);
   setInterruptReturnObserver(acknowledgeInterrupt);
@@ -96,6 +101,7 @@ int initSti5518Devices() {
 
 void shutdownSti5518Devices() {
   if (!initialized) return;
+  setZeroFillRange(1, 0);
   for (const auto &device : ascDevices) unregisterMemoryDevice(device.base);
   unregisterMemoryDevice(controllerBase);
   unregisterMemoryDevice(routingBase);

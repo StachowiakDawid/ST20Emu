@@ -56,15 +56,6 @@ template <typename... Args> void note(std::format_string<Args...> fmt, Args &&..
 }
 } // namespace compat
 
-// Helper to efficiently trim whitespace from string_view
-constexpr std::string_view trim(std::string_view sv) {
-  auto start = sv.find_first_not_of(" \t\r\n");
-  if (start == std::string_view::npos)
-    return {};
-  auto end = sv.find_last_not_of(" \t\r\n");
-  return sv.substr(start, end - start + 1);
-}
-
 // Helper utility for safe C++23 hexadecimal parsing
 template <typename T> static bool parseHex(const std::string &str, T &value) {
   if (str.empty())

@@ -1819,37 +1819,7 @@ int swapTimerList(unsigned char priority, uint32_t front, uint32_t *previous) {
   return 0;
 }
 
-int st20Init(PARMS *userParms) {
-  int i;
-  uint32_t value;
-
-  for (i = 0; i < userParms->nParms; i++) {
-    if (!strcmp(userParms->parameter[i], ST20_PRODUCT_ID_CH)) {
-      if (sscanf(userParms->value[i], "%" SCNx32, &value) == 1) {
-        st20ProductId = value;
-      }
-    } else if (!strcmp(userParms->parameter[i], MEM_START_VAL_CH)) {
-      if (sscanf(userParms->value[i], "%" SCNx32, &value) == 1) {
-        memStartVal = value;
-      }
-    } else if (!strcmp(userParms->parameter[i], TIMER_GUESS_CH)) {
-      if (sscanf(userParms->value[i], "%" SCNx32, &value) == 1) {
-        timerGuess = value;
-      }
-    } else if (!strcmp(userParms->parameter[i], WPTR_END_ADDR_CH)) {
-      if (sscanf(userParms->value[i], "%" SCNx32, &value) == 1) {
-        wptrEndAddr = value;
-      }
-    } else if (!strcmp(userParms->parameter[i], START_ADDR_CH)) {
-      if (sscanf(userParms->value[i], "%" SCNx32, &value) == 1) {
-        startAddr = value;
-      }
-    }
-  }
-
-  compat::print("START_ADDR=0x{:08x}\nMEM_START_VAL=0x{:08x}\nST20_PRODUCT_ID=0x{:08x}\nTIMER_GUESS=0x{:08x}\nWPTR_END_ADDR=0x{:08x}\n",
-                startAddr, memStartVal, st20ProductId, timerGuess, wptrEndAddr);
-
+int st20Init() {
   initCPUState();
   initWatch();
   // added for timers

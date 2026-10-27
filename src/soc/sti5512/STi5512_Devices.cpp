@@ -21,6 +21,8 @@
  * ASC0 = 10, PWM and capture = 11, video decoder = 21.
  */
 namespace {
+constexpr uint32_t sdramStart = 0xc0000000U;
+constexpr uint32_t sdramEnd = 0xc07fffffU;
 constexpr uint32_t controllerBase = 0x20000000U;
 constexpr uint32_t levelBase = 0x20011000U;
 constexpr uint32_t levelSources = 23;
@@ -130,6 +132,9 @@ int initSti5512Devices(uint8_t revision) {
   videoRevision = revision;
   resetDevices();
   for (auto &device : ascDevices) device.transmitted.clear();
+  /* unwritten shared SDRAM reads as zero: boot loaders (the DSR9500's among them) read a
+   * warm-restart mailbox there before anything has written it */
+  setZeroFillRange(sdramStart, sdramEnd);
   initialized = true;
   setPeripheralPoller(pollSti5512Devices);
   setInterruptReturnObserver(acknowledgeInterrupt);
@@ -139,6 +144,7 @@ int initSti5512Devices(uint8_t revision) {
 
 void shutdownSti5512Devices() {
   if (!initialized) return;
+  setZeroFillRange(1, 0);
   unregisterDevices();
   setPeripheralPoller(nullptr);
   setInterruptReturnObserver(nullptr);

@@ -18,7 +18,6 @@
 #include <condition_variable>
 #include <ctime>
 #include <deque>
-#include <fstream>
 #include <mutex>
 #include <system_error>
 #include <thread>
@@ -28,94 +27,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
-uint64_t warnInstr = WARN_UNPROMPTED_INSTR;
-
-void readParms(PARMS *userParms) {
-  userParms->nParms = 0;
-
-  std::ifstream parmFp{INI_FILE};
-  if (!parmFp) {
-    compat::println(stderr, "Cannot open INI file {}\nUsing program defaults", INI_FILE);
-    return;
-  }
-
-  std::string line;
-  while (std::getline(parmFp, line)) {
-    std::string_view sv = trim(line);
-
-    // Ignore empty lines and comments
-    if (sv.empty() || sv.front() == COMMENT_CHAR) {
-      continue;
-    }
-
-    auto eqPos = sv.find('=');
-    if (eqPos == std::string_view::npos) {
-      continue;
-    }
-
-    std::string_view key = trim(sv.substr(0, eqPos));
-    std::string_view val = trim(sv.substr(eqPos + 1));
-
-    if (key.empty() || val.empty()) {
-      continue;
-    }
-
-    // Safely copy to the legacy C-struct fixed buffers
-    auto copySafe = [](char *dest, std::string_view src, size_t max_size) {
-      size_t len = std::min(src.size(), max_size - 1);
-      std::memcpy(dest, src.data(), len);
-      dest[len] = '\0'; // Ensure null-termination
-    };
-
-    copySafe(userParms->parameter[userParms->nParms], key, PARM_SIZE);
-    copySafe(userParms->value[userParms->nParms], val, PARM_SIZE);
-
-    userParms->nParms++;
-
-    if (userParms->nParms >= MAX_PARMS) {
-      compat::println(stderr, "WARNING: INI file exceeds max parameters ({})", MAX_PARMS);
-      break;
-    }
-  }
-}
-
-void st20emuInit(const PARMS *userParms) {
-  uint32_t zeroFillStart{1};
-  uint32_t zeroFillEnd{0};
-  for (int i{0}; i < userParms->nParms; ++i) {
-    uint64_t value{0};
-    std::string_view valStr{userParms->value[i]};
-    int base{10};
-
-    if (valStr.starts_with("0x") || valStr.starts_with("0X")) {
-      valStr.remove_prefix(2);
-      base = 16;
-    }
-
-    auto [ptr, ec] = std::from_chars(valStr.data(), valStr.data() + valStr.size(), value, base);
-
-    if (ec == std::errc{}) {
-      if (!std::strcmp(userParms->parameter[i], MAX_UNPROMPTED_INSTR_CH)) {
-        maxInstr = value;
-      } else if (!std::strcmp(userParms->parameter[i], WARN_UNPROMPTED_INSTR_CH)) {
-        warnInstr = value;
-      } else if (!std::strcmp(userParms->parameter[i], UNDEFINED_WORD_CH)) {
-        undefinedWord = static_cast<uint32_t>(value);
-      } else if (!std::strcmp(userParms->parameter[i], ZERO_FILL_START_CH)) {
-        zeroFillStart = static_cast<uint32_t>(value);
-      } else if (!std::strcmp(userParms->parameter[i], ZERO_FILL_END_CH)) {
-        zeroFillEnd = static_cast<uint32_t>(value);
-      }
-    }
-  }
-
-  setZeroFillRange(zeroFillStart, zeroFillEnd);
-  compat::println("MAX_UNPROMPTED_INSTR={}\nWARN_UNPROMPTED_INSTR={}\nUNDEFINED_WORD=0x{:08x}",
-                  maxInstr, warnInstr, undefinedWord);
-  if (zeroFillStart <= zeroFillEnd)
-    compat::println("ZERO_FILL=0x{:08x}-0x{:08x}", zeroFillStart, zeroFillEnd);
-}
+constexpr uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
+constexpr uint64_t warnInstr = WARN_UNPROMPTED_INSTR;
 
 /* serial (ASC) output of the emulated SoC, printed one line at a time as "ASCn> text" */
 static bool serialSti5512 = false;
@@ -463,13 +376,9 @@ int main(int argc, char **argv) {
   // instruction is ready only when the first instruction is fetched, not before the loop
   // otherwise it would start at 0x7ffffffc instead of 0x7ffffffe
   bool instructionReady{false};
-  PARMS userParms{};
   cli::CliEngine cli;
 
-  readParms(&userParms);
-
-  st20emuInit(&userParms);
-  st20Init(&userParms);
+  st20Init();
   memoryInit();
   compat::println("SoC: {}", soc);
   if (soc == "sti5512") compat::println("VID_REV: 0x{:02x}", socRevision);

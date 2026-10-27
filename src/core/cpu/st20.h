@@ -14,14 +14,11 @@
 
 /* this is the starting address for CPU execution */
 #define START_ADDR 0x7FFFFFFE
-#define START_ADDR_CH "START_ADDR"
 extern uint32_t startAddr;
 
 #define ST20_PRODUCT_ID 0x2D4C9041
-#define ST20_PRODUCT_ID_CH "ST20_PRODUCT_ID"
 
 #define MEM_START_VAL 0x80000140
-#define MEM_START_VAL_CH "MEM_START_VAL"
 
 #define MINIMUM_INTEGER 0x80000000
 #define MAXIMUM_INTEGER 0x7FFFFFFF
@@ -29,7 +26,6 @@ inline constexpr int32_t MostPos = INT32_MAX;
 inline constexpr int32_t MostNeg = INT32_MIN;
 
 #define TIMER_GUESS 0x00000000
-#define TIMER_GUESS_CH "TIMER_GUESS"
 
 #define LOW_PRIORITY 1
 #define HIGH_PRIORITY 0
@@ -84,7 +80,6 @@ inline constexpr uint32_t ALT_NONE_SELECTED = 0xffffffffU;
 #define MAX_INT ((1 << NBITS) - 1)
 
 #define WPTR_END_ADDR 0x1FFFFFFF
-#define WPTR_END_ADDR_CH "WPTR_END_ADDR"
 #define MAX_WPTR 0x2000
 #define WPTR_PRINT_COLS 4
 
@@ -201,7 +196,7 @@ typedef struct watch_struct {
   int nWptr;
 } WATCH;
 
-int st20Init(PARMS *);
+int st20Init();
 int initCPUState(void);
 int initCPUState(bool analysed);
 int loadCPUState(const char *);

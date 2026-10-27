@@ -1142,10 +1142,9 @@ static void testMemoryReaders() {
 }
 
 static void testRuntimeDefaults() {
-  PARMS parms{1, {TIMER_GUESS_CH}, {"0x12345678"}};
-  st20Init(&parms);
-  expect("configured high priority clock", omrState.ClockRegHP, 0x12345678);
-  expect("configured low priority clock", omrState.ClockRegLP, 0x12345678);
+  st20Init();
+  expect("initial high priority clock", omrState.ClockRegHP, TIMER_GUESS);
+  expect("initial low priority clock", omrState.ClockRegLP, TIMER_GUESS);
   undefinedWord = 0xa5a5a5a5;
   reset(64, 1, 2);
   lshl_(0);

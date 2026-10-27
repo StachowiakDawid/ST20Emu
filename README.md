@@ -75,13 +75,10 @@ By default the image is placed immediately below `0x80000000` and execution star
 
 Omit `--batch` to run interactively. Use `--help` for all options.
 
-The emulator reads its settings from `st20emu.ini` in the current directory.
-
-> **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
-
-`UNDEFINED_WORD` sets the pattern for undefined registers, memory and results (default `0xCCCCCCCC`), and `TIMER_GUESS` the initial value of both priority clocks.
-
-`ZERO_FILL_START`/`ZERO_FILL_END` (inclusive, hexadecimal) set an address range whose unwritten bytes read as zero instead of stopping with an uninitialised-memory error. The shipped file covers SDRAM `0xc0000000`-`0xc07fffff`, where boot loaders such as the DSR9500's read a warm-restart mailbox before anything has written it. Remove both lines to trap on every unwritten byte.
+Undefined registers, memory values and instruction results read as `0xCCCCCCCC`. Reading
+unwritten memory stops with an error, except in the shared SDRAM (`0xc0000000`-`0xc07fffff`),
+which reads as zero because boot loaders such as the DSR9500's read a warm-restart mailbox
+there before anything has written it.
 
 ### SoC Selection
 
@@ -107,7 +104,7 @@ Values, addresses and indexes are hexadecimal; `register` is `a`, `b`, `c` or `i
 | Command | Syntax | Description |
 | --- | --- | --- |
 | `ENTER` | _(Press Enter)_ | Executes the next instruction. |
-| `g` | `g` | Runs until a watch condition is met or `MAX_UNPROMPTED_INSTR` instructions pass (10,000,000 in the shipped INI). Press `g` again to stop. |
+| `g` | `g` | Runs until a watch condition is met or 10,000,000 instructions pass. Press `g` again to stop. |
 | `s` | `s register value` | Stops execution when the register reaches the value. |
 | `a`, `b`, `c`, `i` | `a value` | Sets the A, B, C register or Iptr. |
 | `w` | `w index value` | Sets workspace word `index`. |
