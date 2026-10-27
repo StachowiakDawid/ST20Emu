@@ -18,6 +18,7 @@ core_sources = files(
   'src/core/cpu/st20.cpp',
   'src/core/memory/memory.cpp',
   'src/soc/common/STi55xx_Asc.cpp',
+  'src/soc/common/STi55xx_Inc.cpp',
   'src/soc/common/STi55xx_Ssc.cpp',
   'src/soc/sti5512/STi5512_Devices.cpp',
   'src/soc/sti5512/STi5512_Display.cpp',

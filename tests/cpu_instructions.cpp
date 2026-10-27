@@ -3979,7 +3979,7 @@ static void testSti5518Devices() {
   omrState.Enables |= LP_EXTERNALEVENT_ENB;
   expect("masked ASC IRQ poll", pollSti5518Devices() != 0, 0);
   expect("controller mask defers ASC IRQ", interruptHandlerActive(), 0);
-  storeBytes(0x200000c4, 4, 0x40);
+  storeBytes(0x200000c4, 4, 0x10040);
   omrState.Enables &= ~static_cast<uint32_t>(LP_EXTERNALEVENT_ENB);
   expect("globally masked ASC IRQ poll", pollSti5518Devices() != 0, 0);
   expect("CPU mask defers ASC IRQ", interruptHandlerActive(), 0);
@@ -4014,6 +4014,8 @@ static void testSti5518Devices() {
   expect("ASC RX rejects writes", storeBytes(0x20005008, 4, 1) == DEVICE_ACCESS_UNSUPPORTED, 1);
   expect("ASC status rejects writes", storeBytes(0x20005014, 4, 1) == DEVICE_ACCESS_UNSUPPORTED, 1);
   expect("ASC rejects unsupported byte access", readBytes(0x20005014, 1, &value) == INVALID_DEVICE_ACCESS, 1);
+  readBytes(0x200000c0, 4, &value);
+  expect("controller set mask bit 16 is GloEn", value, 0x10040);
   storeBytes(0x200000c8, 4, 0x10000);
   readBytes(0x200000c0, 4, &value);
   expect("controller clear all mask", value, 0);
@@ -4024,7 +4026,7 @@ static void testSti5518Devices() {
   storeBytes(0x20011020, 4, 6);
   storeBytes(0x20000018, 4, 0x184021);
   storeBytes(0x20000058, 4, 1);
-  storeBytes(0x200000c4, 4, 0x40);
+  storeBytes(0x200000c4, 4, 0x10040);
   storeBytes(0x2000400c, 4, 0x1189);
   storeBytes(0x20004010, 4, 5);
   storeBytes(0x200111b4, 4, 1U << 9);

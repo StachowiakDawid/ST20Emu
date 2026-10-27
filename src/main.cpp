@@ -3,6 +3,7 @@
 
 #include "cli/cli_engine.h"
 #include "common/defines.h"
+#include "core/cpu/omr.h"
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
 #include "board/DSR9500.h"
@@ -293,11 +294,51 @@ static int runBatch() {
   return 1;
 }
 
+extern CPUSTATE cpuState;
+extern OMRSTATE omrState;
+
+/* free-runs count instructions without the prompt (benchmarks, the profile-guided build's
+ * training run), then reports the speed */
+static int runFree(uint64_t count) {
+  compat::notesEnabled = false;
+  int result = decodeNextInstr();
+  if (result) {
+    compat::println("Cannot fetch instruction: {}", cpuErrorText(result));
+    return 1;
+  }
+  auto start = std::chrono::steady_clock::now();
+  uint64_t executed = 0;
+  while (executed < count) {
+    RunResult run = runInstructions(std::min<uint64_t>(count - executed, 1000));
+    executed += run.completed;
+    if (run.stopped) {
+      ++executed;
+      result = run.execResult ? run.execResult : decodeNextInstr();
+      printSerialOutput(true);
+      if (run.execResult) compat::println("Execution stopped: {}", cpuErrorText(result));
+      else if (result) compat::println("Cannot fetch instruction: {}", cpuErrorText(result));
+      else compat::println("Watch condition encountered");
+      break;
+    }
+    printSerialOutput(false);
+  }
+  printSerialOutput(true);
+  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  compat::println("Executed {} instructions in {:.2f} s ({:.2f} MIPS)", executed, seconds,
+                  static_cast<double>(executed) / seconds / 1e6);
+  compat::println("A={:08x} B={:08x} C={:08x} Iptr={:08x} Wptr={:08x} Priority={} ClockHP={:08x} "
+                  "ClockLP={:08x} Cycles={}",
+                  cpuState.areg, cpuState.breg, cpuState.creg, cpuState.iptr, cpuState.wptr, cpuState.priority,
+                  omrState.ClockRegHP, omrState.ClockRegLP, elapsedCpuCycles());
+  return result ? 1 : 0;
+}
+
 int main(int argc, char **argv) {
   std::string firmware;
   uint32_t loadAddress = 0;
   bool addressSpecified = false;
   bool batch = false;
+  uint64_t runCount = 0;
   std::string_view soc = "sti5518";
   uint32_t socRevision = 0;
   bool revisionSpecified = false;
@@ -305,18 +346,29 @@ int main(int argc, char **argv) {
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500] [--firmware FILE] [--address HEX] [--batch]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--no-fast-path]\n"
               "  --soc NAME       Emulated SoC (default: sti5518)\n"
               "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
               "  --board NAME     Board parts outside the SoC: dsr9500 (STi5512 only)\n"
                       "  --firmware FILE  Load raw firmware at startup\n"
                       "  --address HEX    Load and entry address (0/default: auto-place, START_ADDR entry)\n"
-                      "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt",
+                      "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt\n"
+                      "  --run COUNT      Run COUNT instructions without the prompt, then report the speed\n"
+                      "  --no-fast-path   Take the full timer/scheduler path for every instruction (reference)",
                       argv[0]);
       return 0;
     }
     if (option == "--batch") {
       batch = true;
+    } else if (option == "--no-fast-path") {
+      setFastPath(false);
+    } else if (option == "--run" && index + 1 < argc) {
+      std::string_view value = argv[++index];
+      auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), runCount);
+      if (error != std::errc{} || end != value.data() + value.size() || runCount == 0) {
+        compat::println(stderr, "Invalid instruction count: {}", value);
+        return 2;
+      }
     } else if (option == "--soc" && index + 1 < argc) {
       soc = argv[++index];
       if (soc != "sti5518" && soc != "sti5512") {
@@ -364,8 +416,12 @@ int main(int argc, char **argv) {
     compat::println(stderr, "--soc-revision requires --soc sti5512");
     return 2;
   }
-  if ((batch || addressSpecified) && firmware.empty()) {
-    compat::println(stderr, "--batch and --address require --firmware FILE");
+  if ((batch || runCount || addressSpecified) && firmware.empty()) {
+    compat::println(stderr, "--batch, --run and --address require --firmware FILE");
+    return 2;
+  }
+  if (batch && runCount) {
+    compat::println(stderr, "--batch and --run can't be combined");
     return 2;
   }
 
@@ -443,18 +499,45 @@ int main(int argc, char **argv) {
     compat::println("Read {} bytes from {}", dataLength, firmware);
   }
   if (batch) return runBatch();
+  if (runCount) return runFree(runCount);
 
   compat::println("");
 
   // throttle how often we ask the OS for keyboard input
-  constexpr uint64_t KEY_POLL_INTERVAL = 1000;
+  constexpr uint64_t KEY_POLL_INTERVAL = 100000;
   constexpr uint64_t SERIAL_INTERVAL = 1000;
   uint64_t serialCount = 0;
+  uint64_t warnCountdown = warnInstr; // counts down instead of a division every instruction
 
   while (!cli.is_quit_requested()) {
+    /*
+     * free run: execute straight through to the next instruction this loop has to look at
+     * (serial output, progress message, key poll, instruction limit). An instruction that
+     * stops the run is handed to the regular path below as already executed.
+     */
+    bool executed = false;
+    int result = 0;
+    if (instructionReady && !cli.needs_prompt()) {
+      uint64_t quiet = std::min({SERIAL_INTERVAL - serialCount % SERIAL_INTERVAL, maxInstr - instrCount,
+                                 warnCountdown, KEY_POLL_INTERVAL - instrCount % KEY_POLL_INTERVAL});
+      if (quiet > 1) {
+        compat::notesEnabled = false;
+        RunResult run = runInstructions(quiet - 1);
+        serialCount += run.completed;
+        instrCount += run.completed;
+        warnCountdown -= run.completed;
+        if (!run.stopped) continue;
+        executed = true;
+        result = run.execResult;
+        watchTripped = run.watchTripped;
+      }
+    }
+
     if (instructionReady) {
-      compat::notesEnabled = cli.needs_prompt();
-      int result = execInstr(&watchTripped);
+      if (!executed) {
+        compat::notesEnabled = cli.needs_prompt();
+        result = execInstr(&watchTripped);
+      }
       if (result || ++serialCount % SERIAL_INTERVAL == 0) printSerialOutput(result != 0);
       if (result) {
         compat::println("Execution stopped: {}", cpuErrorText(result));
@@ -472,7 +555,8 @@ int main(int argc, char **argv) {
         compat::println("We've run {} instr without encountering a watch  curr iptr:{:08x}",
                         instrCount, get_iptr());
         cli.set_need_prompt(true);
-      } else if (instrCount % warnInstr == 0) {
+      } else if (--warnCountdown == 0) {
+        warnCountdown = warnInstr;
         compat::println("Executed {} of {} instr before next prompt  curr iptr: {:08x}", instrCount,
                         maxInstr, get_iptr());
       }
@@ -523,6 +607,7 @@ int main(int argc, char **argv) {
          */
         if (!cli.needs_prompt()) {
           instrCount = 0;
+          warnCountdown = warnInstr;
         }
       }
 

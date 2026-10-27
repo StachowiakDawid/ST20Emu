@@ -5,44 +5,15 @@
 #include "../common/STi55xx_Inc.h"
 
 #include <array>
-#include <bit>
 #include <utility>
 
 namespace {
 std::array<AscDevice, 2> ascDevices{{{0x20004000U, 9}, {0x20005000U, 8}}};
 constexpr uint32_t controllerBase = 0x20000000U;
 constexpr uint32_t routingBase = 0x20011000U;
-std::array<uint32_t, 0x10c / 4> controller{};
+InterruptController controller{controllerBase, true};
 std::array<uint32_t, 0x1f0 / 4> routing{};
-std::array<bool, 8> previousLevels{};
 bool initialized = false;
-uint32_t softwarePending = 0;
-uint32_t hardwarePending = 0;
-
-int readController(void *, uint32_t address, int width, uint32_t *value) {
-  int result = checkWordAccess(address, width);
-  if (result) return result;
-  *value = controller[(address - controllerBase) / 4];
-  return 0;
-}
-
-int writeController(void *, uint32_t address, int width, uint32_t value) {
-  int result = checkWordAccess(address, width);
-  if (result) return result;
-  uint32_t offset = address - controllerBase;
-  uint32_t bits = value & 0x10000U ? 0xffU : value & 0xffU;
-  if (offset == 0xc4) controller[0xc0 / 4] |= bits;
-  else if (offset == 0xc8) controller[0xc0 / 4] &= ~bits;
-  else if (offset == 0xc0) controller[0xc0 / 4] = value & 0xffU;
-  else if (offset == 0x84) softwarePending |= bits;
-  else if (offset == 0x88) { softwarePending &= ~bits; hardwarePending &= ~bits; }
-  else if (offset == 0x80) softwarePending = value & 0xffU;
-  else if (offset == 0x104) controller[0x100 / 4] |= bits;
-  else if (offset == 0x108) controller[0x100 / 4] &= ~bits;
-  else controller[offset / 4] = value;
-  controller[0x80 / 4] = softwarePending | hardwarePending;
-  return 0;
-}
 
 int readRouting(void *, uint32_t address, int width, uint32_t *value) {
   int result = checkWordAccess(address, width);
@@ -62,21 +33,15 @@ int writeRouting(void *, uint32_t address, int width, uint32_t value) {
 }
 
 void acknowledgeInterrupt() {
-  uint32_t &executing = controller[0x100 / 4];
-  if (executing) {
-    int level = std::bit_width(executing) - 1;
-    if (level > activeExternalInterruptLevel()) executing &= ~(1U << level);
-  }
+  acknowledgeInc(controller);
 }
 
 int resetDevices() {
   for (auto &device : ascDevices) resetAsc(device);
-  controller = {};
+  resetInc(controller);
   routing = {};
   routing[0x1bc / 4] = 0x7fffffffU;
   for (uint32_t source = 0; source < 31; ++source) routing[0x100 / 4 + source] = 1;
-  previousLevels = {};
-  softwarePending = hardwarePending = 0;
   return 0;
 }
 }
@@ -94,31 +59,7 @@ int pollSti5518Devices() {
     if (routed) routedLevels |= 1U << routing[device.source];
   }
   routing[0x7c / 4] = rawSources;
-  for (uint32_t level = 0; level < 8; ++level) {
-    bool line = (routedLevels & (1U << level)) != 0;
-    uint32_t mode = controller[0x40 / 4 + level] & 7U;
-    uint32_t bit = 1U << level;
-    if (mode == 1 || mode == 2) hardwarePending &= ~bit;
-    if (triggered(mode, line, previousLevels[level])) hardwarePending |= bit;
-    previousLevels[level] = line;
-  }
-  controller[0x80 / 4] = hardwarePending | softwarePending;
-  for (int level = 7; level >= 0; --level) {
-    uint32_t bit = 1U << level;
-    if (!(controller[0x80 / 4] & controller[0xc0 / 4] & bit) || (controller[0x100 / 4] & bit)) continue;
-    if (controller[static_cast<std::size_t>(level)] == 0) continue;
-    bool accepted = false;
-    int result = serviceNativeInterrupt(static_cast<uint32_t>(level), controller[static_cast<std::size_t>(level)], &accepted);
-    if (result) return result;
-    if (accepted) {
-      softwarePending &= ~bit;
-      hardwarePending &= ~bit;
-      controller[0x80 / 4] &= ~bit;
-      controller[0x100 / 4] |= bit;
-      break;
-    }
-  }
-  return 0;
+  return pollInc(controller, routedLevels);
 }
 
 int initSti5518Devices() {
@@ -132,7 +73,7 @@ int initSti5518Devices() {
       }
       ++registered;
     }
-    int result = registerMemoryDevice({controllerBase, controllerBase + 0x10b, nullptr, readController, writeController});
+    int result = registerMemoryDevice({controllerBase, controllerBase + incRegisterEnd, &controller, readInc, writeInc});
     if (result) {
       for (const auto &device : ascDevices) unregisterMemoryDevice(device.base);
       return result;

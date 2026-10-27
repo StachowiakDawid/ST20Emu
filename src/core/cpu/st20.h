@@ -225,6 +225,19 @@ int printOMRState();
 int decodeNextInstr();
 int printNextInstr();
 int execInstr(int *);
+
+/* outcome of runInstructions: the instructions that ran normally, then the one that stopped it */
+struct RunResult {
+  uint64_t completed = 0;
+  bool stopped = false; // it failed, tripped a watch, or the instruction after it can't be decoded
+  int execResult = 0;
+  int watchTripped = 0;
+};
+/* executes and decodes up to count instructions back to back: the free-running fast path */
+RunResult runInstructions(uint64_t count);
+/* false makes runInstructions take the full timer/scheduler path for every instruction (the
+ * reference the fast path must match) */
+void setFastPath(bool enabled);
 int initTimer();
 int advanceTimers(uint64_t cycles);
 void resetScheduler();

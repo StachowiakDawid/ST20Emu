@@ -50,6 +50,7 @@
 #include <unordered_map>
 #include <deque>
 #include <bit>
+#include <utility>
 #include <vector>
 
 // cannot use static when sharing with other C objects
@@ -90,11 +91,28 @@ PeripheralPoller peripheralPoller = nullptr;
 RebootObserver rebootObserver = nullptr;
 uint64_t cpuCycles = 0;
 
+/* The clocks and the timeslice phase follow cpuCycles lazily inside runInstructions: they are
+ * brought up to date (syncClocks) when a tick is due, before an instruction that may look at
+ * them, and whenever runInstructions returns. Everywhere else clockCycles == cpuCycles. */
+uint64_t clockCycles = 0;   // cycles already applied to them
+uint64_t nextClockTick = 0; // cpuCycles at which the next clock or timeslice tick falls
+
+/* True while the scheduler has nothing to do after an instruction that leaves it alone (see
+ * schedulerQuiet): runInstructions then skips the per-instruction timer and scheduler checks
+ * for such instructions until a tick or a peripheral poll is due. Anything that may wake or
+ * switch processes clears it. */
+bool quiescent = false;
+bool fastPathEnabled = true;
+
 /* peripherals are polled every peripheralPollCycles, and right after a device register access
  * or an interrupt return, rather than after every instruction */
 constexpr uint64_t peripheralPollCycles = 64;
 uint64_t lastPeripheralPoll = 0;
 bool peripheralPollRequested = true;
+
+/* set when execInstr has just polled the scheduler; the decode that follows skips its own poll
+ * while the process keeps running, since nothing can have changed in between */
+bool freshPoll = false;
 bool portableInstructionAbi = false;
 struct ExternalChannel {
   uint32_t capacity;
@@ -154,6 +172,26 @@ struct DecodedInstr {
 };
 constexpr std::size_t decodeCacheSize = std::size_t{1} << 16;
 std::array<DecodedInstr, decodeCacheSize> decodeCache{};
+
+/* Straight runs of decoded instructions, up to a control transfer, an instruction that may
+ * touch the scheduler, or the end of the memory block, so the free-running loop doesn't look
+ * every instruction up on its own. Reused while the memory block's write version holds. */
+struct BlockInstr {
+  int (*function)(uint32_t);
+  uint32_t operand;
+  uint32_t code;
+  uint32_t cycles;
+  uint32_t length;
+  bool pure; // leaves the scheduler and the timers alone (see quiescent)
+};
+struct CodeBlock {
+  uint32_t iptr;
+  uint32_t version;
+  int count; // 0: empty slot
+  BlockInstr instrs[16];
+};
+constexpr std::size_t codeBlockCacheSize = std::size_t{1} << 12;
+std::array<CodeBlock, codeBlockCacheSize> codeBlocks{};
 
 /* records a workspace met while walking a process list; false when it was already met (a
  * cyclic list). Callers keep their buffer static so the per-instruction walks don't allocate. */
@@ -397,6 +435,7 @@ bool validRuntime(const RuntimeSnapshot &snapshot) {
 }
 
 void restoreRuntime(const RuntimeSnapshot &snapshot) {
+  quiescent = false;
   cpuState.wptr = snapshot[RuntimeWorkspace];
   cpuState.priority = static_cast<unsigned char>(snapshot[RuntimePriority]);
   cpuState.running = snapshot[RuntimeRunning] != 0;
@@ -697,8 +736,7 @@ int dispatchProcess() {
   return 0;
 }
 
-int releaseTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t ticksLP) {
-  if (pendingTimerTrap.cause) return 0;
+[[gnu::noinline]] int releaseDueTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t ticksLP) {
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY),
                                  static_cast<unsigned char>(LOW_PRIORITY)}) {
     uint32_t enable = priority == HIGH_PRIORITY ? HP_TIMER_ALRM_ENB : LP_TIMER_ALRM_ENB;
@@ -768,8 +806,30 @@ int releaseTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t tic
   return 0;
 }
 
+/* whether a timer queue's alarm has been reached, so releaseTimers has work to do */
+inline bool timersDue(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t ticksLP) {
+  if (pendingTimerTrap.cause) return false;
+  auto due = [](uint32_t enable, unsigned char priority, uint32_t oldClock, uint64_t ticks) {
+    uint32_t alarm = omrState.TnextReg[priority];
+    return (omrState.Enables & enable) && omrState.TptrReg[priority] != NO_PROCESS &&
+           (timeReached(oldClock, alarm) || ticks >= alarm - oldClock);
+  };
+  return due(HP_TIMER_ALRM_ENB, HIGH_PRIORITY, oldHP, ticksHP) || due(LP_TIMER_ALRM_ENB, LOW_PRIORITY, oldLP, ticksLP);
+}
+
+/* runs twice per instruction: check the alarms inline, and only walk the timer queues (a
+ * large function) once one has been reached */
+inline int releaseTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t ticksLP) {
+  if (!timersDue(oldHP, oldLP, ticksHP, ticksLP)) return 0;
+  quiescent = false;
+  return releaseDueTimers(oldHP, oldLP, ticksHP, ticksLP);
+}
+
 int prepareProcess() {
   if (omrState.halted) return CPU_HALTED;
+  bool polled = std::exchange(freshPoll, false);
+  if (polled && cpuState.running) return 0;
+  quiescent = false;
   int result = pollTimers();
   if (result || cpuState.running) return result;
   uint64_t soonest = UINT64_MAX;
@@ -813,6 +873,7 @@ std::size_t cpuRuntimeSnapshotSize() {
 }
 
 void resetScheduler() {
+  quiescent = false;
   for (int priority = 0; priority < 2; ++priority) {
     omrState.ProcQueueFPtr[priority] = NO_PROCESS;
     omrState.ProcQueueBPtr[priority] = NO_PROCESS;
@@ -859,6 +920,7 @@ int insertReadyQueue(uint32_t priority, uint32_t front, uint32_t back) {
 }
 
 int enqueueProcess(uint32_t workspace, unsigned char priority) {
+  quiescent = false;
   if (priority > LOW_PRIORITY || workspace == NO_PROCESS || (workspace & 3U))
     return INVALID_PROCESS_LIST;
   int result = writeProcessWord(workspace, pw::Link, NO_PROCESS);
@@ -875,6 +937,7 @@ int enqueueProcess(uint32_t workspace, unsigned char priority) {
 }
 
 int registerExternalChannel(uint32_t address, uint32_t capacity) {
+  quiescent = false;
   if ((address & 3U) || capacity == 0 || capacity > 1048576 || externalChannels.size() >= 1024 ||
       externalChannels.contains(address) || executingInstruction) return INVALID_CHANNEL;
   externalChannels.emplace(address, ExternalChannel{capacity, {}, {}});
@@ -917,6 +980,7 @@ int activeExternalInterruptLevel() {
 }
 
 int queueExternalInterrupt(uint32_t level, uint32_t workspace, uint32_t iptr, uint32_t status) {
+  quiescent = false;
   if (!portableInstructionAbiEnabled()) return PORTABLE_ABI_DISABLED;
   if (level >= 8 || workspace == 0 || (workspace & 3U) || (status & STATUS_INTERRUPTED_OPERATION_MASK))
     return INVALID_EXTERNAL_INTERRUPT;
@@ -1000,6 +1064,14 @@ int pollTimers() {
     result = peripheralPoller();
     if (result) return result;
   }
+  /* the common case, after nearly every instruction: the process keeps running and nothing below
+   * has work (no interrupt request or timer trap pending, no external channel, no preemption) */
+  if (cpuState.running && !pendingTimerTrap.cause && externalChannels.empty() &&
+      std::ranges::none_of(externalInterruptRequests, &ExternalInterruptRequest::pending) &&
+      (trapHandlerActive() || interruptHandlerActive() || cpuState.priority == HIGH_PRIORITY ||
+       omrState.ProcQueueFPtr[HIGH_PRIORITY] == NO_PROCESS || cpuState.interruptsDisabled ||
+       !(omrState.Enables & LP_PROCESS_INT_ENB)))
+    return 0;
   result = serviceExternalInterrupts();
   if (result) return result;
   result = pollExternalChannels();
@@ -1220,6 +1292,7 @@ int checkPeriodicTimeslice() {
 }
 
 int timesliceProcess() {
+  quiescent = false;
   if (omrState.ProcQueueFPtr[cpuState.priority] == NO_PROCESS) {
     cpuState.areg = cpuState.breg = cpuState.creg = undefinedWord;
     return 0;
@@ -1251,6 +1324,7 @@ bool trapHandlerActive() {
 }
 
 int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t descriptor) {
+  quiescent = false;
   if (omrState.halted) return CPU_HALTED;
   if (priority > LOW_PRIORITY || cause == 0 || (cause & (cause - 1)) || (cause & ~0x3fffU))
     return INVALID_TRAP_HANDLER;
@@ -1329,6 +1403,7 @@ int rebootProcessor() {
   cpuState.iptr = startAddr;
   compat::println("NOTE: reboot, restarting at 0x{:08x}", startAddr);
   peripheralPollRequested = true;
+  quiescent = false;
   return result;
 }
 
@@ -1397,6 +1472,7 @@ int returnFromInterrupt() {
   }
   if (interruptReturnObserver) interruptReturnObserver();
   peripheralPollRequested = true;
+  quiescent = false;
   return 0;
 }
 
@@ -2557,9 +2633,40 @@ int printEnablesRegState() {
  * Get the bytes for the next instruction and determine what the instruction
  * code and operand are
  */
+namespace {
+/*
+ * Decodes the instruction at address, accumulating its prefixes: pfix (2x) and nfix (6x) bytes
+ * build the operand, and an opr (Fx) byte turns it into an extended instruction code. The
+ * extended codes are offset by 0x10 so they don't clash with the direct ones, and lddevid
+ * (which would clash with ldprodid) gets its own code. At most maxLength bytes are read, which
+ * keeps a decode within one memory block.
+ */
+int decodeAt(uint32_t address, uint32_t maxLength, uint32_t &code, uint32_t &value, int &length,
+             unsigned char *bytes, std::size_t capacity) {
+  code = 0;
+  value = 0;
+  length = 0;
+  for (;;) {
+    if (static_cast<uint32_t>(length) >= maxLength) return READ_UNUSED_MEM;
+    uint32_t cByte = 0;
+    int result = readBytes(address + static_cast<uint32_t>(length), 1, &cByte);
+    if (result) return result;
+    if (static_cast<std::size_t>(length) < capacity) bytes[length] = static_cast<unsigned char>(cByte);
+    ++length;
+    value = (value << 4) + (cByte & 0x0F);
+    code = (cByte & 0xF0) >> 4;
+    if (code == 0x02) continue;
+    if (code == 0x06) {
+      value = ~value;
+      continue;
+    }
+    if (code == 0x0F) code = value == 0x17C ? LDDEVID : (value & 0x1FF) + 0x10;
+    return 0;
+  }
+}
+}
+
 int decodeNextInstr() {
-  bool foundInstr = false;
-  uint32_t cByte = 0;
   int result = 0;
   result = prepareProcess();
   if (result) return result;
@@ -2584,74 +2691,12 @@ int decodeNextInstr() {
     return 0;
   }
 
-  instrCode = 0;
-  operand = 0;
-  instrLength = 0;
-
-  /* keep reading a byte until we've found a non-prefix byte */
-  while (!foundInstr) {
-
-    /* read the next byte of the current instruction */
-    result = readBytes(cpuState.iptr + static_cast<uint32_t>(instrLength), 1, &cByte);
-    if (result) {
-      compat::println("{}", memoryError(result));
-      compat::println("Error occurred when reading instruction at {:08x}, offset {:02x}",
-                      cpuState.iptr, instrLength);
-      return (-1);
-    }
-
-    /* save the bytes that comprise the current instruction */
-    instrBytes[instrLength++] = static_cast<unsigned char>(cByte & 0xFF);
-
-    /* extract the data part of the current instruction byte */
-    operand <<= 4;
-    operand += cByte & 0x0F;
-
-    /* extract the instruction part of the current byte */
-    instrCode = cByte & 0xF0;
-    instrCode >>= 4;
-
-    /*
-     * The prefix encoded instructions are multi-byte instructions
-     * (either the data or the instruction is composed of multiple bytes).
-     * We have to accumulate all of the bytes in the instruction before
-     * we can determine what the instruction and the operand are.
-     */
-    switch (instrCode) {
-    case 0x02:
-      foundInstr = false;
-      break;
-
-    case 0x06:
-      operand = ~operand;
-      foundInstr = false;
-      break;
-
-    /*
-     * All multibyte instruction codes use Fx as the final byte in the
-     * instruction.  These instructions require no operands so the
-     * operand is used as an extended instruction code.
-     * We add 0x10 to the instruction code to avoid conflicts with
-     * the opcodes from the non-extended instructions.
-     * The lddevid code will end up with the same code as ldprodid.
-     *  So we'll map it to 0x200 to avoid the conflict.
-     */
-    case 0x0F:
-      if (operand == 0x17C) {
-        instrCode = LDDEVID;
-      } else {
-        instrCode = (operand & 0x1FF) + 0x10;
-      }
-
-      foundInstr = true;
-
-      break;
-
-    /* all of the non-Fx single byte instructions are handled here */
-    default:
-      foundInstr = true;
-      break;
-    }
+  result = decodeAt(cpuState.iptr, UINT32_MAX, instrCode, operand, instrLength, instrBytes, sizeof instrBytes);
+  if (result) {
+    compat::println("{}", memoryError(result));
+    compat::println("Error occurred when reading instruction at {:08x}, offset {:02x}",
+                    cpuState.iptr, instrLength);
+    return (-1);
   }
 
   uint32_t last = cpuState.iptr + static_cast<uint32_t>(instrLength) - 1U;
@@ -2723,35 +2768,179 @@ uint64_t elapsedCpuCycles() {
   return cpuCycles;
 }
 
-int advanceTimers(uint64_t cycles) {
-  cpuCycles += cycles;
-  auto advanceClock = [cycles](uint32_t &clock, uint64_t &phase, uint32_t frequency) {
+namespace {
+/* cpuCycles at which the next tick of an enabled clock, or of the timeslice, falls */
+uint64_t nextTick() {
+  auto cyclesToTick = [](uint64_t phase, uint64_t frequency) { return (CPU_CLOCK - phase + frequency - 1) / frequency; };
+  uint64_t cycles = omrState.halted ? UINT64_MAX : cyclesToTick(omrState.TimeslicePhase, 1000);
+  if (omrState.ClockEnables & HPTIMER_MASK) cycles = std::min(cycles, cyclesToTick(omrState.ClockPhaseHP, HP_TIMER_HZ));
+  if (omrState.ClockEnables & LPTIMER_MASK) cycles = std::min(cycles, cyclesToTick(omrState.ClockPhaseLP, LP_TIMER_HZ));
+  return cycles == UINT64_MAX ? UINT64_MAX : clockCycles + cycles;
+}
+
+/* brings the clocks and the timeslice up to cpuCycles; the clock ticks are returned so the
+ * caller can release the timers they made due */
+int applyClockCycles(uint64_t &ticksHP, uint64_t &ticksLP) {
+  uint64_t cycles = cpuCycles - clockCycles;
+  clockCycles = cpuCycles;
+  auto advanceClock = [cycles](uint32_t &clock, uint64_t &phase, uint32_t frequency) -> uint64_t {
+    /* most syncs don't reach the next tick: skip the divisions */
+    if (cycles < CPU_CLOCK && phase + cycles * frequency < CPU_CLOCK) {
+      phase += cycles * frequency;
+      return 0;
+    }
     uint64_t elapsed = phase + (cycles % CPU_CLOCK) * frequency;
     uint64_t ticks = (cycles / CPU_CLOCK) * frequency + elapsed / CPU_CLOCK;
     phase = elapsed % CPU_CLOCK;
     clock += static_cast<uint32_t>(ticks);
     return ticks;
   };
-  uint32_t oldHP = omrState.ClockRegHP;
-  uint32_t oldLP = omrState.ClockRegLP;
-  uint64_t ticksHP = 0;
-  uint64_t ticksLP = 0;
   if (omrState.ClockEnables & HPTIMER_MASK)
     ticksHP = advanceClock(omrState.ClockRegHP, omrState.ClockPhaseHP, HP_TIMER_HZ);
   if (omrState.ClockEnables & LPTIMER_MASK)
     ticksLP = advanceClock(omrState.ClockRegLP, omrState.ClockPhaseLP, LP_TIMER_HZ);
-  if (omrState.halted) return CPU_HALTED;
-  uint32_t unusedClock = 0;
-  uint64_t sliceTicks = advanceClock(unusedClock, omrState.TimeslicePhase, 1000);
-  auto ageQuantum = [sliceTicks](CPUSTATE &state) {
-    if (state.running && state.priority == LOW_PRIORITY)
-      state.timeslicePeriods = static_cast<uint32_t>(std::min<uint64_t>(2, state.timeslicePeriods + sliceTicks));
-  };
-  ageQuantum(cpuState);
-  if (lowPriorityShadowValid) ageQuantum(lowPriorityShadow);
-  for (TrapFrame &frame : trapFrames) ageQuantum(frame.caller);
-  int result = releaseTimers(oldHP, oldLP, ticksHP, ticksLP);
+  int result = 0;
+  if (omrState.halted) {
+    result = CPU_HALTED;
+  } else {
+    uint32_t unusedClock = 0;
+    uint64_t sliceTicks = advanceClock(unusedClock, omrState.TimeslicePhase, 1000);
+    auto ageQuantum = [sliceTicks](CPUSTATE &state) {
+      if (state.running && state.priority == LOW_PRIORITY)
+        state.timeslicePeriods = static_cast<uint32_t>(std::min<uint64_t>(2, state.timeslicePeriods + sliceTicks));
+    };
+    if (sliceTicks) {
+      ageQuantum(cpuState);
+      if (lowPriorityShadowValid) ageQuantum(lowPriorityShadow);
+      for (TrapFrame &frame : trapFrames) ageQuantum(frame.caller);
+    }
+  }
+  nextClockTick = nextTick();
+  return result;
+}
+
+/* applies the cycles not yet seen by the clocks, and releases the timers that became due */
+int syncClocks() {
+  uint32_t oldHP = omrState.ClockRegHP;
+  uint32_t oldLP = omrState.ClockRegLP;
+  uint64_t ticksHP = 0;
+  uint64_t ticksLP = 0;
+  int result = applyClockCycles(ticksHP, ticksLP);
+  return result ? result : releaseTimers(oldHP, oldLP, ticksHP, ticksLP);
+}
+
+/* the scheduler state in which pollTimers has nothing to do, so instructions that leave it
+ * alone may skip it: a process runs, nothing is pending or due, and it can't be preempted */
+bool schedulerQuiet() {
+  if (!fastPathEnabled || omrState.halted || !cpuState.running ||
+      (cpuState.status & STATUS_INTERRUPTED_OPERATION_MASK) || pendingTimerTrap.cause ||
+      !externalChannels.empty() || std::ranges::any_of(externalInterruptRequests, &ExternalInterruptRequest::pending))
+    return false;
+  bool preemptable = !trapHandlerActive() && !interruptHandlerActive() && cpuState.priority == LOW_PRIORITY &&
+                     omrState.ProcQueueFPtr[HIGH_PRIORITY] != NO_PROCESS && !cpuState.interruptsDisabled &&
+                     (omrState.Enables & LP_PROCESS_INT_ENB);
+  return !preemptable && !timersDue(omrState.ClockRegHP, omrState.ClockRegLP, 0, 0);
+}
+
+/* rechecks after an instruction that went through pollTimers */
+void updateQuiescence(int result) {
+  quiescent = result == 0 && schedulerQuiet();
+}
+
+bool peripheralPollDue() {
+  return peripheralPoller && (peripheralPollRequested || cpuCycles - lastPeripheralPoll >= peripheralPollCycles);
+}
+
+/* instructions that neither look at nor change the timers or the scheduler, other than by
+ * raising a trap or timeslicing (requestTrap and timesliceProcess end quiescence) */
+bool leavesSchedulerAlone(uint32_t code) {
+  static constexpr std::string_view pure[] = {
+      "adc", "add", "ajw", "and", "bcnt", "bitcnt", "bitrevnbits", "bitrevword", "bsub", "call", "cb",
+      "cbu", "ccnt1", "cir", "ciru", "cj", "crcbyte", "crcword", "cs", "csngl", "csu", "csub0", "cword",
+      "devlb", "devls", "devlw", "devsb", "devss", "devsw", "diff", "div", "dup", "eqc", "fmul", "gajw",
+      "gcall", "gt", "gtu", "j", "ladd", "lb", "lbx", "ldc", "ldclock", "lddevid", "ldiff", "ldiv", "ldl",
+      "ldlp", "ldmemstartval", "ldnl", "ldnlp", "ldpi", "ldpri", "ldprodid", "ldtimer", "lend", "lmul",
+      "ls", "lshl", "lshr", "lsub", "lsum", "lsx", "mint", "mul", "nop", "norm", "not", "or", "pop",
+      "prod", "rem", "ret", "rev", "satadd", "satmul", "satsub", "sb", "shl", "shr", "slmul", "ss",
+      "ssub", "stl", "stnl", "sub", "sulmul", "sum", "testerr", "wcnt", "wsub", "wsubdb", "xbword",
+      "xdble", "xor", "xsword", "xword"};
+  return std::ranges::find(pure, std::string_view(instrEntry[code].mnemonic)) != std::end(pure);
+}
+
+bool endsBlock(uint32_t code) {
+  std::string_view mnemonic = instrEntry[code].mnemonic;
+  return mnemonic == "j" || mnemonic == "call" || mnemonic == "gcall" || mnemonic == "ret" || mnemonic == "lend";
+}
+
+/* the decoded run of instructions starting at iptr, or nullptr when there is none to run
+ * (device memory, or the first instruction can't be decoded) */
+const CodeBlock *codeBlock(uint32_t iptr) {
+  uint32_t memoryBlock = iptr >> BLKSHIFT;
+  CodeBlock &block = codeBlocks[(iptr ^ iptr >> 12) & (codeBlockCacheSize - 1)];
+  if (block.count && block.iptr == iptr && block.version == blockVersion[memoryBlock]) return &block;
+  block.count = 0;
+  if (isMemoryDeviceAddress(iptr)) return nullptr;
+  block.iptr = iptr;
+  block.version = blockVersion[memoryBlock];
+  uint32_t address = iptr;
+  while (block.count < static_cast<int>(std::size(block.instrs))) {
+    uint32_t code = 0;
+    uint32_t value = 0;
+    int length = 0;
+    unsigned char bytes[16];
+    if (decodeAt(address, BLKSIZE - (address & ADDR_IN_BLK_MASK), code, value, length, bytes, sizeof bytes)) break;
+    bool pure = leavesSchedulerAlone(code);
+    block.instrs[block.count++] = {instrEntry[code].function, value, code, instrEntry[code].cpucycles,
+                                   static_cast<uint32_t>(length), pure};
+    address += static_cast<uint32_t>(length);
+    if (!pure || endsBlock(code) || (address & ADDR_IN_BLK_MASK) == 0) break;
+  }
+  return block.count ? &block : nullptr;
+}
+
+/*
+ * execInstr for a block instruction while the scheduler is quiet. It does what execInstr does,
+ * but the clocks are only synced when a tick is due or the instruction isn't pure, and
+ * pollTimers only runs when a peripheral poll is due, the instruction isn't pure, or the
+ * instruction ended quiescence: otherwise both would have found nothing to do.
+ */
+int execBlockInstr(const BlockInstr &instr, int *breakFlag) {
+  uint32_t instructionAddress = cpuState.iptr;
+  instrCode = instr.code;
+  operand = instr.operand;
+  instrLength = static_cast<int>(instr.length);
+  cpuState.iptr = instructionAddress + instr.length;
+
+  executingInstruction = true;
+  cpuCycles += instr.cycles;
+  int result = 0;
+  if (!instr.pure || cpuCycles >= nextClockTick) result = syncClocks();
+  if (!result) result = instr.function(instr.operand);
+  else cpuState.iptr = instructionAddress;
+  executingInstruction = false;
+  if (result) {
+    quiescent = false;
+  } else if (!instr.pure || !quiescent || peripheralPollDue()) {
+    result = pollTimers();
+    updateQuiescence(result);
+  }
+  freshPoll = result == 0;
+
+  *breakFlag = checkWatch();
+
+  return result;
+}
+}
+
+int advanceTimers(uint64_t cycles) {
+  cpuCycles += cycles;
+  int result = syncClocks();
   return result || executingInstruction ? result : pollTimers();
+}
+
+void setFastPath(bool enabled) {
+  fastPathEnabled = enabled;
+  quiescent = false;
 }
 
 int execInstr(int *breakFlag) {
@@ -2774,6 +2963,7 @@ int execInstr(int *breakFlag) {
     result = resumePendingOperation();
     executingInstruction = false;
     if (!result) result = pollTimers();
+    quiescent = false;
     *breakFlag = checkWatch();
     return result;
   }
@@ -2785,14 +2975,75 @@ int execInstr(int *breakFlag) {
   else cpuState.iptr = instructionAddress;
   executingInstruction = false;
   if (!result) result = pollTimers();
+  freshPoll = result == 0;
+  updateQuiescence(result);
 
   *breakFlag = checkWatch();
 
   return (result);
 }
 
-/**************************
+/*
+ * Runs exec+decode pairs. While the scheduler is quiet, decoded blocks run instead (see
+ * execBlockInstr), and once they stop the next instruction is decoded for the caller as a
+ * pair would have. A run that stops on an instruction reports it as executed but not completed.
  */
+RunResult runInstructions(uint64_t count) {
+  RunResult run;
+  auto stop = [&run](int result, int watchTripped) {
+    run.stopped = true;
+    run.execResult = result;
+    run.watchTripped = watchTripped;
+    return run;
+  };
+  bool noBlock = false;
+  while (run.completed < count) {
+    if (!quiescent || noBlock) {
+      noBlock = false;
+      int watchTripped = 0;
+      int result = execInstr(&watchTripped);
+      if (result || watchTripped || decodeNextInstr()) return stop(result, watchTripped);
+      ++run.completed;
+      continue;
+    }
+    bool executed = false;
+    while (quiescent && run.completed < count) {
+      const CodeBlock *block = codeBlock(cpuState.iptr);
+      if (!block) {
+        noBlock = true;
+        break;
+      }
+      uint32_t memoryBlock = block->iptr >> BLKSHIFT;
+      uint32_t next = block->iptr;
+      for (int index = 0; index < block->count; ++index) {
+        const BlockInstr &instr = block->instrs[index];
+        int watchTripped = 0;
+        int result = execBlockInstr(instr, &watchTripped);
+        if (result || watchTripped) {
+          uint64_t ticksHP = 0;
+          uint64_t ticksLP = 0;
+          applyClockCycles(ticksHP, ticksLP);
+          return stop(result, watchTripped);
+        }
+        executed = true;
+        ++run.completed;
+        next += instr.length;
+        if (run.completed == count || !quiescent || cpuState.iptr != next ||
+            blockVersion[memoryBlock] != block->version)
+          break;
+      }
+    }
+    uint64_t ticksHP = 0;
+    uint64_t ticksLP = 0;
+    applyClockCycles(ticksHP, ticksLP);
+    if (executed && decodeNextInstr()) {
+      --run.completed;
+      return stop(0, 0);
+    }
+  }
+  return run;
+}
+
 int readWptrWord(uint32_t index, uint32_t *value) {
   int result = 0;
   uint32_t address;
@@ -2970,6 +3221,7 @@ const char *st20Error(int error) {
 }
 
 void resetTimers() {
+  quiescent = false;
   omrState.ClockRegHP = timerGuess;
   omrState.ClockRegLP = timerGuess;
   omrState.ClockPhaseHP = 0;
