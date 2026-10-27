@@ -8,12 +8,14 @@
  * STi5512 Register Manual (7145562 B), chapter 22. Both counters are clocked from the
  * processor clock through their prescalers. The 8-bit PWM counter raises Int when it wraps;
  * the 32-bit capture/compare counter raises Cmp0-3 when it reaches PWM_nCompareVal.
- * Capture inputs (CaptureIn0-3) and the PWMOut/CompareOut pins are not modelled.
+ * Capture inputs are edges reported by the board; PWMOut and CompareOut pins are not modelled.
  */
 namespace {
 constexpr uint32_t pwmBase = 0x2000b000U;
 constexpr uint32_t pwmEnd = 0x2000b067U;
+constexpr uint32_t captureValueRegister = 0x10 / 4;
 constexpr uint32_t compareRegister = 0x20 / 4;
+constexpr uint32_t captureEdgeRegister = 0x30 / 4;
 constexpr uint32_t controlRegister = 0x50 / 4;
 constexpr uint32_t enableRegister = 0x54 / 4;
 constexpr uint32_t statusRegister = 0x58 / 4;
@@ -91,4 +93,13 @@ bool tickSti5512Pwm() {
   advance(now - lastCycle);
   lastCycle = now;
   return (pwm[statusRegister] & pwm[enableRegister]) != 0;
+}
+
+void sti5512PwmCaptureEdge(int input, bool rising) {
+  if (input < 0 || input > 3) return;
+  tickSti5512Pwm();
+  uint32_t edges = pwm[captureEdgeRegister + static_cast<uint32_t>(input)] & 3U;
+  if (!(edges & (rising ? 1U : 2U)) || !(pwm[controlRegister] & captureEnable)) return;
+  pwm[captureValueRegister + static_cast<uint32_t>(input)] = pwm[captureCountRegister];
+  pwm[statusRegister] |= 2U << input;
 }

@@ -58,7 +58,9 @@ For unattended firmware execution:
 ```
 
 Batch mode runs CPU instructions until the first fetch or execution error (including
-CPU halt or idle), then exits with status `1`. It never reads keyboard input or
+CPU halt or idle), then exits with status `1`. With SoC peripherals installed, an idle CPU lets
+time pass in 1000-cycle steps (up to 10 emulated seconds, or until the next timer alarm) so
+that peripheral interrupts can wake it, as on silicon. It never reads keyboard input or
 opens a prompt, and ignores watches and the interactive instruction-count limits.
 Firmware-loading failures also exit with status `1`; invalid arguments exit with
 status `2`. Firmware that never encounters an error runs indefinitely.
@@ -140,10 +142,22 @@ Further STi5512 devices:
 - PTI DMA channels 1-3 (`0x20031000`): the read pointer advances to the write pointer,
   wrapping from top to base; the decoders are not modelled, so the data is discarded.
 - PWM and capture/compare counters (`0x2000b000`, interrupt 11), clocked from the CPU cycle
-  count through their prescalers: PWM overflow and compare interrupts. Capture inputs (the IR
-  receiver) are not modelled.
+  count through their prescalers: PWM overflow, compare and capture interrupts. Capture edges
+  come from the board (the DSR9500 IR receiver).
+- PIO ports 0-4 (`0x2000c000`-`0x20010000`): output, set/clear aliases and configuration
+  registers; input pins read back their output unless the board drives them. Compare
+  interrupts are not modelled.
+- Display timing: 50 Hz PAL fields raise VSYNC top/bottom in `VID_ITS` (interrupt 21). Reading
+  `VID_ITS` at `0x3d` samples and clears it.
+- OSD output: the `screen FILE` command renders the OSD block lists (`OSD_TOP`/`OSD_BOT`,
+  2/4/8 bpp, 14/24-bit palettes, mix weights) over the background colour as a 720x576 BMP.
+- MPEG video decoder control: bit buffer (fed by PTI DMA channel 1 or `CFG_CDR`, level in
+  `VID_VBL`), start code detector and header FIFO (`VID_HDS`, `VID_HDF`, `SCH`), and decoding
+  tasks (`VID_TIS` EXE/FIS/SKP at VSYNC: PSD, then PII/DEI once the picture's data is
+  consumed), with soft and pipeline resets. Pictures are not reconstructed, so video and
+  still pictures are not displayed; only the OSD is.
 
-PIO, the transport controller, smart card, teletext, the decoders, external RAM reset contents
+The transport controller, smart card, teletext, the MPEG decoders, external RAM reset contents
 and device snapshots remain unimplemented. The interactive `vra` register descriptions remain
 STi5518-specific.
 
@@ -152,7 +166,18 @@ STi5518-specific.
 `--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's I2C chips as register
 files: the QPSK demodulator (`0xaa` on SSC1, identity `0x5a` in register 0), the CI controller
 (`0x80`) and the RF modulator (`0xca`) on SSC0. There is no tuner, signal, CI module or RF
-model. The DSR9500 main firmware boots with:
+model. The board also connects:
+
+- the front panel: a 16-bit shift register on PIO4 (data bit 3, clock bit 4) latched by PIO1
+  bit 7. Its four LED digits are printed as `LED> text` when they change; `led` shows them.
+  `fp KEY` holds a key of the matrix (`up`, `down` or a column bit 1, 2, 4, 8, 0x80) for 150 ms.
+- the IR receiver on PIO3 bit 3 and PWM CaptureIn0: `ir KEY...` sends NEC frames with the
+  customer code 0xfe01. Keys are `0`-`9`, `ok`, `menu`, `exit`, `up`, `down`, `left`, `right`,
+  `pgup`, `pgdn`, `power` or a command number. The receiver starts in standby, where only
+  `power` (remote or front panel) is accepted.
+
+Stop a free run (`g`) to type these commands, then continue with `g`. With the DSR9500
+firmware the main menu appears after about 90 million instructions (`screen menu.bmp`). The DSR9500 main firmware boots with:
 
 ```bash
 ./st20emu-release --soc sti5512 --board dsr9500 --firmware firmware/dsr9500mcmain.bin --batch

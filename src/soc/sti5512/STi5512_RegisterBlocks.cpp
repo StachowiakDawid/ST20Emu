@@ -1,4 +1,5 @@
 #include "STi5512_RegisterBlocks.h"
+#include "STi5512_VideoDecoder.h"
 
 #include <algorithm>
 #include <array>
@@ -11,8 +12,11 @@
  * Registers are plain storage: writes to read-only registers are ignored, reads return
  * the last written or reset value. Command bits the manual describes as resetting
  * automatically read back as 0, and the audio and DENC soft resets restore their reset
- * values. Other hardware side effects (decoding, serial pointers, clear-on-read status) are
- * not modelled; undefined reset values read as 0.
+ * values. OSD_TOP and OSD_BOT are serial (high byte, then low byte). VID_ITS latches the
+ * interrupt events raised by the display model; reading its most significant byte (0x3d)
+ * samples and clears it, and 0x62/0x63 return the sample. The video decoder model supplies
+ * VID_VBL, VID_STA, VID_HDF and VID_HDS and sees every video register write. Other side
+ * effects are not modelled; undefined reset values read as 0.
  */
 namespace {
 struct RegisterBlock {
@@ -25,6 +29,9 @@ struct RegisterBlock {
 };
 
 constexpr uint32_t videoRevisionOffset = 0x78;
+constexpr uint32_t osdTopOffset = 0x2a;              // OSD_TOP, OSD_BOT at 0x2b
+constexpr uint32_t interruptMaskOffset = 0x3c;      // VID_ITM bits 23:16; 0x60, 0x61 below
+constexpr uint32_t interruptStatusOffset = 0x3d;    // VID_ITS bits 23:16; 0x62, 0x63 below
 constexpr uint32_t audioResetOffset = 0x40;          // AUD_RES
 constexpr uint32_t dencSoftResetOffset = 0x06;       // DEN_CFG6
 constexpr uint8_t dencSoftResetBit = 0x80;
@@ -83,6 +90,35 @@ std::array<RegisterBlock, 7> blocks{{
 
 enum BlockIndex { videoBlock, audioBlock, subPictureBlock, dencBlock };
 
+std::array<uint16_t, 2> osdPointers{};
+std::array<bool, 2> osdLowByte{};
+uint32_t videoInterrupts = 0;
+uint32_t videoInterruptSample = 0;
+
+uint8_t readVideoByte(RegisterBlock &block, uint32_t offset) {
+  uint8_t decoded = 0;
+  if (sti5512VideoDecoderRead(offset, &decoded)) return decoded;
+  if (offset == interruptStatusOffset) {
+    videoInterruptSample = videoInterrupts;
+    videoInterrupts = 0;
+    return static_cast<uint8_t>(videoInterruptSample >> 16);
+  }
+  if (offset == 0x62) return static_cast<uint8_t>(videoInterruptSample >> 8);
+  if (offset == 0x63) return static_cast<uint8_t>(videoInterruptSample);
+  return block.values[offset];
+}
+
+/* returns true if the byte was consumed by a serial register */
+bool writeVideoByte(uint32_t offset, uint8_t data) {
+  if (offset != osdTopOffset && offset != osdTopOffset + 1) return false;
+  std::size_t field = offset - osdTopOffset;
+  uint16_t &pointer = osdPointers[field];
+  pointer = osdLowByte[field] ? static_cast<uint16_t>((pointer & 0xff00) | data)
+                              : static_cast<uint16_t>((pointer & 0x00ff) | data << 8);
+  osdLowByte[field] = !osdLowByte[field];
+  return true;
+}
+
 void resetBlock(RegisterBlock &block, uint32_t first) {
   std::fill(block.values.begin() + first, block.values.end(), 0);
   for (const auto &[offset, reset] : block.resets) {
@@ -112,7 +148,11 @@ int readBlock(void *context, uint32_t address, int width, uint32_t *value) {
   auto &block = *static_cast<RegisterBlock *>(context);
   uint32_t offset = address - block.base;
   uint32_t word = 0;
-  for (int i = 0; i < width; ++i) word |= static_cast<uint32_t>(block.values[offset + static_cast<uint32_t>(i)]) << (8 * i);
+  for (int i = 0; i < width; ++i) {
+    uint32_t byte = offset + static_cast<uint32_t>(i);
+    uint8_t data = &block == &blocks[videoBlock] ? readVideoByte(block, byte) : block.values[byte];
+    word |= static_cast<uint32_t>(data) << (8 * i);
+  }
   *value = word;
   return 0;
 }
@@ -124,6 +164,7 @@ int writeBlock(void *context, uint32_t address, int width, uint32_t value) {
     uint32_t byte = offset + static_cast<uint32_t>(i);
     if (isReadOnly(block, byte)) continue;
     uint8_t data = static_cast<uint8_t>(value >> (8 * i));
+    if (&block == &blocks[videoBlock] && writeVideoByte(byte, data)) continue;
     if (&block == &blocks[audioBlock] && byte == audioResetOffset) resetAudio(block);
     if (&block == &blocks[dencBlock] && byte == dencSoftResetOffset && (data & dencSoftResetBit))
       resetBlock(block, dencUserRegisters);
@@ -131,6 +172,7 @@ int writeBlock(void *context, uint32_t address, int width, uint32_t value) {
     for (const auto &[clearOffset, bits] : block.selfClearing) {
       if (clearOffset == byte) block.values[byte] &= static_cast<uint8_t>(~bits);
     }
+    if (&block == &blocks[videoBlock]) sti5512VideoDecoderWrite(byte, data);
   }
   return 0;
 }
@@ -148,4 +190,26 @@ void resetSti5512RegisterBlocks(uint8_t videoRevision) {
     resetBlock(block, 0);
   }
   blocks[0].values[videoRevisionOffset] = videoRevision;
+  osdPointers = {};
+  osdLowByte = {};
+  videoInterrupts = videoInterruptSample = 0;
+}
+
+uint8_t sti5512VideoRegister(uint32_t offset) {
+  return offset < blocks[videoBlock].size ? blocks[videoBlock].values[offset] : 0;
+}
+
+uint32_t sti5512OsdPointer(int field) {
+  return osdPointers[field ? 1 : 0];
+}
+
+void raiseSti5512VideoInterrupt(uint32_t events) {
+  videoInterrupts |= events & 0xffffffU;
+}
+
+bool sti5512VideoInterruptLine() {
+  const auto &video = blocks[videoBlock].values;
+  uint32_t mask = static_cast<uint32_t>(video[interruptMaskOffset]) << 16 |
+                  static_cast<uint32_t>(video[0x60]) << 8 | video[0x61];
+  return (videoInterrupts & mask) != 0;
 }

@@ -5,9 +5,12 @@
 #include "../common/STi55xx_Asc.h"
 #include "../common/STi55xx_Inc.h"
 #include "../common/STi55xx_Ssc.h"
+#include "STi5512_Display.h"
+#include "STi5512_Pio.h"
 #include "STi5512_PtiDma.h"
 #include "STi5512_Pwm.h"
 #include "STi5512_RegisterBlocks.h"
+#include "STi5512_VideoDecoder.h"
 
 #include <array>
 #include <bit>
@@ -17,13 +20,15 @@
  * STi5512 Register Manual (7145562 B): ASC (chapter 3),
  * INC (Table 13) and INL (Table 14, chapter 14). Interrupt numbers are from the
  * STi5512 datasheet (7145560 B) Table 50: SSC0 = 5, SSC1 = 6, ASC3 = 7, ASC2 = 8, ASC1 = 9,
- * ASC0 = 10, PWM and capture = 11.
+ * ASC0 = 10, PWM and capture = 11, video decoder = 21.
  */
 namespace {
 constexpr uint32_t controllerBase = 0x20000000U;
 constexpr uint32_t levelBase = 0x20011000U;
 constexpr uint32_t levelSources = 23;
 constexpr uint32_t pwmSource = 11;
+constexpr uint32_t videoSource = 21;
+BoardPoller boardPoller = nullptr;
 std::array<AscDevice, 4> ascDevices{{{0x20003000U, 10}, {0x20004000U, 9}, {0x20005000U, 8}, {0x20006000U, 7}}};
 std::array<SscDevice, 2> sscDevices{{{0x20009000U, 5}, {0x2000a000U, 6}}};
 std::array<uint32_t, 0x10c / 4> controller{};
@@ -102,6 +107,7 @@ int registerDevices() {
   for (auto &device : sscDevices) devices.push_back({device.base, device.base + sscRegisterEnd, &device, readSsc, writeSsc});
   devices.push_back(sti5512PtiDmaDevice());
   devices.push_back(sti5512PwmDevice());
+  for (const auto &device : sti5512PioDevices()) devices.push_back(device);
   devices.push_back({controllerBase, controllerBase + 0x10b, nullptr, readController, writeController});
   devices.push_back({levelBase, levelBase + 0x7f, nullptr, readLevel, writeLevel});
   for (const auto &device : devices) {
@@ -121,6 +127,9 @@ int resetDevices() {
   for (auto &device : sscDevices) resetSsc(device);
   resetSti5512PtiDma();
   resetSti5512Pwm();
+  resetSti5512Pio();
+  resetSti5512Display();
+  resetSti5512VideoDecoder();
   controller = {};
   levels = {};
   previousLevels = {};
@@ -139,7 +148,9 @@ int pollSti5512Devices() {
     if (tickSsc(device)) inputs |= 1U << device.source;
   }
   tickSti5512PtiDma();
+  if (boardPoller) boardPoller();
   if (tickSti5512Pwm()) inputs |= 1U << pwmSource;
+  if (tickSti5512Display()) inputs |= 1U << videoSource;
   levels[0x7c / 4] = inputs;
   uint32_t routedLevels = 0;
   for (uint32_t source = 0; source < levelSources; ++source) {
@@ -195,6 +206,9 @@ void shutdownSti5512Devices() {
   setPeripheralPoller(nullptr);
   setInterruptReturnObserver(nullptr);
   setRebootObserver(nullptr);
+  setSti5512PioObserver(nullptr);
+  setSti5512PioInputSource(nullptr);
+  boardPoller = nullptr;
   for (auto &device : sscDevices) device.slaves.clear();
   initialized = false;
 }
@@ -208,4 +222,8 @@ int attachSti5512I2cDevice(int port, I2cRegisterDevice *device) {
   if (port < 0 || port >= static_cast<int>(sscDevices.size()) || device == nullptr) return INVALID_MEMORY_DEVICE;
   sscDevices[static_cast<std::size_t>(port)].slaves.push_back(device);
   return 0;
+}
+
+void setSti5512BoardPoller(BoardPoller poller) {
+  boardPoller = poller;
 }

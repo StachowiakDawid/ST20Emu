@@ -691,7 +691,18 @@ int releaseTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t tic
       int stateResult = readProcessWord(workspace, pw::State, state);
       bool alternative = stateResult == 0 && (state == ALT_WAITING || state == ALT_READY);
       bool needsWakeup = !alternative || state == ALT_WAITING;
-      bool trapped = needsWakeup && (trapEnableMask(priority) & TIMER_TRAPENB) != 0;
+      /* While this priority's scheduler trap handler runs, its group is masked, but a timer
+       * trap condition stays set and is taken once the handler returns (ST20-TP2 datasheet
+       * 3.6.3): decide with the enables the trap return will restore. */
+      uint32_t enables = trapEnableMask(priority);
+      for (const TrapFrame &frame : trapFrames) {
+        if (frame.priority == priority && trapGroup(frame.cause) == TRAP_GROUP_SCHEDULER) {
+          uint32_t restored = 0;
+          if (readProcessWord(trapRecordAddress(priority, TRAP_GROUP_SCHEDULER, true), 0, restored) == 0)
+            enables = restored & 0x3fffU;
+        }
+      }
+      bool trapped = needsWakeup && (enables & TIMER_TRAPENB) != 0;
       if (trapped) {
         uint32_t handlerWptr = 0;
         int checked = readProcessWord(trapRecordAddress(priority, TRAP_GROUP_SCHEDULER, false), 2, handlerWptr);
@@ -743,9 +754,25 @@ int prepareProcess() {
     uint64_t cycles = (needed + frequency - 1) / frequency;
     soonest = std::min(soonest, cycles);
   }
-  if (soonest == UINT64_MAX) return CPU_IDLE;
-  result = advanceTimers(soonest);
-  return result ? result : cpuState.running ? 0 : CPU_IDLE;
+  if (!peripheralPoller) {
+    if (soonest == UINT64_MAX) return CPU_IDLE;
+    result = advanceTimers(soonest);
+    return result ? result : cpuState.running ? 0 : CPU_IDLE;
+  }
+  /* With peripherals, idle time passes in small steps so that their events (interrupts,
+   * edges on input pins) wake processes at the right time, as on silicon. */
+  constexpr uint64_t idleStep = 1000;
+  constexpr uint64_t idleLimit = 10ULL * CPU_CLOCK;
+  for (uint64_t idle = 0; idle < idleLimit && !cpuState.running; idle += idleStep) {
+    uint64_t cycles = std::min(soonest, idleStep);
+    result = advanceTimers(cycles);
+    if (result) return result;
+    if (soonest != UINT64_MAX) {
+      soonest -= cycles;
+      if (soonest == 0) break;
+    }
+  }
+  return cpuState.running ? 0 : CPU_IDLE;
 }
 }
 
@@ -946,6 +973,22 @@ int pollTimers() {
   if (!executingInstruction && !trapHandlerActive() && !interruptHandlerActive() && pendingTimerTrap.cause) {
     if (cpuState.running && cpuState.priority == LOW_PRIORITY && cpuState.interruptsDisabled &&
         pendingTimerTrap.priority == HIGH_PRIORITY) return dispatchProcess();
+    /* A low-priority timer trap is taken at low priority, as its handler runs there: it waits
+     * while a high-priority process runs, and when the high-priority side is idle the
+     * processor first drops to low priority (OS20 starts the woken task through the
+     * low-priority trapped-process record, which a high-priority return would discard). */
+    if (pendingTimerTrap.priority == LOW_PRIORITY && cpuState.priority == HIGH_PRIORITY && cpuState.running)
+      return dispatchProcess();
+    if (pendingTimerTrap.priority == LOW_PRIORITY && cpuState.priority == HIGH_PRIORITY && !cpuState.running) {
+      int dispatched = dispatchProcess();
+      if (dispatched) return dispatched;
+      if (cpuState.priority == HIGH_PRIORITY) {
+        if (cpuState.running || omrState.ProcQueueFPtr[HIGH_PRIORITY] != NO_PROCESS) return 0;
+        selectPriority(LOW_PRIORITY); // nothing to run at either priority: idle low priority
+        cpuState = {undefinedWord, undefinedWord, undefinedWord, 0, 0, LOW_PRIORITY, NO_PROCESS, false,
+                    0, 0, 0, 0};
+      }
+    }
     PendingTrap pending = pendingTimerTrap;
     bool trapped = (trapEnableMask(pending.priority) & pending.cause) != 0;
     result = trapped ? requestTrap(pending.cause, pending.priority, false, pending.descriptor)
@@ -1296,6 +1339,12 @@ int returnFromInterrupt() {
     selectPriority(LOW_PRIORITY);
     cpuState = lowPriorityShadow;
     lowPriorityShadowValid = false;
+  } else if (managed && externalInterruptFrames.back().caller.priority == LOW_PRIORITY &&
+             !externalInterruptFrames.back().caller.running) {
+    /* the interrupt came while low priority was idle: idle again with the registers kept, as
+     * the Wptr of the last descheduled process is what a following QueueEmpty trap records */
+    selectPriority(LOW_PRIORITY);
+    cpuState = externalInterruptFrames.back().caller;
   } else {
     selectPriority(LOW_PRIORITY);
     cpuState = {undefinedWord, undefinedWord,

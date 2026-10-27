@@ -8,6 +8,11 @@
 #include "../src/soc/sti5518/STi5518_Devices.h"
 #include "../src/soc/sti5512/STi5512_Devices.h"
 #include "../src/soc/common/STi55xx_Ssc.h"
+#include "../src/soc/sti5512/STi5512_Display.h"
+#include "../src/soc/sti5512/STi5512_VideoDecoder.h"
+#include "../src/soc/sti5512/STi5512_RegisterBlocks.h"
+#include "../src/soc/sti5512/STi5512_Pwm.h"
+#include "../src/board/DSR9500.h"
 
 #include <cstdint>
 #include <bit>
@@ -390,11 +395,11 @@ static void testMultiplyAndShifts() {
   for (uint32_t count : {32U, 63U, 64U, 96U, 65536U, 0xffffffffU}) {
     reset(count, 0xffffffff, 0x1234);
     shl_(0);
-    expect("shl out-of-range policy", cpuState.areg, UNDEFINED_WORD_OLD);
+    expect("shl out-of-range gives zero", cpuState.areg, 0);
     expect("shl out-of-range stack", cpuState.breg, 0x1234);
     reset(count, 0xffffffff, 0x1234);
     shr_(0);
-    expect("shr out-of-range policy", cpuState.areg, UNDEFINED_WORD_OLD);
+    expect("shr out-of-range gives zero", cpuState.areg, 0);
     if (count >= 64) {
       reset(count, 0xffffffff, 0x1234);
       lshl_(0);
@@ -1191,8 +1196,8 @@ static void testRuntimeDefaults() {
   expect("configured high priority clock", omrState.ClockRegHP, 0x12345678);
   expect("configured low priority clock", omrState.ClockRegLP, 0x12345678);
   undefinedWord = 0xa5a5a5a5;
-  reset(32, 1, 2);
-  shl_(0);
+  reset(64, 1, 2);
+  lshl_(0);
   expect("configured undefined shift", cpuState.areg, undefinedWord);
   expect("configured undefined stack", cpuState.creg, undefinedWord);
   uint32_t value = 0;
@@ -3648,6 +3653,222 @@ static void testSti5512Pwm() {
   schedulerFixture(0x20000);
 }
 
+static void storeBigEndian(uint32_t address, uint32_t value) {
+  for (int i = 0; i < 4; ++i) storeBytes(address + static_cast<uint32_t>(i), 1, (value >> (24 - 8 * i)) & 0xffU);
+}
+
+static void testSti5512DisplayDevices() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5512 display devices", initSti5512Devices() != 0, 0);
+  uint32_t value = 0;
+  storeBytes(0x2000c004, 4, 0x81);
+  readBytes(0x2000c000, 4, &value);
+  expect("PIO set bits", value, 0x81);
+  storeBytes(0x2000c008, 4, 0x80);
+  readBytes(0x2000c000, 4, &value);
+  expect("PIO clear bits", value, 0x01);
+  readBytes(0x2000c010, 4, &value);
+  expect("PIO input reads back output without board", value, 0x01);
+  expect("PIO input is read only", storeBytes(0x2000c010, 4, 0) == DEVICE_ACCESS_UNSUPPORTED, 1);
+
+  storeBytes(0x2000b030, 4, 2);
+  storeBytes(0x2000b050, 4, 0x7cf);
+  advanceTimers(29 * 10);
+  sti5512PwmCaptureEdge(0, true);
+  readBytes(0x2000b058, 4, &value);
+  expect("rising edge ignored by falling capture", value & 2, 0);
+  sti5512PwmCaptureEdge(0, false);
+  readBytes(0x2000b058, 4, &value);
+  expect("falling edge raises capture 0", value & 2, 2);
+  readBytes(0x2000b010, 4, &value);
+  expect("capture latches the counter", value, 10);
+
+  storeBytes(0x61, 1, 0x40);
+  raiseSti5512VideoInterrupt(0x40);
+  expect("VSYNC top asserts video interrupt", sti5512VideoInterruptLine(), 1);
+  readBytes(0x3d, 1, &value);
+  expect("VID_ITS high byte", value, 0);
+  expect("reading VID_ITS clears the line", sti5512VideoInterruptLine(), 0);
+  readBytes(0x63, 1, &value);
+  expect("VID_ITS low byte keeps the sample", value, 0x40);
+  advanceTimers(CPU_CLOCK / 50);
+  pollSti5512Devices();
+  readBytes(0x2001107c, 4, &value);
+  expect("field boundary raises interrupt 21", value & (1U << 21), 1U << 21);
+
+  storeBytes(0x2a, 1, 0x01);
+  storeBytes(0x2a, 1, 0x23);
+  storeBytes(0x2b, 1, 0x01);
+  storeBytes(0x2b, 1, 0x24);
+  expect("OSD_TOP serial write", sti5512OsdPointer(0), 0x0123);
+  expect("OSD_BOT serial write", sti5512OsdPointer(1), 0x0124);
+  constexpr uint32_t block = 0xc0012300;
+  storeBigEndian(block, 0x0aU << 25 | 23U << 16 | 23U);           // Tc, AA; Y 23-23
+  storeBigEndian(block + 4, 118U << 16 | 121U);                    // X 118-121
+  storeBigEndian(block + 8, 0);                                    // colour 0: transparent
+  storeBigEndian(block + 12, 63U << 24 | 0x40U << 16 | 0xd4U << 8 | 0x64U); // red, W 63
+  storeBigEndian(block + 16, 0);
+  storeBigEndian(block + 20, 0);
+  storeBytes(block + 24, 1, 0x50);                                 // pixels 1, 1, 0, 0
+  storeBigEndian(block + 32, 0xffffffff);
+  storeBigEndian(block + 36, 0xffffffff);
+  storeBigEndian(0xc0012400, 0xffffffff);
+  storeBigEndian(0xc0012404, 0xffffffff);
+  storeBytes(0x91, 1, 0x04);
+  char directory[] = "/tmp/st20-screen-XXXXXX";
+  expect("screen temp directory", mkdtemp(directory) != nullptr, 1);
+  std::string path = std::string(directory) + "/screen.bmp";
+  int regions = 0;
+  expect("render screen", writeSti5512Screen(path, &regions).empty(), 1);
+  expect("one OSD region drawn", regions, 1);
+  std::ifstream bmp(path, std::ios::binary);
+  std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(bmp)), std::istreambuf_iterator<char>());
+  expect("BMP size", bytes.size(), 54U + 720U * 576U * 3U);
+  std::size_t topLeft = 54U + 575U * 720U * 3U;
+  if (bytes.size() > topLeft + 9) {
+    expect("OSD pixel is red", bytes[topLeft + 2] > 150 && bytes[topLeft + 1] < 60 && bytes[topLeft] < 60, 1);
+    expect("transparent pixel shows background", bytes[topLeft + 6] == bytes[topLeft + 6 + 3], 1);
+  }
+  unlink(path.c_str());
+  rmdir(directory);
+
+  expect("initialize DSR9500 board", initDsr9500Board() != 0, 0);
+  auto shiftOut = [](uint16_t word) {
+    for (int bit = 15; bit >= 0; --bit) {
+      storeBytes((word >> bit) & 1 ? 0x20010004 : 0x20010008, 4, 0x08);
+      storeBytes(0x20010008, 4, 0x10);
+      storeBytes(0x20010004, 4, 0x10);
+    }
+    storeBytes(0x2000d008, 4, 0x80);
+    storeBytes(0x2000d004, 4, 0x80);
+  };
+  shiftOut(0x1000 | 0xf9);
+  expect("front-panel digit 0 shows 1", dsr9500Display() == "1   ", 1);
+  expect("front-panel key accepted", dsr9500PressFrontPanel("up").empty(), 1);
+  shiftOut(0);
+  readBytes(0x20010010, 4, &value);
+  expect("pressed key pulls return line low", value & 4, 0);
+  shiftOut(4);
+  readBytes(0x20010010, 4, &value);
+  expect("pressed key column drives return line", value & 4, 4);
+  expect("unknown front-panel key", dsr9500PressFrontPanel("nope").empty(), 0);
+  expect("remote key accepted", dsr9500SendIr("ok").empty(), 1);
+  expect("unknown remote key", dsr9500SendIr("nope").empty(), 0);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static void testSti5512VideoDecoder() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5512 video decoder", initSti5512Devices() != 0, 0);
+  uint32_t value = 0;
+  storeBytes(0x02, 1, 0x01); // VID_CTL.EDC
+  const uint8_t stream[] = {
+      0x00, 0x00, 0x01, 0xb3, 0x2d, 0x02, 0x40, 0x23,          // sequence header 720x576
+      0x00, 0x00, 0x01, 0xb8, 0x00, 0x08, 0x00, 0x00,          // GOP
+      0x00, 0x00, 0x01, 0x00, 0x00, 0x0f, 0xff, 0xf8,          // picture 1
+      0x00, 0x00, 0x01, 0x01, 0x11, 0x22, 0x33, 0x44,          // slice
+      0x00, 0x00, 0x01, 0x00, 0x00, 0x4f, 0xff, 0xf8,          // picture 2
+      0x00, 0x00, 0x01, 0x01, 0x55, 0x66, 0x77, 0x88,          // slice
+      0x00, 0x00, 0x01, 0xb7};                                 // sequence end
+  for (uint8_t byte : stream) expect("bit buffer accepts data", sti5512VideoInput(byte), 1);
+  readBytes(0x65, 1, &value);
+  expect("start code search idle before HDS", value & 0x01, 0);
+  storeBytes(0x69, 1, 0x01);                                   // VID_HDS.HDS
+  pollSti5512Devices();
+  readBytes(0x65, 1, &value);
+  expect("sequence header found (SCH)", value & 0x01, 1);
+  readBytes(0x63, 1, &value);
+  readBytes(0x3d, 1, &value);
+  readBytes(0x63, 1, &value);
+  expect("SCH raised in VID_ITS", value & 0x01, 1);
+  readBytes(0x66, 1, &value);
+  expect("header FIFO returns the start code", value, 0xb3);
+  readBytes(0x66, 1, &value);
+  expect("then the header bytes", value, 0x2d);
+  storeBytes(0x69, 1, 0x01);
+  readBytes(0x66, 1, &value);
+  expect("next search stops on the GOP", value, 0xb8);
+  storeBytes(0x69, 1, 0x01);
+  readBytes(0x66, 1, &value);
+  expect("then on picture 1", value, 0x00);
+  storeBytes(0x69, 1, 0x01);
+  readBytes(0x66, 1, &value);
+  expect("slices are skipped to picture 2", value, 0x00);
+  readBytes(0x66, 1, &value);
+  expect("picture 2 header byte", value, 0x00);
+  readBytes(0x66, 1, &value);
+  expect("picture 2 temporal reference", value, 0x4f);
+  storeBytes(0x03, 1, 0x01);                                   // VID_TIS.EXE
+  advanceTimers(CPU_CLOCK / 50);
+  pollSti5512Devices();
+  readBytes(0x3d, 1, &value);
+  readBytes(0x63, 1, &value);
+  expect("VSYNC launches a task (PSD)", value & 0x80, 0x80);
+  advanceTimers(CPU_CLOCK / 100);
+  pollSti5512Devices();
+  readBytes(0x64, 1, &value);
+  expect("first task skips to the first picture and idles", value & 0x03, 0x03);
+  storeBytes(0x03, 1, 0x05);                                   // EXE | FIS
+  readBytes(0x64, 1, &value);
+  expect("forced task decodes", value & 0x01, 0);
+  advanceTimers(CPU_CLOCK / 100);
+  pollSti5512Devices();
+  readBytes(0x64, 1, &value);
+  expect("picture decoded, pipeline idle", value & 0x03, 0x03);
+  storeBytes(0x39, 1, 0x01);                                   // video soft reset
+  readBytes(0x65, 1, &value);
+  expect("soft reset empties the bit buffer (BBE)", value & 0x10, 0x10);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static void testIdleInterruptKeepsRegisters() {
+  schedulerFixture(0x180000);
+  setPortableInstructionAbi(false);
+  expect("initialize STi5512 for idle interrupt", initSti5512Devices() != 0, 0);
+  storeBytes(0x184018, 4, 0x80000000);
+  storeBytes(0x18401c, 4, 0x9400);
+  storeBytes(0x20000018, 4, 0x184021);
+  storeBytes(0x20000058, 4, 1);
+  storeBytes(0x2001101c, 4, 6);
+  storeBytes(0x200000c4, 4, 0x10040);
+  storeBytes(0x2000600c, 4, 0x189);
+  storeBytes(0x20006010, 4, 2);
+  omrState.Enables |= LP_EXTERNALEVENT_ENB;
+  cpuState.running = false;               // the last low-priority process just descheduled
+  cpuState.wptr = 0x123400;
+  expect("interrupt taken while idle", pollSti5512Devices() != 0, 0);
+  expect("idle interrupt active", activeExternalInterruptLevel() == 6, 1);
+  storeBytes(0x20006010, 4, 0);
+  expect("idle interrupt returns", iret_(0) != 0, 0);
+  expect("idle again after interrupt", cpuState.running, 0);
+  expect("idle low priority after interrupt", cpuState.priority, LOW_PRIORITY);
+  expect("idle Wptr kept across interrupt", cpuState.wptr, 0x123400);
+  shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+static void testTimerTrapLatchedDuringHandler() {
+  schedulerFixture(0xc9000);
+  installTrap(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, 0xca000, 0x5400); // handler masks its group
+  omrState.Enables |= TIMER_TRAPENB | RUN_TRAPENB;
+  cpuState.areg = 0;
+  tin_(0);
+  expect("run trap enters scheduler handler", requestTrap(RUN_TRAPENB, LOW_PRIORITY, false, 0xce001) != 0, 0);
+  expect("scheduler handler active", cpuState.wptr, 0xca000);
+  expect("timer expiry inside handler", advanceTimers(3888) != 0, 0);
+  expect("timer waiter left the timer queue", omrState.TptrReg[LOW_PRIORITY], NO_PROCESS);
+  expect("masked timer trap is not bypassed to the ready queue", omrState.ProcQueueFPtr[LOW_PRIORITY], NO_PROCESS);
+  expect("handler keeps running", cpuState.wptr, 0xca000);
+  expect("handler returns", tret_(0) != 0, 0);
+  pollTimers();
+  expect("latched timer trap taken after return", cpuState.wptr, 0xca000);
+  expect("latched timer trap descriptor", trapEntryDescriptor(), 0xc9001);
+  tret_(0);
+  schedulerFixture(0x20000);
+}
+
 static int rebootObserverCalls = 0;
 static int countReboot() {
   ++rebootObserverCalls;
@@ -3868,6 +4089,10 @@ static void testInterruptReturns() {
   testSti5512I2c();
   testSti5512PtiDma();
   testSti5512Pwm();
+  testSti5512DisplayDevices();
+  testSti5512VideoDecoder();
+  testIdleInterruptKeepsRegisters();
+  testTimerTrapLatchedDuringHandler();
   testReboot();
   testSti5518Devices();
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {

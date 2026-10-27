@@ -1568,10 +1568,12 @@ int testhalterr_(uint32_t /*unused*/) {
   return 0;
 }
 
+/* Out-of-range shifts give zero, as the instruction set manual describes for shl and shr
+ * (its formal definition says undefined); OS20's QueueActive |= 1 << -1 relies on it. */
 int shl_(uint32_t /*unused*/) {
   uint32_t count = pop();
   uint32_t value = pop();
-  uint32_t shifted = count < BitsPerWord ? value << count : undefinedWord;
+  uint32_t shifted = count < BitsPerWord ? value << count : 0;
   push(shifted);
 
   return 0;
@@ -1580,7 +1582,7 @@ int shl_(uint32_t /*unused*/) {
 int shr_(uint32_t /*unused*/) {
   uint32_t count = pop();
   uint32_t value = pop();
-  uint32_t shifted = count < BitsPerWord ? value >> count : undefinedWord;
+  uint32_t shifted = count < BitsPerWord ? value >> count : 0;
   push(shifted);
 
   return 0;

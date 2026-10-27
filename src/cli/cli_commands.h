@@ -24,6 +24,12 @@ CliError cmd_next(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_quit(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_stop(CliEngine &engine, std::span<const std::string_view> args);
 
+// devices (STi5512 display, DSR9500 board)
+CliError cmd_ir(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_front_panel(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_led(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_screen(CliEngine &engine, std::span<const std::string_view> args);
+
 // registers
 CliError cmd_set_areg(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_set_breg(CliEngine &engine, std::span<const std::string_view> args);

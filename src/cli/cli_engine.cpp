@@ -46,6 +46,11 @@ CliError CliEngine::prompt_and_execute() {
 
   std::string line;
   if (!std::getline(std::cin, line)) {
+    if (std::cin.eof()) { // no more input: end the session instead of prompting forever
+      request_quit();
+      set_need_cmd(false);
+      return CliError::Success;
+    }
     return CliError::GetCommandError;
   }
 

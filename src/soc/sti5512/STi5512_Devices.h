@@ -13,5 +13,8 @@ int pollSti5512Devices();
 std::vector<uint8_t> takeSti5512AscTransmit(int port);
 /* connects an I2C slave to the bus of SSC0 or SSC1 (port 0-1); the device must outlive the bus */
 int attachSti5512I2cDevice(int port, I2cRegisterDevice *device);
+/* called before the SoC peripherals on every poll, so board parts can drive pins */
+using BoardPoller = void (*)();
+void setSti5512BoardPoller(BoardPoller poller);
 
 #endif
