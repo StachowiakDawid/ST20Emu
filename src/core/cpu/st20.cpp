@@ -1,34 +1,3 @@
-/********************************************************************/
-/* 16/12/2011	-Fixed 'bitcnt' instruction							*/
-/*				-Added some detailed instruction comment			*/
-/* 19/12/2011   -Added 'db' (query database) command				*/
-/* 20/12/2011	-Added 'vra' (verbose register access) command		*/
-/*				 that show info's also in 'go' mode					*/
-/*				 (added a status flag into struct cmdState_struct)	*/
-/*				-fixed some C4996 warnings about float->uint32_t and	*/
-/*				 uint32_t->float. A cast has been enough.				*/
-/*				-implemented binary search trough db entries		*/
-/*				 and put all registers in a more suitable form		*/
-/* 23/12/2011   -check all registers entries order.					*/
-/*				-create Defines for 'h2idc.idc' IDA Script		    */
-/*				-compiled with static libraries.					*/
-/* 26/12/2011	-'g' command can be interrupted hitting the 'g' key */
-/*				-added a less detailed description based upon the   */
-/*				 STi5518 memory map									*/
-/* 31/12/2011	-new year's eve :)									*/
-/*				-added 'omr' command (OtherMachineRegisters)		*/
-/*				-added 'ver' command (View Enables Register)		*/
-/*				-added cpucycles quasi-precise clock				*/
-/*				-added these instructions:							*/
-/*					'gintenb/gintdis'								*/
-/*					'trapenb/trapdis'								*/
-/*					'ldclock/clockenb/clockdis'						*/
-/*					'timerenb/timerdis'								*/
-/* 04/01/2012	-various bug fixed around the code					*/
-/*				-emulation cycle now is better						*/
-/*				-HighPriority and LowPriority ClockReg more precise */
-/********************************************************************/
-
 #include "st20.h"
 #include <cinttypes>
 #include "instrentry.h"
@@ -1819,7 +1788,6 @@ int swapTimerList(unsigned char priority, uint32_t front, uint32_t *previous) {
 int st20Init() {
   initCPUState();
   initWatch();
-  // added for timers
   initTimer();
 
   return (0);
@@ -2194,7 +2162,6 @@ int printOMRState() {
 int printEnablesRegState() {
 
   compat::println("Enables Register Value=0x{:08x}", omrState.Enables);
-  // compat::println("-GLOBAL INTERRUPTS ENABLES VALUES-\n");
   if (omrState.Enables & LP_PROCESS_INT_ENB)
     compat::println(" LP_PROCESS_INT_ENB	is set");
   if (omrState.Enables & LP_TIMESLICE_ENB)
@@ -2211,7 +2178,6 @@ int printEnablesRegState() {
     compat::println(" HP_EXTERNALEVENT_ENB	is set");
   if (omrState.Enables & HP_TIMER_ALRM_ENB)
     compat::println(" HP_TIMER_ALRM_ENB	is set");
-  // compat::println("-TRAP ENABLES VALUES-");
   if (omrState.Enables & BREAKPOINT_TRAPENB)
     compat::println(" BREAKPOINT_TRAPENB	is set");
   if (omrState.Enables & INTEGER_ERR_TRAPENB)
@@ -2363,10 +2329,6 @@ int printNextInstr(const CPUTrace &trace) {
   return (0);
 }
 
-//////////////////////////////////////////////////////////////////////////
-//					EXEC DECODED INSTRUCTION
-//				(Here the we tick the timers too)
-//////////////////////////////////////////////////////////////////////////
 void requestPeripheralPoll() {
   peripheralPollRequested = true;
 }
@@ -2654,16 +2616,12 @@ int readWptrWord(uint32_t index, uint32_t *value) {
   return result;
 }
 
-/**************************
- */
 int addrWptrWord(uint32_t index, uint32_t *address) {
   *address = cpuState.wptr + index * BytesPerWord;
 
   return 0;
 }
 
-/**************************
- */
 int storeWptrWord(uint32_t index, uint32_t value) {
   int result = 0;
   uint32_t address;
@@ -2825,7 +2783,6 @@ void resetTimers() {
   omrState.ClockEnables |= LPTIMER_MASK; // set bit1
   omrState.Enables = 0xffffc000;         // the initial state, see omr.h
                                          // bit 14 and 15 are reserved but set to 1
-  //'ticking' code is into execInstr() subroutine
 }
 
 int initTimer() {

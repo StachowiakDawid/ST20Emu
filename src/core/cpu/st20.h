@@ -88,7 +88,7 @@ inline constexpr uint32_t ALT_NONE_SELECTED = 0xffffffffU;
  */
 #define LDDEVID 0x210
 
-/* Error codes from st20.c */
+/* Error codes from st20.cpp */
 #define ST20_ERROR_START -2000
 #define ST20_ERROR_END -2999
 

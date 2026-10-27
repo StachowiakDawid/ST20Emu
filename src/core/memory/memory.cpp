@@ -131,11 +131,9 @@ int byteUsedBit(MEMBLK *blk, int offset, int set_flag);
 int memoryInit() {
   /* the emulator will get into an infinite loop if this initialization isn't done */
   storeBytes(0x3004U, 4, 0U);
-  // below for sti5518 ASC1 20005000 base
+  // STi5518 ASC2 (base 0x20005000) receive buffer and status
   storeBytes(0x20005008U, 4, 0x00000000U);
   storeBytes(0x20005014U, 4, 0x00000000U);
-  // below for sti5517
-  // storeBytes(0x200130f8U, 4, 0x00000001U);
 
   return 0;
 }

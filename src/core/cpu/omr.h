@@ -22,7 +22,6 @@
 inline constexpr uint32_t HP_TIMER_HZ = 1000000;
 inline constexpr uint32_t LP_TIMER_HZ = 15625;
 inline constexpr uint32_t NO_PROCESS = 0x80000000U;
-// static uint32_t lpm_timertick=CPU_CLOCK/LPM_CLOCK; //Low Power Module Clock (64bit!!)
 
 #ifndef OMRSTATE_STRUCT
 #define OMRSTATE_STRUCT
@@ -54,7 +53,6 @@ typedef struct omrState {
 } OMRSTATE;
 #endif
 
-// Function Prototypes
 /*
  - ENABLES REGISTER -
 The Enables register contains:
@@ -111,8 +109,8 @@ priority and 0 indicates high priority.
 The process descriptor is formed from a pointer to the process workspace or-ed with
 the priority flag at bit 0. Bit 1 is always set to 0.
 Wdesc is defined so that the following invariants are obeyed:
-  Wptr = Wdesc ^ WordSelectMask
-  Priority = Wdesc ^ 1
+  Wptr = Wdesc & WordSelectMask
+  Priority = Wdesc & 1
 Figure
       Workspace Address			  0 Pr
   bit 31..............................2 1 0
@@ -140,7 +138,7 @@ constexpr uint32_t TRAP_GROUP_SCHEDULER = 3;
 #define SIGNAL_TRAPENB 0x800       // bit 11
 #define PROCESS_TRAPENB 0x1000     // bit 12
 #define QUEUE_EMPTY_TRAPENB 0x2000 // bit 13
-// bits14-15 are reserved 0x3000 0x4000
+// bits 14-15 (0x4000, 0x8000) are reserved
 #define LP_PROCESS_INT_ENB 0x10000    // bit 16
 #define LP_TIMESLICE_ENB 0x20000      // bit 17
 #define LP_EXTERNALEVENT_ENB 0x40000  // bit 18

@@ -2,7 +2,7 @@
 #include "../../core/memory/memory.h"
 
 /*
- * STi5512 Register Manual (7145562 B), chapter 24. Only I2C master transfers are modelled:
+ * STi5512 Register Manual (7145562 B) chapter 24; the STi5518's SSC is the same. Only I2C master transfers are modelled:
  * a TBUF write while STRTG is set sends a START and the address frame; data frames follow
  * until STOPG releases the bus. Slave mode, SPI transfers, arbitration, clock stretching
  * and 10-bit addressing are not modelled.

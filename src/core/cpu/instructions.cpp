@@ -830,10 +830,7 @@ int lb_(uint32_t /*unused*/) {
   result = readBytes(oldAreg, 1, &newAreg);
   push(newAreg);
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
@@ -858,10 +855,7 @@ int lbx_(uint32_t /*unused*/) {
   }
   push(newAreg);
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
@@ -886,9 +880,6 @@ int ldc_(uint32_t operand) {
   should be used instead.
 */
 int lddevid_(uint32_t /*unused*/) {
-  /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
-          st20ProductId); */
-
   push(st20ProductId);
 
   return 0;
@@ -1015,10 +1006,7 @@ int ldnl_(uint32_t offset) {
   int result = readBytes(address, BytesPerWord, &cWord);
   push(cWord);
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", address, cWord);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
@@ -1055,9 +1043,6 @@ int reboot_(uint32_t /*unused*/) {
 }
 
 int ldprodid_(uint32_t /*unused*/) {
-  /*  compat::println("Product ID is unknown.  Setting A register to {:0x}",
-          st20ProductId); */
-
   push(st20ProductId);
 
   return 0;
@@ -1153,10 +1138,7 @@ int ls_(uint32_t /*unused*/) {
   result = readBytes(oldAreg, 2, &newAreg);
   push(newAreg);
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", memoryError(result));
@@ -1461,10 +1443,7 @@ int sb_(uint32_t /*value*/) {
 
   int result = storeBytes(value1, 1, static_cast<unsigned char>(value2 & 0xFF));
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFF);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", st20Error(result));
@@ -1563,10 +1542,7 @@ int ss_(uint32_t /*value*/) {
 
   int result = storeBytes(value1, 2, static_cast<unsigned int>(value2 & 0xFFFF));
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFFFF);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", st20Error(result));
@@ -1627,12 +1603,6 @@ int stclock_(uint32_t /*unused*/) {
   else
     omrState.ClockRegHP = oldBreg;
 
-  // omrState.Enables|=HPTIMER_MASK; // set bit0
-  // omrState.Enables|=LPTIMER_MASK; // set bit1
-
-  // AND NOW CLOCKS MUST START TICKING!!! But how can i do it?!
-  // check 'Enables' flag....
-
   return 0;
 }
 
@@ -1660,11 +1630,8 @@ int stnl_(uint32_t offset) {
 
   int result = storeBytes(oldAreg + offset * BytesPerWord, BytesPerWord, oldBreg);
 
-  // TODO: move execution diagnostics behind a frontend observer.
-  // if (needPrompt()) {
   compat::note("NOTE: Write to memory address {:08x}, value=0x{:08x}", oldAreg + offset * BytesPerWord,
                   oldBreg);
-  // }
 
   if (result) {
     compat::println("ERROR: {}", st20Error(result));
@@ -1704,7 +1671,6 @@ int wait_(uint32_t /*unused*/) {
 }
 
 int wcnt_(uint32_t /*unused*/) {
-  // uint32_t value1, value2;
   uint32_t value1;
 
   value1 = pop();
@@ -1893,8 +1859,7 @@ int clockdis_(uint32_t /*unused*/) {
     omrState.ClockEnables &= ~LPTIMER_MASK; // clear bit1
 
   push(oldClockEnables &= ENABLE_CLOCKREG_MASK); // bit 0.1 leaved unchanged. others are zero'ed
-                                 //'ticking' code is into execInstr() subroutine
-  return 0;
+                                 return 0;
 }
 
 /*
@@ -1922,8 +1887,7 @@ int clockenb_(uint32_t /*unused*/) {
     omrState.ClockEnables |= LPTIMER_MASK; // set bit1
 
   push(oldClockEnables &= ENABLE_CLOCKREG_MASK); // bit 0.1 leaved unchanged. others are zero'ed
-                                 //'ticking' code is into execInstr() subroutine
-  return 0;
+                                 return 0;
 }
 
 /*
@@ -1947,7 +1911,6 @@ int ldclock_(uint32_t /*unused*/) {
   else
     push(omrState.ClockRegHP);
 
-  //'ticking' code is into execInstr() subroutine
 
   return 0;
 }

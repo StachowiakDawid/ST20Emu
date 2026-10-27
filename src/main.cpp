@@ -412,7 +412,7 @@ int main(int argc, char **argv) {
   while (!cli.is_quit_requested()) {
     /*
      * free run: execute straight through to the next instruction this loop has to look at
-     * (serial output, progress message, key poll, instruction limit). An instruction that
+     * (serial output, progress message, stop-request check, instruction limit). An instruction that
      * stops the run is handed to the regular path below as already executed.
      */
     bool executed = false;
@@ -448,7 +448,7 @@ int main(int argc, char **argv) {
     /*
      * if the program is running without prompts, exit this state if
      * we have executed lots of instructions and haven't encountered
-     * a watch condition or if a key has been pressed.
+     * a watch condition or if "g" has been entered.
      */
     if (!cli.needs_prompt()) {
       if (++instrCount >= maxInstr) {
