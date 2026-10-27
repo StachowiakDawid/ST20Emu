@@ -47,6 +47,13 @@ void print(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
 template <typename... Args> void print(std::format_string<Args...> fmt, Args &&...args) {
   compat::print(stdout, fmt, std::forward<Args>(args)...);
 }
+
+// per-instruction trace notes (memory and device accesses); free-running execution turns them off
+inline bool notesEnabled = true;
+
+template <typename... Args> void note(std::format_string<Args...> fmt, Args &&...args) {
+  if (notesEnabled) println(stdout, fmt, std::forward<Args>(args)...);
+}
 } // namespace compat
 
 // Helper to efficiently trim whitespace from string_view

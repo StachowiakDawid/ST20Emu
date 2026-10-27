@@ -141,6 +141,8 @@ inline constexpr uint32_t STATUS_PORTABLE_INTDIS = 1U << 24;
 using InterruptReturnObserver = void (*)();
 using PeripheralPoller = int (*)();
 void setPeripheralPoller(PeripheralPoller poller);
+/* polls peripherals at the next opportunity instead of waiting for the poll interval */
+void requestPeripheralPoll();
 void setInterruptReturnObserver(InterruptReturnObserver observer);
 using RebootObserver = int (*)();
 /* called by rebootProcessor() so the SoC can return its devices to their reset state */

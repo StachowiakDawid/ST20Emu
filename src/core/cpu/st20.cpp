@@ -47,7 +47,6 @@
 #include <cstring>
 #include <algorithm>
 #include <array>
-#include <unordered_set>
 #include <unordered_map>
 #include <deque>
 #include <bit>
@@ -90,6 +89,12 @@ InterruptReturnObserver interruptReturnObserver = nullptr;
 PeripheralPoller peripheralPoller = nullptr;
 RebootObserver rebootObserver = nullptr;
 uint64_t cpuCycles = 0;
+
+/* peripherals are polled every peripheralPollCycles, and right after a device register access
+ * or an interrupt return, rather than after every instruction */
+constexpr uint64_t peripheralPollCycles = 64;
+uint64_t lastPeripheralPoll = 0;
+bool peripheralPollRequested = true;
 bool portableInstructionAbi = false;
 struct ExternalChannel {
   uint32_t capacity;
@@ -136,6 +141,27 @@ struct PendingTrap {
 };
 PendingTrap pendingTimerTrap;
 bool queueEmptyReported[2]{};
+
+/* instructions decoded from memory, keyed by address and revalidated with the block's write
+ * version, so prefix chains aren't re-read byte by byte on every execution */
+struct DecodedInstr {
+  uint32_t iptr;
+  uint32_t version;
+  uint32_t code;
+  uint32_t operand;
+  int length; // 0: empty slot
+  unsigned char bytes[12];
+};
+constexpr std::size_t decodeCacheSize = std::size_t{1} << 16;
+std::array<DecodedInstr, decodeCacheSize> decodeCache{};
+
+/* records a workspace met while walking a process list; false when it was already met (a
+ * cyclic list). Callers keep their buffer static so the per-instruction walks don't allocate. */
+bool visitOnce(std::vector<uint32_t> &visited, uint32_t workspace) {
+  if (std::ranges::find(visited, workspace) != visited.end()) return false;
+  visited.push_back(workspace);
+  return true;
+}
 
 uint32_t trapGroup(uint32_t cause) {
   unsigned int bit = static_cast<unsigned int>(std::countr_zero(cause));
@@ -679,10 +705,16 @@ int releaseTimers(uint32_t oldHP, uint32_t oldLP, uint64_t ticksHP, uint64_t tic
     if (!(omrState.Enables & enable)) continue;
     uint32_t oldClock = priority == HIGH_PRIORITY ? oldHP : oldLP;
     uint64_t ticks = priority == HIGH_PRIORITY ? ticksHP : ticksLP;
-    std::unordered_set<uint32_t> visited;
+    /* the alarm register holds the front process's time (as on silicon), so there is nothing
+     * to release while it hasn't been reached */
+    uint32_t alarm = omrState.TnextReg[priority];
+    if (omrState.TptrReg[priority] == NO_PROCESS || (!timeReached(oldClock, alarm) && ticks < alarm - oldClock))
+      continue;
+    static std::vector<uint32_t> visited;
+    visited.clear();
     while (omrState.TptrReg[priority] != NO_PROCESS) {
       uint32_t workspace = omrState.TptrReg[priority];
-      if ((workspace & 3U) || !visited.insert(workspace).second) return INVALID_PROCESS_LIST;
+      if ((workspace & 3U) || !visitOnce(visited, workspace)) return INVALID_PROCESS_LIST;
       uint32_t time = 0;
       int result = readProcessWord(workspace, pw::Time, time);
       if (result) return result;
@@ -962,7 +994,9 @@ int pollTimers() {
   if (omrState.halted) return CPU_HALTED;
   int result = releaseTimers(omrState.ClockRegHP, omrState.ClockRegLP, 0, 0);
   if (result || executingInstruction) return result;
-  if (peripheralPoller) {
+  if (peripheralPoller && (peripheralPollRequested || cpuCycles - lastPeripheralPoll >= peripheralPollCycles)) {
+    peripheralPollRequested = false;
+    lastPeripheralPoll = cpuCycles;
     result = peripheralPoller();
     if (result) return result;
   }
@@ -1277,6 +1311,7 @@ void setInterruptReturnObserver(InterruptReturnObserver observer) {
 
 void setPeripheralPoller(PeripheralPoller poller) {
   peripheralPoller = poller;
+  peripheralPollRequested = true;
 }
 
 void setRebootObserver(RebootObserver observer) {
@@ -1293,6 +1328,7 @@ int rebootProcessor() {
   if (!result && rebootObserver) result = rebootObserver();
   cpuState.iptr = startAddr;
   compat::println("NOTE: reboot, restarting at 0x{:08x}", startAddr);
+  peripheralPollRequested = true;
   return result;
 }
 
@@ -1360,6 +1396,7 @@ int returnFromInterrupt() {
     }
   }
   if (interruptReturnObserver) interruptReturnObserver();
+  peripheralPollRequested = true;
   return 0;
 }
 
@@ -1563,9 +1600,10 @@ int disableAltTimer(uint32_t offset, bool enabled, uint32_t time, uint32_t *sele
   unsigned char priority = cpuState.priority;
   uint32_t previous = NO_PROCESS;
   uint32_t cursor = omrState.TptrReg[priority];
-  std::unordered_set<uint32_t> visited;
+  static std::vector<uint32_t> visited;
+  visited.clear();
   while (cursor != NO_PROCESS) {
-    if ((cursor & 3U) || !visited.insert(cursor).second) return INVALID_PROCESS_LIST;
+    if ((cursor & 3U) || !visitOnce(visited, cursor)) return INVALID_PROCESS_LIST;
     uint32_t next = NO_PROCESS;
     int result = readProcessWord(cursor, pw::TLink, next);
     if (result) return result;
@@ -1982,9 +2020,10 @@ int waitTimer(uint32_t time, bool alternative) {
   uint32_t deadline = time + 1U;
   uint32_t previous = NO_PROCESS;
   uint32_t next = omrState.TptrReg[priority];
-  std::unordered_set<uint32_t> visited;
+  static std::vector<uint32_t> visited;
+  visited.clear();
   while (next != NO_PROCESS) {
-    if ((next & 3U) || next == cpuState.wptr || !visited.insert(next).second)
+    if ((next & 3U) || next == cpuState.wptr || !visitOnce(visited, next))
       return INVALID_PROCESS_LIST;
     uint32_t nextTime = 0;
     int result = readProcessWord(next, pw::Time, nextTime);
@@ -2535,6 +2574,16 @@ int decodeNextInstr() {
     return 0;
   }
 
+  uint32_t block = cpuState.iptr >> BLKSHIFT;
+  DecodedInstr &cached = decodeCache[cpuState.iptr & (decodeCacheSize - 1)];
+  if (cached.length && cached.iptr == cpuState.iptr && cached.version == blockVersion[block]) {
+    instrCode = cached.code;
+    operand = cached.operand;
+    instrLength = cached.length;
+    std::memcpy(instrBytes, cached.bytes, sizeof cached.bytes);
+    return 0;
+  }
+
   instrCode = 0;
   operand = 0;
   instrLength = 0;
@@ -2605,6 +2654,13 @@ int decodeNextInstr() {
     }
   }
 
+  uint32_t last = cpuState.iptr + static_cast<uint32_t>(instrLength) - 1U;
+  if (static_cast<std::size_t>(instrLength) <= sizeof cached.bytes && last >> BLKSHIFT == block &&
+      !isMemoryDeviceAddress(cpuState.iptr)) {
+    cached = {cpuState.iptr, blockVersion[block], instrCode, operand, instrLength, {}};
+    std::memcpy(cached.bytes, instrBytes, sizeof cached.bytes);
+  }
+
   return (0);
 }
 
@@ -2659,6 +2715,10 @@ int printNextInstr(const CPUTrace &trace) {
 //					EXEC DECODED INSTRUCTION
 //				(Here the we tick the timers too)
 //////////////////////////////////////////////////////////////////////////
+void requestPeripheralPoll() {
+  peripheralPollRequested = true;
+}
+
 uint64_t elapsedCpuCycles() {
   return cpuCycles;
 }

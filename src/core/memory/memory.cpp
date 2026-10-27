@@ -12,11 +12,13 @@
 #include <unistd.h>
 
 // std
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <new>
 #include <regex>
 #include <vector>
@@ -39,8 +41,12 @@ static MEMBLK *memoryMap = nullptr;
 
 /* direct lookup of every allocated block by address >> BLKSHIFT, so reads
  * don't walk the sorted memoryMap list (which is kept for save/load) */
-static constexpr int BLKSHIFT = std::countr_zero(BLKSIZE);
 static MEMBLK *blockIndex[(UINT64_C(1) << 32) >> BLKSHIFT]{};
+
+uint32_t blockVersion[(UINT64_C(1) << 32) >> BLKSHIFT]{};
+
+/* blocks that overlap a memory-mapped device; accesses elsewhere skip the device list */
+static bool deviceBlock[(UINT64_C(1) << 32) >> BLKSHIFT]{};
 
 namespace {
 std::vector<MemoryDevice> memoryDevices;
@@ -57,6 +63,7 @@ int deviceForAccess(uint32_t address, int width, const MemoryDevice **device) {
   *device = nullptr;
   if (width <= 0) return 0;
   uint64_t end = static_cast<uint64_t>(address) + static_cast<uint32_t>(width) - 1U;
+  if (!deviceBlock[address >> BLKSHIFT] && !deviceBlock[static_cast<uint32_t>(end) >> BLKSHIFT]) return 0;
   for (const MemoryDevice &candidate : memoryDevices) {
     bool overlaps = (address <= candidate.end && end >= candidate.start) ||
                     (end > UINT32_MAX && static_cast<uint32_t>(end) >= candidate.start);
@@ -67,6 +74,29 @@ int deviceForAccess(uint32_t address, int width, const MemoryDevice **device) {
   }
   return 0;
 }
+
+void indexDeviceBlocks() {
+  std::fill(std::begin(deviceBlock), std::end(deviceBlock), false);
+  for (const MemoryDevice &device : memoryDevices) {
+    for (uint64_t block = device.start >> BLKSHIFT; block <= device.end >> BLKSHIFT; ++block)
+      deviceBlock[block] = true;
+  }
+}
+
+/* reads nBytes (little-endian) that lie in one block and have all been written; false otherwise */
+bool readWrittenBytes(uint32_t address, int nBytes, uint32_t *value) {
+  uint32_t offset = address & ADDR_IN_BLK_MASK;
+  MEMBLK *block = blockIndex[address >> BLKSHIFT];
+  if (block == nullptr || offset + static_cast<uint32_t>(nBytes) > BLKSIZE) return false;
+  uint32_t word = 0;
+  for (uint32_t i = 0; i < static_cast<uint32_t>(nBytes); ++i) {
+    uint32_t byte = offset + i;
+    if (!(block->used[byte >> 3] & (1U << (byte & 7U)))) return false;
+    word |= static_cast<uint32_t>(block->data[byte]) << (8U * i);
+  }
+  *value = word;
+  return true;
+}
 }
 
 int registerMemoryDevice(const MemoryDevice &device) {
@@ -75,6 +105,7 @@ int registerMemoryDevice(const MemoryDevice &device) {
     if (device.start <= existing.end && device.end >= existing.start) return INVALID_MEMORY_DEVICE;
   }
   memoryDevices.push_back(device);
+  indexDeviceBlocks();
   return 0;
 }
 
@@ -82,6 +113,7 @@ int unregisterMemoryDevice(uint32_t start) {
   for (auto device = memoryDevices.begin(); device != memoryDevices.end(); ++device) {
     if (device->start == start) {
       memoryDevices.erase(device);
+      indexDeviceBlocks();
       return 0;
     }
   }
@@ -89,6 +121,7 @@ int unregisterMemoryDevice(uint32_t start) {
 }
 
 bool isMemoryDeviceAddress(uint32_t address) {
+  if (!deviceBlock[address >> BLKSHIFT]) return false;
   for (const MemoryDevice &device : memoryDevices) {
     if (address >= device.start && address <= device.end) return true;
   }
@@ -174,10 +207,12 @@ int readBytes(uint32_t address, int nBytes, uint32_t *value) {
   const MemoryDevice *mappedDevice = nullptr;
   int deviceResult = deviceForAccess(address, nBytes, &mappedDevice);
   if (deviceResult) return deviceResult;
+  if (!mappedDevice && readWrittenBytes(address, nBytes, value)) return 0;
   if (mappedDevice) {
     MemoryDevice device = *mappedDevice;
     if (!device.read) return DEVICE_ACCESS_UNSUPPORTED;
     uint32_t word = 0;
+    requestPeripheralPoll();
     deviceResult = device.read(device.context, address, nBytes, &word);
     if (deviceResult) return deviceResult;
     uint32_t mask = nBytes == 4 ? UINT32_MAX : (1U << (nBytes * 8)) - 1U;
@@ -244,7 +279,22 @@ int storeBytes(uint32_t address, int nBytes, uint32_t value) {
     MemoryDevice device = *mappedDevice;
     if (!device.write) return DEVICE_ACCESS_UNSUPPORTED;
     uint32_t mask = nBytes == 4 ? UINT32_MAX : (1U << (nBytes * 8)) - 1U;
+    requestPeripheralPoll();
     return device.write(device.context, address, nBytes, value & mask);
+  }
+
+  /* all bytes in one block: look it up once */
+  uint32_t blockOffset = address & ADDR_IN_BLK_MASK;
+  if (nBytes > 0 && blockOffset + static_cast<uint32_t>(nBytes) <= BLKSIZE) {
+    MEMBLK *block = getMemBlk(address, true);
+    if (block == nullptr) return READ_UNUSED_MEM;
+    for (uint32_t byte = blockOffset; byte < blockOffset + static_cast<uint32_t>(nBytes); ++byte) {
+      block->data[byte] = static_cast<unsigned char>(cWord & 0xFFU);
+      block->used[byte >> 3] |= static_cast<unsigned char>(1U << (byte & 7U));
+      cWord >>= 8U;
+    }
+    ++blockVersion[address >> BLKSHIFT];
+    return 0;
   }
 
   for (int i = 0; i < nBytes; i++) {
@@ -264,6 +314,7 @@ int storeBytes(uint32_t address, int nBytes, uint32_t value) {
 
     /* save the byte in the memory block */
     cBlk->data[offset] = cByte;
+    ++blockVersion[(address + static_cast<uint32_t>(i)) >> BLKSHIFT];
 
     /* mark the byte as used */
     byteUsedBit(cBlk, offset, static_cast<int>(SET_BIT));
@@ -461,6 +512,7 @@ int bulkLoadBytes(uint32_t address, const char *byteFile, char *usedFile, uint32
 
       /* copy the data into the memory block */
       memcpy(&(cBlk->data[blockOffset]), data, static_cast<size_t>(nBytesRead));
+      ++blockVersion[cBlk->startAddr >> BLKSHIFT];
 
       /* if there is no used byte file, set all of the bytes to used */
       if (usedFd < 0) {
@@ -689,6 +741,7 @@ void freeAllMemory() {
   while (current != nullptr) {
     MEMBLK* next = current->next;
     blockIndex[current->startAddr >> BLKSHIFT] = nullptr;
+    ++blockVersion[current->startAddr >> BLKSHIFT];
     delete current;
     current = next;
   }

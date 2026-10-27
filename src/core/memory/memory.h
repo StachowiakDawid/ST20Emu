@@ -3,11 +3,17 @@
 
 #include "../../common/defines.h"
 
+#include <bit>
 #include <cstdint>
 
 inline constexpr uint32_t BLKSIZE = 8 * 1024;
 inline constexpr uint32_t ADDR_IN_BLK_MASK = BLKSIZE - 1U;
 inline constexpr uint32_t ADDR_OF_BLK_MASK = ~ADDR_IN_BLK_MASK;
+inline constexpr int BLKSHIFT = std::countr_zero(BLKSIZE);
+
+/* changes whenever a block's bytes do, so data derived from them (decoded instructions) can be
+ * revalidated cheaply */
+extern uint32_t blockVersion[(UINT64_C(1) << 32) >> BLKSHIFT];
 
 /* Error codes from memory subsystem */
 inline constexpr int MEMORY_ERROR_START = -1000;

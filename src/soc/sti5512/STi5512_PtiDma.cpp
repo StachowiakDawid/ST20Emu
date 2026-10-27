@@ -1,8 +1,10 @@
 #include "STi5512_PtiDma.h"
 #include "STi5512_VideoDecoder.h"
 #include "../common/STi55xx_Asc.h"
+#include "../../core/cpu/st20.h"
 #include "../../core/memory/memory.h"
 
+#include <algorithm>
 #include <array>
 
 /*
@@ -20,9 +22,13 @@ constexpr uint32_t topRegister = 0x10 / 4;
 constexpr uint32_t writeRegister = 0x20 / 4;
 constexpr uint32_t readRegister = 0x30 / 4;
 constexpr uint32_t enableRegister = 0x50 / 4;
-constexpr uint32_t bytesPerTick = 64;
+/* devices are polled every few dozen cycles, so the budget follows the cycles since the last
+ * transfer; it is generous enough that the bit buffer, not the DMA, limits the rate */
+constexpr uint64_t bytesPerCycle = 64;
+constexpr uint64_t maxBytesPerTick = 64 * 1024;
 
 std::array<uint32_t, (dmaEnd + 1 - dmaBase) / 4> dma{};
+uint64_t lastCycle = 0;
 
 int readDma(void *, uint32_t address, int width, uint32_t *value) {
   int result = checkWordAccess(address, width);
@@ -45,9 +51,13 @@ MemoryDevice sti5512PtiDmaDevice() {
 
 void resetSti5512PtiDma() {
   dma = {};
+  lastCycle = elapsedCpuCycles();
 }
 
 void tickSti5512PtiDma() {
+  uint64_t now = elapsedCpuCycles();
+  uint64_t bytesPerTick = std::min(std::max<uint64_t>(now - lastCycle, 1) * bytesPerCycle, maxBytesPerTick);
+  lastCycle = now;
   for (uint32_t channel = 1; channel < 4; ++channel) {
     if (!(dma[enableRegister] & (1U << channel))) continue;
     uint32_t &read = dma[readRegister + channel];

@@ -43,11 +43,11 @@ int deviceAccess(int width, bool writeAccess, const char *mnemonic) {
     push(value);
   }
 
-  compat::println("NOTE: At 0x{:08x} {} of device at address {:08x}, value=0x{:08x}",
+  compat::note("NOTE: At 0x{:08x} {} of device at address {:08x}, value=0x{:08x}",
                   get_iptr() - static_cast<uint32_t>(instrLength),
                   writeAccess ? "Write" : "Read", address, value);
   if (!writeAccess && !mappedDevice)
-    compat::println("Value of A register is questionable");
+    compat::note("Value of A register is questionable");
   if (deviceAccessObserver)
     deviceAccessObserver(address);
 
@@ -583,7 +583,7 @@ int call_(uint32_t offset) {
   cpuState.creg = undefinedWord;
   cpuState.iptr += offset;
 
-  compat::println("Call to {:08x} ,return to {:08x}", cpuState.iptr, addr);
+  compat::note("Call to {:08x} ,return to {:08x}", cpuState.iptr, addr);
 
   return 0;
 }
@@ -883,7 +883,7 @@ int lb_(uint32_t /*unused*/) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
+  compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   if (result) {
@@ -911,7 +911,7 @@ int lbx_(uint32_t /*unused*/) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
+  compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   if (result) {
@@ -1068,7 +1068,7 @@ int ldnl_(uint32_t offset) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", address, cWord);
+  compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", address, cWord);
   // }
 
   if (result) {
@@ -1206,7 +1206,7 @@ int ls_(uint32_t /*unused*/) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
+  compat::note("NOTE: Read of memory address {:08x}, value=0x{:08x}", oldAreg, newAreg);
   // }
 
   if (result) {
@@ -1330,7 +1330,7 @@ int move_(uint32_t /*unused*/) {
 
   int result = storeByteRange(oldCreg, oldBreg, oldAreg);
 
-  compat::println("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg,
+  compat::note("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg,
                   oldCreg, oldBreg);
 
   if (result) {
@@ -1521,7 +1521,7 @@ int sb_(uint32_t /*value*/) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFF);
+  compat::note("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFF);
   // }
 
   if (result) {
@@ -1623,7 +1623,7 @@ int ss_(uint32_t /*value*/) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFFFF);
+  compat::note("NOTE: Write to memory address {:08x}, value=0x{:08x}", value1, value2 & 0xFFFF);
   // }
 
   if (result) {
@@ -1677,7 +1677,7 @@ int stclock_(uint32_t /*unused*/) {
   oldAreg = pop();
   oldBreg = pop();
 
-  compat::println("0x{:08x} stored in {} clock", oldBreg,
+  compat::note("0x{:08x} stored in {} clock", oldBreg,
                   (oldAreg & 1) ? "low priority" : "high priority");
 
   if (oldAreg & 1)
@@ -1720,7 +1720,7 @@ int stnl_(uint32_t offset) {
 
   // TODO: move execution diagnostics behind a frontend observer.
   // if (needPrompt()) {
-  compat::println("NOTE: Write to memory address {:08x}, value=0x{:08x}", oldAreg + offset * BytesPerWord,
+  compat::note("NOTE: Write to memory address {:08x}, value=0x{:08x}", oldAreg + offset * BytesPerWord,
                   oldBreg);
   // }
 
@@ -1866,10 +1866,10 @@ Error signals: none
 int ldtimer_(uint32_t /*unused*/) {
   if (cpuState.priority == HIGH_PRIORITY) {
     push(omrState.ClockRegHP);
-    compat::println("Read of HIGH_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegHP);
+    compat::note("Read of HIGH_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegHP);
   } else {
     push(omrState.ClockRegLP);
-    compat::println("Read of LOW_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegLP);
+    compat::note("Read of LOW_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegLP);
   }
   return 0;
 }
@@ -1893,7 +1893,7 @@ Error signals: none
 int sttimer_(uint32_t /*unused*/) {
 
   omrState.ClockRegHP = omrState.ClockRegLP = pop();
-  compat::println("LOW and HIGH priority clock registers were set to 0x{:08x}",
+  compat::note("LOW and HIGH priority clock registers were set to 0x{:08x}",
                   omrState.ClockRegHP);
 
   omrState.ClockEnables |= HPTIMER_MASK; // set bit0
@@ -1998,7 +1998,7 @@ int ldclock_(uint32_t /*unused*/) {
 
   oldAreg = pop();
 
-  compat::println("Areg loaded with {} clock", (oldAreg & 1) ? "LOW_PRIORITY" : "HIGH_PRIORITY");
+  compat::note("Areg loaded with {} clock", (oldAreg & 1) ? "LOW_PRIORITY" : "HIGH_PRIORITY");
 
   if (oldAreg & 1)
     push(omrState.ClockRegLP);

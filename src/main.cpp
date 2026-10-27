@@ -453,6 +453,7 @@ int main(int argc, char **argv) {
 
   while (!cli.is_quit_requested()) {
     if (instructionReady) {
+      compat::notesEnabled = cli.needs_prompt();
       int result = execInstr(&watchTripped);
       if (result || ++serialCount % SERIAL_INTERVAL == 0) printSerialOutput(result != 0);
       if (result) {
