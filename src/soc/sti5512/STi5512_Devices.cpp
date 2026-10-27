@@ -4,11 +4,10 @@
 #include "../../core/memory/memory.h"
 #include "../common/STi55xx_Asc.h"
 #include "../common/STi55xx_Inc.h"
+#include "../common/STi55xx_Pwm.h"
 #include "../common/STi55xx_Ssc.h"
 #include "STi5512_Display.h"
-#include "STi5512_Pio.h"
 #include "STi5512_PtiDma.h"
-#include "STi5512_Pwm.h"
 #include "STi5512_RegisterBlocks.h"
 #include "STi5512_VideoDecoder.h"
 
@@ -30,6 +29,9 @@ constexpr uint32_t videoSource = 21;
 BoardPoller boardPoller = nullptr;
 std::array<AscDevice, 4> ascDevices{{{0x20003000U, 10}, {0x20004000U, 9}, {0x20005000U, 8}, {0x20006000U, 7}}};
 std::array<SscDevice, 2> sscDevices{{{0x20009000U, 5}, {0x2000a000U, 6}}};
+std::array<PioPort, sti5512PioPorts> pioPorts{{{0x2000c000U, 0}, {0x2000d000U, 1}, {0x2000e000U, 2},
+    {0x2000f000U, 3}, {0x20010000U, 4}}};
+PwmDevice pwmDevice{0x2000b000U};
 InterruptController controller{controllerBase, false};
 std::array<uint32_t, 0x80 / 4> levels{};
 uint8_t videoRevision = 0;
@@ -69,8 +71,8 @@ int registerDevices() {
   for (auto &device : ascDevices) devices.push_back({device.base, device.base + ascRegisterEnd, &device, readAsc, writeAsc});
   for (auto &device : sscDevices) devices.push_back({device.base, device.base + sscRegisterEnd, &device, readSsc, writeSsc});
   devices.push_back(sti5512PtiDmaDevice());
-  devices.push_back(sti5512PwmDevice());
-  for (const auto &device : sti5512PioDevices()) devices.push_back(device);
+  devices.push_back({pwmDevice.base, pwmDevice.base + pwmRegisterEnd, &pwmDevice, readPwm, writePwm});
+  for (auto &port : pioPorts) devices.push_back({port.base, port.base + pioRegisterEnd, &port, readPio, writePio});
   devices.push_back({controllerBase, controllerBase + incRegisterEnd, &controller, readInc, writeInc});
   devices.push_back({levelBase, levelBase + 0x7f, nullptr, readLevel, writeLevel});
   for (const auto &device : devices) {
@@ -89,8 +91,8 @@ int resetDevices() {
   for (auto &device : ascDevices) resetAsc(device);
   for (auto &device : sscDevices) resetSsc(device);
   resetSti5512PtiDma();
-  resetSti5512Pwm();
-  resetSti5512Pio();
+  resetPwm(pwmDevice);
+  for (auto &port : pioPorts) resetPio(port);
   resetSti5512Display();
   resetSti5512VideoDecoder();
   resetInc(controller);
@@ -110,7 +112,7 @@ int pollSti5512Devices() {
   }
   tickSti5512PtiDma();
   if (boardPoller) boardPoller();
-  if (tickSti5512Pwm()) inputs |= 1U << pwmSource;
+  if (tickPwm(pwmDevice)) inputs |= 1U << pwmSource;
   if (tickSti5512Display()) inputs |= 1U << videoSource;
   levels[0x7c / 4] = inputs;
   uint32_t routedLevels = 0;
@@ -161,4 +163,20 @@ int attachSti5512I2cDevice(int port, I2cRegisterDevice *device) {
 
 void setSti5512BoardPoller(BoardPoller poller) {
   boardPoller = poller;
+}
+
+void setSti5512PioObserver(PioOutputObserver observer) {
+  for (auto &port : pioPorts) port.observer = observer;
+}
+
+void setSti5512PioInputSource(PioInputSource source) {
+  for (auto &port : pioPorts) port.input = source;
+}
+
+uint8_t sti5512PioOutput(int port) {
+  return port >= 0 && port < sti5512PioPorts ? pioPorts[static_cast<std::size_t>(port)].registers[0] : 0;
+}
+
+void sti5512PwmCaptureEdge(int input, bool rising) {
+  pwmCaptureEdge(pwmDevice, input, rising);
 }

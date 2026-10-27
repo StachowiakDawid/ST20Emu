@@ -5,7 +5,6 @@
 
 #include "../../common/compat.h"
 #include "../../common/defines.h"
-// #include "../../soc/sti5518/STi5518_SearchDB.h"
 #include "../memory/memory.h"
 
 #include <algorithm>
@@ -27,8 +26,6 @@ extern int readWptrWord(uint32_t index, uint32_t *value);
 extern INSTRENTRY instrEntry[];
 
 namespace {
-DeviceAccessObserver deviceAccessObserver = nullptr;
-
 int deviceAccess(int width, bool writeAccess, const char *mnemonic) {
   uint32_t address = pop();
   bool mappedDevice = isMemoryDeviceAddress(address);
@@ -48,8 +45,6 @@ int deviceAccess(int width, bool writeAccess, const char *mnemonic) {
                   writeAccess ? "Write" : "Read", address, value);
   if (!writeAccess && !mappedDevice)
     compat::note("Value of A register is questionable");
-  if (deviceAccessObserver)
-    deviceAccessObserver(address);
 
   if (result && (mappedDevice || writeAccess || result != READ_UNUSED_MEM)) {
     compat::println("ERROR: {}", memoryError(result));
@@ -179,10 +174,6 @@ int copy2d(Move2dFilter filter) {
   return 0;
 }
 
-}
-
-void setDeviceAccessObserver(DeviceAccessObserver observer) {
-  deviceAccessObserver = observer;
 }
 
 /*

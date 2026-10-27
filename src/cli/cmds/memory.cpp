@@ -22,26 +22,6 @@ CliError cmd_load(CliEngine & /*engine*/, std::span<const std::string_view> args
   return result == 0 ? CliError::Success : CliError::InputError;
 }
 
-CliError cmd_load_data(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  if (args.empty())
-    return CliError::BadParameter;
-
-  uint32_t startAddr = 0;
-  uint32_t dataLength = 0;
-  int result = 0;
-
-  if (args.size() >= 2 && parseHex(std::string(args[0]), startAddr)) {
-    std::string file_path(args[1]);
-    result = bulkLoadBytes(startAddr, file_path.c_str(), nullptr, &dataLength);
-  } else {
-    std::string file_path(args[0]);
-    result = bulkLoadBytes(0, file_path.c_str(), nullptr, &dataLength);
-    compat::println("Read {} bytes from {}", dataLength, file_path);
-  }
-
-  return result == 0 ? CliError::Success : CliError::InputError;
-}
-
 CliError cmd_save(CliEngine & /*engine*/, std::span<const std::string_view> args) {
   if (args.empty())
     return CliError::BadParameter;

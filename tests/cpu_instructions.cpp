@@ -11,7 +11,6 @@
 #include "../src/soc/sti5512/STi5512_Display.h"
 #include "../src/soc/sti5512/STi5512_VideoDecoder.h"
 #include "../src/soc/sti5512/STi5512_RegisterBlocks.h"
-#include "../src/soc/sti5512/STi5512_Pwm.h"
 #include "../src/board/DSR9500.h"
 
 #include <cstdint>
@@ -1161,14 +1160,7 @@ static void testRuntimeDefaults() {
   undefinedWord = UNDEFINED_WORD_OLD;
 }
 
-static uint32_t observedAddress = 0;
-static int observedAccesses = 0;
-
 static void testDeviceAccess() {
-  setDeviceAccessObserver(+[](uint32_t address) {
-    observedAddress = address;
-    ++observedAccesses;
-  });
   int (*loads[])(uint32_t) = {devlb_, devls_, devlw_};
   int (*stores[])(uint32_t) = {devsb_, devss_, devsw_};
   uint32_t masks[] = {0xff, 0xffff, 0xffffffff};
@@ -1185,13 +1177,7 @@ static void testDeviceAccess() {
     expect("device load width", cpuState.areg, 0x89abcdefU & masks[index]);
     expect("device load preserves B", cpuState.breg, 0x12345678);
     expect("device load preserves C", cpuState.creg, 0x87654321);
-    expect("device observer address", observedAddress, address);
   }
-  expect("device observer count", static_cast<uint32_t>(observedAccesses), 6);
-  setDeviceAccessObserver(nullptr);
-  reset(0xb000, 0, 0);
-  devlb_(0);
-  expect("disabled device observer", static_cast<uint32_t>(observedAccesses), 6);
   reset(0x70003000, 1, 2);
   expect("unused device memory remains tolerated", devlw_(0) != 0, 0);
   expect("unused device memory value", cpuState.areg, undefinedWord);

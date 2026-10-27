@@ -5,9 +5,6 @@
 
 #include <cstdint>
 
-using DeviceAccessObserver = void (*)(uint32_t address);
-void setDeviceAccessObserver(DeviceAccessObserver observer);
-
 int adc_(uint32_t);
 int add_(uint32_t);
 int ajw_(uint32_t);

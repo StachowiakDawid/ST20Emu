@@ -5,8 +5,6 @@
 #include "../core/cpu/st20.h"
 #include "../soc/common/STi55xx_Ssc.h"
 #include "../soc/sti5512/STi5512_Devices.h"
-#include "../soc/sti5512/STi5512_Pio.h"
-#include "../soc/sti5512/STi5512_Pwm.h"
 
 #include <algorithm>
 #include <array>

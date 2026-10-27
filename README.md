@@ -57,64 +57,38 @@ For unattended firmware execution:
 ./st20emu --firmware firmware/6300.bin --batch
 ```
 
-Batch mode runs CPU instructions until the first fetch or execution error (including
-CPU halt or idle), then exits with status `1`. With SoC peripherals installed, an idle CPU lets
-time pass in 1000-cycle steps (up to 10 emulated seconds, or until the next timer alarm) so
-that peripheral interrupts can wake it, as on silicon. It never reads keyboard input or
-opens a prompt, and ignores watches and the interactive instruction-count limits.
-Firmware-loading failures also exit with status `1`; invalid arguments exit with
-status `2`. Firmware that never encounters an error runs indefinitely.
+Batch mode runs until the first fetch or execution error (including a CPU halt, or an idle CPU
+that no peripheral interrupt wakes within 10 emulated seconds), then exits
+with status `1`. Firmware-loading failures also exit with `1`, invalid arguments with `2`.
+Batch mode reads no keyboard input and ignores watches and instruction-count limits.
 
-The terminal prints the log filename. Both stdout and stderr, including startup
-diagnostics, are saved in the current working directory as
-`st20emu-log-YYYYMMDD-HHMMSS.txt`. During execution, the instruction count, decoded
-instruction, CPU state, and diagnostics are logged for every instruction. Output
-is captured as immutable register, instruction-byte, and workspace snapshots;
-a background worker formats the trace and writes it to disk. Snapshots are handed
-off every 100,000 instructions, with no byte-size threshold. Up to two batches
-can wait behind the batch being written, bounding the number of queued records;
-memory usage depends on the captured workspace and diagnostics. Execution waits
-for the worker only when this queue fills.
-Capturing snapshots and formatting execution diagnostics still take CPU time;
-lossless full tracing cannot outrun the logger indefinitely. Any remaining output, including
-the final error, CPU state, and total instruction count, is drained and flushed
-when execution stops. Forced termination can lose buffered or queued output.
-If a log with the same timestamp already exists, startup fails without overwriting it.
+Every instruction, with its CPU state and diagnostics, is logged to
+`st20emu-log-YYYYMMDD-HHMMSS.txt` in the current directory, so logs grow quickly; use
+interactive mode for long runs. Output still buffered when the emulator is killed is lost.
 
-By default the image is placed immediately below `0x80000000`, as with `l filename`,
-and execution starts at the configured `START_ADDR` (default `0x7ffffffe`). To load
-and start at an explicit nonzero hexadecimal address:
+By default the image is placed immediately below `0x80000000` and execution starts at
+`START_ADDR` (default `0x7ffffffe`). To load and start at another address:
 
 ```bash
 ./st20emu --firmware firmware/program.bin --address 0x1000 --batch
 ```
 
-Omit `--batch` to load the firmware at startup and continue interactively.
-Use `--help` for available options. An address of zero selects default placement.
+Omit `--batch` to run interactively. Use `--help` for all options.
 
-Once inside the interactive command prompt (`>`), load a binary file containing valid ST20 instructions (such as a TSOP dump) using the `l` command:
+The emulator reads its settings from `st20emu.ini` in the current directory.
 
-```plaintext
-l firmware/6300.bin
-```
+> **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
 
-> **Note:** You can load any compatible ST20 binary. Ensure you load a file before starting execution; attempting to run the emulator with empty memory will result in immediate execution errors.
-
-The emulator reads configuration values from `st20emu.ini`, which must reside in the same directory as the executable. The settings in this file are straightforward and self-explanatory.
+`UNDEFINED_WORD` sets the pattern for undefined registers, memory and results (default `0xCCCCCCCC`), and `TIMER_GUESS` the initial value of both priority clocks.
 
 `ZERO_FILL_START`/`ZERO_FILL_END` (inclusive, hexadecimal) set an address range whose unwritten bytes read as zero instead of stopping with an uninitialised-memory error. The shipped file covers SDRAM `0xc0000000`-`0xc07fffff`, where boot loaders such as the DSR9500's read a warm-restart mailbox before anything has written it. Remove both lines to trap on every unwritten byte.
 
 ### SoC Selection
 
-Use `--soc sti5518` (the default) or `--soc sti5512` to select the device model.
-The selected SoC is printed at startup and included in batch logs.
-
-```bash
-./st20emu --soc sti5512 --soc-revision 0xaa --firmware firmware/wsad.bin.bak --batch
-```
-
-`--soc-revision HEX` sets the STi5512 `VID_REV` byte. The modelled devices and their limits are described in
-[src/soc/sti5512/README.md](src/soc/sti5512/README.md) and [src/soc/sti5518/README.md](src/soc/sti5518/README.md).
+Use `--soc sti5518` (the default) or `--soc sti5512` to select the device model;
+`--soc-revision HEX` sets the STi5512 `VID_REV` byte. The modelled devices and their limits are
+described in [src/soc/sti5512/README.md](src/soc/sti5512/README.md) and
+[src/soc/sti5518/README.md](src/soc/sti5518/README.md).
 
 ### Boards
 
@@ -126,152 +100,40 @@ The selected SoC is printed at startup and included in batch logs.
 Bytes the firmware sends through the ASC ports are printed line by line as `ASCn> text`
 (to the terminal, or to the batch log).
 
-### Host Channels and Reset
+### Emulator commands
 
-Explicitly configured FIFO endpoints via `registerExternalChannel`, `feedExternalChannel` and `drainExternalChannel` support blocking input/output, scalar sends, ALT guards and reset. Transfers are atomic with RAM-only buffers. These host-configured endpoints are not an automatic STi5518 hardware channel map.
+Values, addresses and indexes are hexadecimal; `register` is `a`, `b`, `c` or `i`.
 
-`reboot` performs a boot-from-ROM cold reset: processor and device-model state return to their reset values, memory is kept, and execution restarts at `START_ADDR`. Exact chip-specific bus timings and alignment rules are not modelled.
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `ENTER` | _(Press Enter)_ | Executes the next instruction. |
+| `g` | `g` | Runs until a watch condition is met or `MAX_UNPROMPTED_INSTR` instructions pass (10,000,000 in the shipped INI). Press `g` again to stop. |
+| `s` | `s register value` | Stops execution when the register reaches the value. |
+| `a`, `b`, `c`, `i` | `a value` | Sets the A, B, C register or Iptr. |
+| `w` | `w index value` | Sets workspace word `index`. |
+| `vw` | `vw index` | Shows the address of workspace word `index`. |
+| `v` | `v address` | Shows the word at the address. |
+| `va` | `va address value` | Writes the word at the address. |
+| `vaa` | `vaa address length` | Shows `length` bytes of words from the address. |
+| `save` | `save name` | Saves memory (8 KB `.bin` blocks with `.use` maps of written bytes) and the CPU state (`cpu.bin`) into directory `name`. |
+| `load` | `load name` | Loads a state saved with `save`. |
+| `omr` | `omr` | Shows the other machine registers: enables, clocks, timer and ready queues, error flags. |
+| `ver` | `ver` | Lists the set bits of the Enables register. |
+| `screen` | `screen [file]` | Writes the STi5512 OSD as a BMP (default `screen.bmp`). |
+| `q` | `q` | Quits. |
 
-> **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
-
-Once your firmware is loaded, you can begin issuing commands to the emulator.
-
----
-
-### Parameter definitions
-
-Before using the commands, keep in mind these parameter meanings:
-
-- `value` / `address`: A 32-bit **octal** value or address.
-- `filename` / `name`: A target file or directory name.
-- `register`: The specific register identifier (`a`, `b`, `c`, or `i`).
-- `index`: An octal number representing a valid workspace pointer (`Wptr`) index.
-
----
-
-### Emulator commands reference
-
-| Category               | Command | Syntax               | Description                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | ------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Execution**          | `ENTER` | _(Press Enter)_      | Executes the single next instruction.                                                                                                                                                                                                                                                                                           |
-|                        | `g`     | `g`                  | Runs the emulation from the current address until a watch condition is met or 1,000,000 instructions pass. **Press `g` again during execution to stop.**                                                                                                                                                                        |
-|                        | `s`     | `s register value`   | Sets a watch condition on `a`, `b`, `c`, or `i`. When the register hits this value, execution halts and prompts you.                                                                                                                                                                                                            |
-| **Register control**   | `a`     | `a value`            | Sets the **A register** to the specified value.                                                                                                                                                                                                                                                                                 |
-|                        | `b`     | `b value`            | Sets the **B register** to the specified value.                                                                                                                                                                                                                                                                                 |
-|                        | `c`     | `c value`            | Sets the **C register** to the specified value.                                                                                                                                                                                                                                                                                 |
-|                        | `i`     | `i value`            | Sets the **Iptr (Instruction pointer)** register to the specified value.                                                                                                                                                                                                                                                        |
-|                        | `w`     | `w index value`      | Sets the workspace word at the specified `index` to the given value.                                                                                                                                                                                                                                                            |
-| **Memory control**     | `l`     | `l address filename` | Loads a binary/TSOP dump file into memory starting at the specified address.                                                                                                                                                                                                                                                    |
-|                        | `v`     | `v address`          | Views the word at the specified memory address.                                                                                                                                                                                                                                                                                 |
-|                        | `va`    | `va address value`   | Writes/sets the word at the specified address with a new value.                                                                                                                                                                                                                                                                 |
-|                        | `vaa`   | `vaa address range`  | Views a range of words starting from the specified address.                                                                                                                                                                                                                                                                     |
-| **State & session**    | `load`  | `load name`          | Loads a previously saved ST20 state.                                                                                                                                                                                                                                                                                            |
-|                        | `save`  | `save name`          | Dumps memory contents (in 8K chunks) and the CPU state into a new directory named `name`. The `.bin` files are the memory contents. These can be loaded into a hex editors or IDA Pro. The `.use` files are flags indicating if a particular byte in memory has been defined or not. The `cpu.bin` file contains the CPU state. |
-|                        | `q`     | `q`                  | Quits the emulator.                                                                                                                                                                                                                                                                                                             |
-| **Diagnostics & info** | `db`    | `db value`           | Searches the internal database for information about a specified register (passed as a hex number).                                                                                                                                                                                                                             |
-|                        | `omr`   | `omr`                | Displays "Other Machine Registers" (clock, status registers, traps, interrupts).                                                                                                                                                                                                                                                |
-|                        | `ver`   | `ver`                | Shows the contents of the "Enables" register with descriptive labels for every bit set to 1.                                                                                                                                                                                                                                    |
-|                        | `vra`   | `vra`                | Toggles STi5518 register and memory-region descriptions for `devlb`, `devls`, `devlw`, `devsb`, `devss`, and `devsw`. Standard device-access notes are printed in either mode. |
-
-CPU registers, addresses, watch values, and memory words use `uint32_t` rather than host-sized integers.
-
-The `UNDEFINED_WORD` setting supplies the 32-bit pattern used for undefined registers, memory values, and instruction results. `TIMER_GUESS` supplies the initial value of both priority clocks.
-
----
-
-### Execution output
-
-After a command is executed or `ENTER` is pressed, the emulator prints standard status block:
-
-- Displays the current hex values for `A`, `B`, `C` and the `Iptr` registers
-- Displays all currently allocated workspace words.
-
-      > Note: Undefined words use `UNDEFINED_WORD`, which defaults to `0xCCCCCCCC`.
-
-- Displays the memory address of the upcoming command, its raw octal byte values, and its decoded assembly mnemonic.
-- Finally, it drops the cursor back to the command prompt (`>`), waiting for the input.
-
-Here's an example of what you might see:
+After each step the emulator prints the registers, the workspace and the next instruction:
 
 ```plaintext
-A=0x7fff0014 B=0xaaaaaaaa C=0xaaaaaaaa  Iptr=0x7fff0038
-Wptr  0=0x7fff0014  1=0x7ffffff0  2=0xaaaaaaaa 3=0xaaaaaaaa
-      4=0x7ffffff0
+A=0xcccccccc B=0xcccccccc C=0xcccccccc  Iptr=0x7ffffffe
+Wptr=0x1fffffe4 Priority=1 State=running Status=0x00100000
+Wptr
+ 00=0xcccccccc 01=0xcccccccc 02=0xcccccccc 03=0xcccccccc
+ 04=0xcccccccc 05=0xcccccccc 06=0xcccccccc
 
-7fff0038  60 bd  ajw fffffffd
+7ffffffe  61 07  j loc_7fffffe7
 >
 ```
-
-If you have `vra` mode turned on, you may see these additional diagnostic tags:
-
-- `NOTE`: Standard informational note generated by `st20emu`.
-- `REGN`: **Reg**ister **N**ame found in the internal hardware database.
-- `bits:`: The bit-width extension of the register.
-- `access:`: Allowed access permissions for the register (e.g., `R/W` for Read/Write).
-- `DESC`/`DESCR`: Text **desc**ription of the register or the targeted memory region.
-
-And this with the `vra` mode ON (if an entry is found in the internal DB):
-
-```plaintext
-7fff01a4  2f f1  devsb
->
-NOTE: At 0x7fff01a4 Write to device at address 00000e00, value=0x00000007
-REGN: MPEG_CONTROL_7_0 bits:8 access:R/W
-DESC: MPEG Audio/Video buffer control register
-A=0x7fff01d2 B=0xaaaaaaaa C=0xaaaaaaaa  Iptr=0x7fff01a6
-Wptr  0=0x7fff01d2  1=0xaaaaaaaa  2=0xaaaaaaaa  3=0xaaaaaaaa
-      4=0x7ffffff0  5=0xaaaaaaaa  6=0xaaaaaaaa
-
-7fff01a6  27 40  ldc 70
->
-```
-
-This is the output of the `omr` command...
-
-```plaintext
-
-> omr
-OTHER MACHINE REGISTERS
-
-Enables=0xffffc000
-ClockRegHP=0x20000000 ClockRegLP=0x20000000 ClockEnables=0x03
-HP_ErrFlag=0x00 LP_ErrFlag=0x00 HaltOnError=0x00
->
-
-```
-
-...and this for `ver`
-
-```plaintext
-> ver
-Enables Register Value=0xffffc000
- LP_PROCESS_INT_ENB     is set
- LP_TIMESLICE_ENB       is set
- LP_EXTERNALEVENT_ENB   is set
- LP_TIMER_ALRM_ENB      is set
- HP_PROCESS_INT_ENB     is set
- HP_TIMESLICE_ENB       is set
- HP_EXTERNALEVENT_ENB   is set
- HP_TIMER_ALRM_ENB      is set
->
-```
-
----
-
-`devls`/`lb`/`lw` and `devss`/`sb`/`sw` can be used for memory access too, so if a specific address isn't found in the internal DB, a more generic description is returned based on the datasheet memory map description.
-
-Example:
-
-```plaintext
-NOTE: At 0xc0402804 Write to device at address c042a5e8, value=0x00000002
-DESCR: Address is into Shared SDRAM (Region 1)
-```
-
----
-
-The ajw command has not been executed yet. If you hit the ENTER
-key, it will be executed and the results of its execution will be
-displayed.
 
 ## Acknowledgments
 

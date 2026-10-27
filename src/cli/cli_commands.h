@@ -36,14 +36,11 @@ CliError cmd_set_breg(CliEngine &engine, std::span<const std::string_view> args)
 CliError cmd_set_creg(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_set_iptr(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_store_wptr(CliEngine &engine, std::span<const std::string_view> args);
-CliError cmd_show_regs(CliEngine &engine, std::span<const std::string_view> args);
-CliError cmd_query_db(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_show_enbreg(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_omr(CliEngine &engine, std::span<const std::string_view> args);
 
 // memory
 CliError cmd_load(CliEngine &engine, std::span<const std::string_view> args);
-CliError cmd_load_data(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_save(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_view(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_view_a(CliEngine &engine, std::span<const std::string_view> args);

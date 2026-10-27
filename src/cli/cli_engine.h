@@ -39,20 +39,12 @@ public:
   }
   CliError set_need_prompt(bool flag);
 
-  bool is_verbose_regs() const {
-    return show_verbose_regs;
-  }
-  void toggle_verbose_regs() {
-    show_verbose_regs = !show_verbose_regs;
-  }
-
 private:
   CliError execute_command(std::string_view cmd_name, std::span<const std::string_view> args);
 
   bool quit_requested{false};
   bool need_cmd{true};
   bool need_prompt{true};
-  bool show_verbose_regs{false};
 };
 
 } // namespace cli

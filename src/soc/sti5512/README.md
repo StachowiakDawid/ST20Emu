@@ -12,7 +12,8 @@ STi5512 startup also installs ASC0-ASC3 (`0x20003000`-`0x20006000`, interrupts 1
 and 7, from the STi5512 datasheet 7145560 B, Table 50), the interrupt controller (INC,
 `0x20000000`) and the STi5512 interrupt level controller (INL, `0x20011000`: per-interrupt
 priorities and `InputInterrupts`, without the STi5518 trigger-mode and enable extensions).
-The INC and ASC transmitter models are shared with the STi5518 (`src/soc/common`); the INC
+The INC, ASC transmitter, SSC, PWM, PIO and display/OSD models live in `src/soc/common`, as the
+STi5518 has the same blocks (it currently installs only the INC and ASC); the INC
 requires the `GloEn` mask bit (bit 16) for delivery, and bit 16 of its clear registers clears
 only `GloEn`.
 `takeSti5512AscTransmit(port)` returns each port's captured bytes. The register blocks below `0x8000` (video and configuration
@@ -48,5 +49,4 @@ Further STi5512 devices:
   still pictures are not displayed; only the OSD is.
 
 The transport controller, smart card, teletext, the MPEG decoders, external RAM reset contents
-and device snapshots remain unimplemented. The interactive `vra` register descriptions remain
-STi5518-specific.
+and device snapshots remain unimplemented.

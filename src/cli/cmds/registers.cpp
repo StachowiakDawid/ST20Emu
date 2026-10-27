@@ -2,8 +2,6 @@
 
 #include "../../common/compat.h"
 #include "../../core/cpu/st20.h"
-#include "../../core/cpu/instructions.h"
-#include "../../soc/sti5518/STi5518_SearchDB.h"
 
 #include <string>
 
@@ -53,24 +51,6 @@ CliError cmd_store_wptr(CliEngine & /*engine*/, std::span<const std::string_view
   }
 
   storeWptrWord(index, value);
-  return CliError::Success;
-}
-
-CliError cmd_show_regs(CliEngine &engine, std::span<const std::string_view> /*args*/) {
-  engine.toggle_verbose_regs();
-  setDeviceAccessObserver(engine.is_verbose_regs() ? +[](uint32_t address) {
-    soc::sti5518::search_for_reg(address);
-  } : nullptr);
-  compat::println("Verbose Register Access {}", engine.is_verbose_regs() ? "ON" : "OFF");
-  return CliError::Success;
-}
-
-CliError cmd_query_db(CliEngine & /*engine*/, std::span<const std::string_view> args) {
-  uint32_t n = 0;
-  if (args.empty() || !parseHex(std::string(args[0]), n))
-    return CliError::BadParameter;
-
-  soc::sti5518::search_for_reg(n);
   return CliError::Success;
 }
 
