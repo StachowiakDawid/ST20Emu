@@ -38,13 +38,11 @@
 #include "../../common/defines.h"
 #include "../memory/memory.h"
 
-// posix / linux
-#include <fcntl.h>
-#include <unistd.h>
-
 // std
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <algorithm>
 #include <array>
 #include <unordered_map>
@@ -1875,44 +1873,36 @@ int saveCPUState(const char *dirName) {
     return INVALID_CPU_FILENAME;
   }
 
-  char cpuFileName[NAME_SIZE];
-  if (snprintf(cpuFileName, sizeof(cpuFileName), "%s/cpu.bin", dirName) < 0) {
-    return INVALID_CPU_FILENAME;
-  }
+  std::string cpuFileName = std::string(dirName) + "/cpu.bin";
 
-  constexpr mode_t fileMode = S_IRUSR | S_IWUSR;
-  int cpuFileFd = open(cpuFileName, O_WRONLY | O_CREAT | O_TRUNC, fileMode);
-  if (cpuFileFd < 0) {
-    perror("CPU state save file cannot be opened");
+  std::ofstream cpuFile(cpuFileName, std::ios::binary | std::ios::trunc);
+  if (!cpuFile) {
+    compat::println(stderr, "CPU state save file cannot be opened: {}", cpuFileName);
     return INVALID_CPU_FILE;
   }
 
-  // helper lambda to ensure descriptor is closed on failure
-  auto cleanWrite = [cpuFileFd](const void *buf, size_t count) -> bool {
-    return write(cpuFileFd, buf, count) == static_cast<ssize_t>(count);
+  auto cleanWrite = [&cpuFile](const void *buf, size_t count) -> bool {
+    cpuFile.write(static_cast<const char *>(buf), static_cast<std::streamsize>(count));
+    return static_cast<bool>(cpuFile);
   };
 
   CPUSnapshotPrefix snapshot{cpuState.areg, cpuState.breg, cpuState.creg,
                              cpuState.iptr, 0, cpuState.nWptr, {}};
   if (!cleanWrite(&snapshot, sizeof(snapshot))) {
-    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
 
   wptrEndAddr = static_cast<uint32_t>(cpuState.wptr + static_cast<uint32_t>(cpuState.nWptr) * BytesPerWord - 1U);
   if (!cleanWrite(&wptrEndAddr, sizeof(wptrEndAddr))) {
-    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
 
   if (!cleanWrite(&watch, sizeof(WATCH))) {
-    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
 
   RuntimeSnapshot runtime = captureRuntime();
   if (!cleanWrite(runtime.data(), sizeof(runtime))) {
-    close(cpuFileFd);
     return INVALID_CPU_WRITE;
   }
   if (!externalChannels.empty()) {
@@ -1922,12 +1912,10 @@ int saveCPUState(const char *dirName) {
       totalBytes += endpoint.input.size() + endpoint.output.size();
     }
     if (totalBytes > 16777216) {
-      close(cpuFileFd);
       return INVALID_CPU_WRITE;
     }
     std::array<uint32_t, 4> header{0x45584348U, 1, static_cast<uint32_t>(externalChannels.size()), static_cast<uint32_t>(totalBytes)};
     if (!cleanWrite(header.data(), sizeof(header))) {
-      close(cpuFileFd);
       return INVALID_CPU_WRITE;
     }
     for (const auto &[address, endpoint] : externalChannels) {
@@ -1937,14 +1925,13 @@ int saveCPUState(const char *dirName) {
       std::vector<uint8_t> bytes(endpoint.input.begin(), endpoint.input.end());
       bytes.insert(bytes.end(), endpoint.output.begin(), endpoint.output.end());
       if (!cleanWrite(record.data(), sizeof(record)) || !cleanWrite(bytes.data(), bytes.size())) {
-        close(cpuFileFd);
         return INVALID_CPU_WRITE;
       }
     }
   }
 
-  close(cpuFileFd);
-  return 0;
+  cpuFile.close();
+  return cpuFile ? 0 : INVALID_CPU_WRITE;
 }
 
 uint32_t get_iptr(void) {
@@ -1956,58 +1943,51 @@ int loadCPUState(const char *dirName) {
     return INVALID_CPU_FILENAME;
   }
 
-  char cpuFileName[NAME_SIZE];
-  if (snprintf(cpuFileName, sizeof(cpuFileName), "%s/cpu.bin", dirName) < 0) {
-    return INVALID_CPU_FILENAME;
-  }
+  std::string cpuFileName = std::string(dirName) + "/cpu.bin";
 
-  int cpuFileFd = open(cpuFileName, O_RDONLY);
-  if (cpuFileFd < 0) {
-    perror("CPU state load file cannot be opened");
+  std::ifstream cpuFile(cpuFileName, std::ios::binary);
+  if (!cpuFile) {
+    compat::println(stderr, "CPU state load file cannot be opened: {}", cpuFileName);
     return INVALID_CPU_FILE;
   }
 
-  /* helper lambda to check exact byte read counts and prevent FD leaks on failure */
-  auto cleanRead = [cpuFileFd](void *buf, size_t count) -> bool {
-    return read(cpuFileFd, buf, count) == static_cast<ssize_t>(count);
+  /* reads exactly count bytes */
+  auto cleanRead = [&cpuFile](void *buf, size_t count) -> bool {
+    cpuFile.read(static_cast<char *>(buf), static_cast<std::streamsize>(count));
+    return cpuFile.gcount() == static_cast<std::streamsize>(count);
   };
 
   CPUSnapshotPrefix snapshot{};
   if (!cleanRead(&snapshot, sizeof(snapshot))) {
-    close(cpuFileFd);
     return INVALID_CPU_READ;
   }
 
   uint32_t loadedEndAddress = 0;
   if (!cleanRead(&loadedEndAddress, sizeof(loadedEndAddress))) {
-    close(cpuFileFd);
     return INVALID_CPU_READ;
   }
 
   WATCH loadedWatch{};
   if (!cleanRead(&loadedWatch, sizeof(loadedWatch))) {
-    close(cpuFileFd);
     return INVALID_CPU_READ;
   }
 
   RuntimeSnapshot runtime{};
   if (snapshot.nWptr < 0 || snapshot.nWptr > MAX_WPTR ||
       !cleanRead(runtime.data(), sizeof(runtime)) || !validRuntime(runtime)) {
-    close(cpuFileFd);
     return INVALID_CPU_FILE;
   }
   if (runtime[RuntimeStatus] & STATUS_INTERRUPTED_OPERATION_MASK) {
-    close(cpuFileFd);
     return INVALID_CPU_FILE;
   }
   std::unordered_map<uint32_t, ExternalChannel> loadedChannels;
   {
     std::array<uint32_t, 4> header{};
-    ssize_t headerBytes = read(cpuFileFd, header.data(), sizeof(header));
+    cpuFile.read(reinterpret_cast<char *>(header.data()), sizeof(header));
+    std::streamsize headerBytes = cpuFile.gcount();
     if (headerBytes != 0) {
-      if (headerBytes != static_cast<ssize_t>(sizeof(header)) || header[0] != 0x45584348U || header[1] != 1 ||
+      if (headerBytes != static_cast<std::streamsize>(sizeof(header)) || header[0] != 0x45584348U || header[1] != 1 ||
           header[2] > 1024 || header[3] > 16777216) {
-        close(cpuFileFd);
         return INVALID_CPU_FILE;
       }
       uint64_t total = 0;
@@ -2017,7 +1997,6 @@ int loadCPUState(const char *dirName) {
       for (uint32_t index = 0; index < header[2]; ++index) {
         std::array<uint32_t, 12> record{};
         if (!cleanRead(record.data(), sizeof(record))) {
-          close(cpuFileFd);
           return INVALID_CPU_FILE;
         }
         uint64_t bytes = static_cast<uint64_t>(record[10]) + record[11];
@@ -2026,12 +2005,10 @@ int loadCPUState(const char *dirName) {
             record[4] > record[1] || record[5] > 1 || record[6] > 1 || record[8] > 1 || record[9] > 1 ||
             record[10] > record[1] || record[11] > record[1] || total > header[3] ||
             !validDescriptor(record[2]) || !validDescriptor(record[3]) || !validDescriptor(record[7])) {
-          close(cpuFileFd);
           return INVALID_CPU_FILE;
         }
         std::vector<uint8_t> data(static_cast<std::size_t>(bytes));
         if (!cleanRead(data.data(), data.size())) {
-          close(cpuFileFd);
           return INVALID_CPU_FILE;
         }
         ExternalChannel endpoint{record[1], {}, {}};
@@ -2048,7 +2025,6 @@ int loadCPUState(const char *dirName) {
         loadedChannels.emplace(record[0], std::move(endpoint));
       }
       if (total != header[3]) {
-        close(cpuFileFd);
         return INVALID_CPU_FILE;
       }
     }
@@ -2062,7 +2038,6 @@ int loadCPUState(const char *dirName) {
               snapshot.creg,
               snapshot.iptr, snapshot.nWptr};
   restoreRuntime(runtime);
-  close(cpuFileFd);
   return 0;
 }
 

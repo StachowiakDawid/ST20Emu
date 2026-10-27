@@ -18,13 +18,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <random>
 #include <initializer_list>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-#include <unistd.h>
 
 extern CPUSTATE cpuState;
 extern OMRSTATE omrState;
@@ -62,6 +64,34 @@ static void expect(const char *name, uint64_t actual, uint64_t expected) {
     std::fprintf(stderr, "FAIL %s: actual=0x%" PRIx64 " expected=0x%" PRIx64 "\n", name,
                  actual, expected);
   }
+}
+
+/* creates a new directory, replacing the trailing XXXXXX of pattern like mkdtemp */
+static char *makeTempDirectory(char *pattern) {
+  static std::mt19937 random{std::random_device{}()};
+  constexpr std::string_view letters = "abcdefghijklmnopqrstuvwxyz0123456789";
+  std::size_t length = std::strlen(pattern);
+  if (length < 6) return nullptr;
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    for (std::size_t index = length - 6; index < length; ++index) pattern[index] = letters[random() % letters.size()];
+    std::error_code error;
+    if (std::filesystem::create_directory(pattern, error)) return pattern;
+  }
+  return nullptr;
+}
+
+/* removes a file or an empty directory */
+static void removePath(const std::string &path) {
+  std::error_code error;
+  std::filesystem::remove(path, error);
+}
+
+/* flushes an open file and cuts it to size bytes; returns 0 on success */
+static int truncateFile(std::FILE *file, const std::string &path, std::uintmax_t size) {
+  std::fflush(file);
+  std::error_code error;
+  std::filesystem::resize_file(path, size, error);
+  return error ? -1 : 0;
 }
 
 static uint32_t nextWord(uint32_t &seed) {
@@ -860,7 +890,7 @@ static void testResetAnalysis() {
   expect("ordinary reset succeeds", initCPUState() != 0, 0);
   expect("ordinary reset clears analyse latch", omrState.analysedOnReset, 0);
   char directory[] = "/tmp/st20-analysis-XXXXXX";
-  expect("analyse snapshot temp directory", mkdtemp(directory) != nullptr, 1);
+  expect("analyse snapshot temp directory", makeTempDirectory(directory) != nullptr, 1);
   expect("analysed reset for snapshot", initCPUState(true) != 0, 0);
   expect("save analysed reset snapshot", saveCPUState(directory) != 0, 0);
   omrState.analysedOnReset = false;
@@ -883,13 +913,13 @@ static void testResetAnalysis() {
     std::fseek(file, runtimeStart + static_cast<uint32_t>(sizeof(uint32_t)), SEEK_SET);
     std::fwrite(&version, sizeof(version), 1, file);
     std::fflush(file);
-    expect("truncate to version3 runtime", ftruncate(fileno(file), runtimeStart + static_cast<uint32_t>(169 * sizeof(uint32_t))) != 0, 0);
+    expect("truncate to version3 runtime", truncateFile(file, filename, runtimeStart + static_cast<uint32_t>(169 * sizeof(uint32_t))) != 0, 0);
     std::fclose(file);
     expect("reject version3 snapshot", loadCPUState(directory) == INVALID_CPU_FILE, 1);
     expect("version3 rejection preserves reset latch", omrState.analysedOnReset, 1);
   }
-  unlink(filename.c_str());
-  rmdir(directory);
+  removePath(filename);
+  removePath(directory);
   omrState = {};
   initCPUState();
 }
@@ -1000,7 +1030,7 @@ static void testLegacySnapshot() {
     bool wptrUsed[MAX_WPTR];
   };
   char directory[] = "/tmp/st20-snapshot-XXXXXX";
-  if (!mkdtemp(directory)) {
+  if (!makeTempDirectory(directory)) {
     expect("snapshot temporary directory", 0, 1);
     return;
   }
@@ -1013,7 +1043,7 @@ static void testLegacySnapshot() {
   FILE *file = std::fopen(filename.c_str(), "wb");
   if (!file) {
     expect("snapshot fixture open", 0, 1);
-    rmdir(directory);
+    removePath(directory);
     return;
   }
   expect("snapshot fixture CPU write", std::fwrite(&legacy, sizeof(legacy), 1, file), 1);
@@ -1063,7 +1093,7 @@ static void testLegacySnapshot() {
     std::fflush(file);
     expect("reject unsupported full runtime version", loadCPUState(directory) == INVALID_CPU_FILE, 1);
     if (version < 11) {
-      expect("truncate old runtime fixture", ftruncate(fileno(file), runtimeStart +
+      expect("truncate old runtime fixture", truncateFile(file, filename, runtimeStart +
           static_cast<uint32_t>(runtimeWords[version] * sizeof(uint32_t))) != 0, 0);
       expect("reject old runtime size", loadCPUState(directory) == INVALID_CPU_FILE, 1);
     }
@@ -1076,12 +1106,12 @@ static void testLegacySnapshot() {
   expect("open current truncation fixture", file != nullptr, 1);
   if (file) {
     std::fseek(file, 0, SEEK_END);
-    expect("truncate current runtime by one byte", ftruncate(fileno(file), std::ftell(file) - 1) != 0, 0);
+    expect("truncate current runtime by one byte", truncateFile(file, filename, std::ftell(file) - 1) != 0, 0);
     std::fclose(file);
     expect("reject incomplete current runtime", loadCPUState(directory) == INVALID_CPU_FILE, 1);
   }
   std::remove(filename.c_str());
-  rmdir(directory);
+  removePath(directory);
 }
 
 static void testZeroFillMemory() {
@@ -1128,17 +1158,21 @@ static void testMemoryReaders() {
   expect("word read wraps guest address space", readBytes(WordMask, BytesPerWord, &wrapped) != 0, 0);
   expect("wrapped word preserves all bits", wrapped, 0x88776655);
 
-  char filename[] = "/tmp/st20-oversized-XXXXXX";
-  int file = mkstemp(filename);
-  expect("oversized firmware fixture opens", file >= 0, 1);
-  if (file >= 0) {
-    expect("oversized firmware fixture length", ftruncate(file, static_cast<off_t>(UINT32_MAX) + 1) != 0, 0);
-    close(file);
+  char directory[] = "/tmp/st20-oversized-XXXXXX";
+  expect("oversized firmware fixture directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string filename = std::string(directory) + "/firmware.bin";
+  bool created = static_cast<bool>(std::ofstream(filename, std::ios::binary));
+  expect("oversized firmware fixture opens", created, 1);
+  if (created) {
+    std::error_code error;
+    std::filesystem::resize_file(filename, std::uintmax_t{UINT32_MAX} + 1, error);
+    expect("oversized firmware fixture length", static_cast<bool>(error), 0);
     uint32_t length = 123;
-    expect("firmware larger than word length is rejected", bulkLoadBytes(0, filename, nullptr, &length) == INVALID_BYTE_FILE, 1);
+    expect("firmware larger than word length is rejected", bulkLoadBytes(0, filename.c_str(), nullptr, &length) == INVALID_BYTE_FILE, 1);
     expect("oversized firmware leaves byte count unchanged", length, 123);
-    unlink(filename);
+    removePath(filename);
   }
+  removePath(directory);
 }
 
 static void testRuntimeDefaults() {
@@ -2337,7 +2371,7 @@ static void testTimerOrderingAndPreemption() {
 
 static void testSchedulerSnapshot() {
   char directory[] = "/tmp/st20-runtime-snapshot-XXXXXX";
-  if (!mkdtemp(directory)) {
+  if (!makeTempDirectory(directory)) {
     expect("runtime snapshot temporary directory", 0, 1);
     return;
   }
@@ -2410,7 +2444,7 @@ static void testSchedulerSnapshot() {
     uint32_t version = 1;
     std::fwrite(&version, sizeof(version), 1, file);
     std::fflush(file);
-    expect("snapshot version-1 fixture truncation", ftruncate(fileno(file), prefixSize + 33 * static_cast<uint32_t>(sizeof(uint32_t))) != 0, 0);
+    expect("snapshot version-1 fixture truncation", truncateFile(file, filename, prefixSize + 33 * static_cast<uint32_t>(sizeof(uint32_t))) != 0, 0);
     std::fclose(file);
     cpuState.move2dBlockLength = 99;
     cpuState.move2dDestStride = 88;
@@ -2421,7 +2455,7 @@ static void testSchedulerSnapshot() {
     expect("version-1 rejection preserves source stride", cpuState.move2dSourceStride, 77);
   } else expect("version-1 fixture open", 0, 1);
   std::remove(filename.c_str());
-  rmdir(directory);
+  removePath(directory);
   schedulerFixture(0x20000);
 }
 
@@ -2825,7 +2859,7 @@ static void testMove2d() {
 
 static void testBlockedChannelSnapshot() {
   char directory[] = "/tmp/st20-channel-snapshot-XXXXXX";
-  if (!mkdtemp(directory)) {
+  if (!makeTempDirectory(directory)) {
     expect("channel snapshot temporary directory", 0, 1);
     return;
   }
@@ -2854,7 +2888,7 @@ static void testBlockedChannelSnapshot() {
   expect("restored sender resumes", cpuState.wptr, 0xa0000);
   std::string filename = std::string(directory) + "/cpu.bin";
   std::remove(filename.c_str());
-  rmdir(directory);
+  removePath(directory);
   schedulerFixture(0x20000);
 }
 
@@ -3191,7 +3225,7 @@ static void testShadowRegisters() {
     expect("native trap shadow roundtrip value", value, trapInput[index]);
   }
   char trapDirectory[] = "/tmp/st20-native-trap-shadow-XXXXXX";
-  expect("native trap shadow snapshot directory", mkdtemp(trapDirectory) != nullptr, 1);
+  expect("native trap shadow snapshot directory", makeTempDirectory(trapDirectory) != nullptr, 1);
   expect("native trap shadow snapshot saves", saveCPUState(trapDirectory) != 0, 0);
   resetScheduler();
   expect("native trap shadow snapshot restores", loadCPUState(trapDirectory) != 0, 0);
@@ -3204,8 +3238,8 @@ static void testShadowRegisters() {
   expect("native trap low edit resumes B", cpuState.breg, 0x5555);
   expect("native trap low edit resumes C", cpuState.creg, 0x6666);
   std::string trapFilename = std::string(trapDirectory) + "/cpu.bin";
-  unlink(trapFilename.c_str());
-  rmdir(trapDirectory);
+  removePath(trapFilename);
+  removePath(trapDirectory);
 
   schedulerFixture(0x19d000, LOW_PRIORITY);
   installTrap(HIGH_PRIORITY, TRAP_GROUP_SCHEDULER, 0x19a000, 0x9e00);
@@ -3249,7 +3283,7 @@ static void testShadowRegisters() {
   readBytes(0x199810, 4, &value);
   expect("native captured invalid export retains A", value, 0x4444);
   char invalidDirectory[] = "/tmp/st20-invalid-captured-bank-XXXXXX";
-  expect("native invalid captured snapshot directory", mkdtemp(invalidDirectory) != nullptr, 1);
+  expect("native invalid captured snapshot directory", makeTempDirectory(invalidDirectory) != nullptr, 1);
   expect("native invalid captured snapshot saves", saveCPUState(invalidDirectory) != 0, 0);
   resetScheduler();
   expect("native invalid captured snapshot restores", loadCPUState(invalidDirectory) != 0, 0);
@@ -3260,8 +3294,8 @@ static void testShadowRegisters() {
   cpuState.creg = 0x199700;
   expect("native captured bank reactivates", ldshadow_(0) != 0, 0);
   std::string invalidFilename = std::string(invalidDirectory) + "/cpu.bin";
-  unlink(invalidFilename.c_str());
-  rmdir(invalidDirectory);
+  removePath(invalidFilename);
+  removePath(invalidDirectory);
   uint32_t trapped = trapRecordAddress(HIGH_PRIORITY, TRAP_GROUP_SCHEDULER, true);
   uint32_t savedRecord[4]{};
   for (uint32_t index = 0; index < 4; ++index) readBytes(trapped + index * 4, 4, &savedRecord[index]);
@@ -3278,7 +3312,7 @@ static void testShadowRegisters() {
     expect("native captured load leaves trapped control record unchanged", value, savedRecord[index]);
   }
   char capturedDirectory[] = "/tmp/st20-native-captured-shadow-XXXXXX";
-  expect("native captured bank snapshot directory", mkdtemp(capturedDirectory) != nullptr, 1);
+  expect("native captured bank snapshot directory", makeTempDirectory(capturedDirectory) != nullptr, 1);
   expect("native captured bank snapshot saves", saveCPUState(capturedDirectory) != 0, 0);
   resetScheduler();
   expect("native captured bank snapshot restores", loadCPUState(capturedDirectory) != 0, 0);
@@ -3298,8 +3332,8 @@ static void testShadowRegisters() {
   expect("native captured bank restores original global enables", omrState.Enables >> 16, savedRecord[0] >> 16);
   expect("native captured bank retains edited low trap enables", trapEnableMask(LOW_PRIORITY), 0x22);
   std::string capturedFilename = std::string(capturedDirectory) + "/cpu.bin";
-  unlink(capturedFilename.c_str());
-  rmdir(capturedDirectory);
+  removePath(capturedFilename);
+  removePath(capturedDirectory);
 
   preemptLow();
   const uint32_t edited[] = {0x005a1234, STATUS_VALID | STATUS_TIMESLICE_ENABLE,
@@ -3310,7 +3344,7 @@ static void testShadowRegisters() {
   cpuState.creg = 0x19b000;
   expect("ldshadow edits bank before snapshot", ldshadow_(0) != 0, 0);
   char directory[] = "/tmp/st20-shadow-XXXXXX";
-  expect("shadow snapshot directory", mkdtemp(directory) != nullptr, 1);
+  expect("shadow snapshot directory", makeTempDirectory(directory) != nullptr, 1);
   expect("save edited shadow snapshot", saveCPUState(directory) != 0, 0);
   resetScheduler();
   expect("load edited shadow snapshot", loadCPUState(directory) != 0, 0);
@@ -3322,8 +3356,8 @@ static void testShadowRegisters() {
   expect("snapshot keeps edited shadow C", cpuState.creg, 0x9999);
   expect("snapshot keeps edited low trap mask", trapEnableMask(LOW_PRIORITY), 0x1234);
   std::string filename = std::string(directory) + "/cpu.bin";
-  unlink(filename.c_str());
-  rmdir(directory);
+  removePath(filename);
+  removePath(directory);
   schedulerFixture(0xc04307b8);
   installTrap(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, 0xc042a5e0, 0xc042a004);
   omrState.Enables |= SIGNAL_TRAPENB;
@@ -3636,7 +3670,7 @@ static void testSti5512DisplayDevices() {
   storeBigEndian(0xc0012404, 0xffffffff);
   storeBytes(0x91, 1, 0x04);
   char directory[] = "/tmp/st20-screen-XXXXXX";
-  expect("screen temp directory", mkdtemp(directory) != nullptr, 1);
+  expect("screen temp directory", makeTempDirectory(directory) != nullptr, 1);
   std::string path = std::string(directory) + "/screen.bmp";
   int regions = 0;
   expect("render screen", writeSti5512Screen(path, &regions).empty(), 1);
@@ -3649,8 +3683,8 @@ static void testSti5512DisplayDevices() {
     expect("OSD pixel is red", bytes[topLeft + 2] > 150 && bytes[topLeft + 1] < 60 && bytes[topLeft] < 60, 1);
     expect("transparent pixel shows background", bytes[topLeft + 6] == bytes[topLeft + 6 + 3], 1);
   }
-  unlink(path.c_str());
-  rmdir(directory);
+  removePath(path);
+  removePath(directory);
 
   expect("initialize DSR9500 board", initDsr9500Board() != 0, 0);
   auto shiftOut = [](uint16_t word) {
@@ -4111,7 +4145,7 @@ static void testInterruptReturns() {
   pollTimers();
   storeBytes(0x186000, 4, 0);
   char directory[] = "/tmp/st20-iret-XXXXXX";
-  expect("iret snapshot directory", mkdtemp(directory) != nullptr, 1);
+  expect("iret snapshot directory", makeTempDirectory(directory) != nullptr, 1);
   expect("save pending low-shadow return", saveCPUState(directory) != 0, 0);
   resetScheduler();
   expect("restore pending low-shadow return", loadCPUState(directory) != 0, 0);
@@ -4119,8 +4153,8 @@ static void testInterruptReturns() {
   expect("snapshot iret restores low workspace", cpuState.wptr, 0x185000);
   expect("snapshot iret restores low A", cpuState.areg, 0x4567);
   std::string filename = std::string(directory) + "/cpu.bin";
-  unlink(filename.c_str());
-  rmdir(directory);
+  removePath(filename);
+  removePath(directory);
 
   int previous = acknowledged;
   schedulerFixture(0x6d000000, HIGH_PRIORITY);
@@ -4232,7 +4266,7 @@ static void testNativeExternalChannels() {
     expect("native modeled input blocks", in_(0) != 0, 0);
     expect("native modeled input suspended", cpuState.running, 0);
     char directory[] = "/tmp/st20-native-fifo-XXXXXX";
-    expect("native modeled snapshot directory", mkdtemp(directory) != nullptr, 1);
+    expect("native modeled snapshot directory", makeTempDirectory(directory) != nullptr, 1);
     expect("native modeled blocked snapshot saves", saveCPUState(directory) != 0, 0);
     reset(channel, 0, 0);
     resetch_(0);
@@ -4244,8 +4278,8 @@ static void testNativeExternalChannels() {
     readBytes(0x251004, 2, &value);
     expect("native modeled blocked input bytes", value, 0x3412);
     std::string filename = std::string(directory) + "/cpu.bin";
-    unlink(filename.c_str());
-    rmdir(directory);
+    removePath(filename);
+    removePath(directory);
     storeBytes(0x251008, 4, 0x01020304);
     storeBytes(0x25100c, 4, 0x05060708);
     reset(8, channel, 0x251008);
@@ -4333,7 +4367,7 @@ static void testNativeExternalChannels() {
     expect("native modeled data committed before kernel", value, 0x3412);
     expect("native modeled kernel owns enqueue", omrState.ProcQueueFPtr[priority], NO_PROCESS);
     char trapDirectory[] = "/tmp/st20-native-channel-trap-XXXXXX";
-    expect("native modeled trapped snapshot directory", mkdtemp(trapDirectory) != nullptr, 1);
+    expect("native modeled trapped snapshot directory", makeTempDirectory(trapDirectory) != nullptr, 1);
     expect("native modeled completed transfer snapshot saves", saveCPUState(trapDirectory) != 0, 0);
     cpuState.areg = channel;
     resetch_(0);
@@ -4346,8 +4380,8 @@ static void testNativeExternalChannels() {
     expect("native modeled completed owner running", cpuState.running, 1);
     expect("native modeled trap return has no interrupted operation", cpuState.status & STATUS_INTERRUPTED_OPERATION_MASK, 0);
     filename = std::string(trapDirectory) + "/cpu.bin";
-    unlink(filename.c_str());
-    rmdir(trapDirectory);
+    removePath(filename);
+    removePath(trapDirectory);
     reset(2, channel, 0x251010);
     expect("native modeled reset waiter blocks", in_(0) != 0, 0);
     reset(channel, 0, 0);
@@ -4434,7 +4468,7 @@ static void testPeriodicTimeslicing() {
   fixture();
   advanceTimers(period + period / 2);
   char directory[] = "/tmp/st20-periodic-XXXXXX";
-  expect("periodic snapshot directory", mkdtemp(directory) != nullptr, 1);
+  expect("periodic snapshot directory", makeTempDirectory(directory) != nullptr, 1);
   expect("save periodic quantum", saveCPUState(directory) != 0, 0);
   resetScheduler();
   expect("restore periodic quantum", loadCPUState(directory) != 0, 0);
@@ -4452,7 +4486,7 @@ static void testPeriodicTimeslicing() {
     std::fseek(file, runtimeStart + static_cast<uint32_t>(sizeof(uint32_t)), SEEK_SET);
     std::fwrite(&version, sizeof(version), 1, file);
     std::fflush(file);
-    expect("truncate to version5 runtime", ftruncate(fileno(file), runtimeStart + static_cast<uint32_t>(180 * sizeof(uint32_t))) != 0, 0);
+    expect("truncate to version5 runtime", truncateFile(file, filename, runtimeStart + static_cast<uint32_t>(180 * sizeof(uint32_t))) != 0, 0);
     std::fclose(file);
     cpuState.timeslicePeriods = 2;
     omrState.TimeslicePhase = 123;
@@ -4460,8 +4494,8 @@ static void testPeriodicTimeslicing() {
     expect("version5 rejection preserves quantum", cpuState.timeslicePeriods, 2);
     expect("version5 rejection preserves period phase", omrState.TimeslicePhase, 123);
   }
-  unlink(filename.c_str());
-  rmdir(directory);
+  removePath(filename);
+  removePath(directory);
   fixture();
   installTrap(LOW_PRIORITY, 3, 0x1b3000, 0xa400);
   omrState.Enables |= TIMESLICE_TRAPENB;
@@ -4499,7 +4533,7 @@ static void testTimesliceTrapsAndSnapshots() {
   }
   schedulerFixture(0x179000);
   char directory[] = "/tmp/st20-interrupt-XXXXXX";
-  expect("interrupt snapshot directory", mkdtemp(directory) != nullptr, 1);
+  expect("interrupt snapshot directory", makeTempDirectory(directory) != nullptr, 1);
   intdis_(0);
   cpuState.status &= ~STATUS_TIMESLICE_ENABLE;
   expect("save disabled interruption snapshot", saveCPUState(directory) != 0, 0);
@@ -4532,14 +4566,14 @@ static void testTimesliceTrapsAndSnapshots() {
     std::fseek(file, runtimeStart + static_cast<uint32_t>(sizeof(uint32_t)), SEEK_SET);
     std::fwrite(&version, sizeof(version), 1, file);
     std::fflush(file);
-    expect("truncate to version4 runtime", ftruncate(fileno(file), runtimeStart + static_cast<uint32_t>(170 * sizeof(uint32_t))) != 0, 0);
+    expect("truncate to version4 runtime", truncateFile(file, filename, runtimeStart + static_cast<uint32_t>(170 * sizeof(uint32_t))) != 0, 0);
     std::fclose(file);
     expect("reject version4 interrupt fixture", loadCPUState(directory) == INVALID_CPU_FILE, 1);
     expect("version4 rejection preserves interruption disable", cpuState.interruptsDisabled, 1);
     expect("version4 rejection does not restore old trap", trapHandlerActive(), 0);
   }
-  unlink(filename.c_str());
-  rmdir(directory);
+  removePath(filename);
+  removePath(directory);
   schedulerFixture(0x17b000);
   storeBytes(0x17c000 - 4, 4, 0x9000);
   enqueueProcess(0x17c000, LOW_PRIORITY);
@@ -5050,7 +5084,7 @@ static void testSchedulerTrapDelivery() {
 
 static void testTrapSnapshot() {
   char directory[] = "/tmp/st20-trap-snapshot-XXXXXX";
-  if (!mkdtemp(directory)) {
+  if (!makeTempDirectory(directory)) {
     expect("trap snapshot directory", 0, 1);
     return;
   }
@@ -5093,7 +5127,7 @@ static void testTrapSnapshot() {
   tret_(0);
   std::string filename = std::string(directory) + "/cpu.bin";
   std::remove(filename.c_str());
-  rmdir(directory);
+  removePath(directory);
   schedulerFixture(0x20000);
 }
 
@@ -5214,7 +5248,7 @@ static void testSignalAndChannelDelivery() {
 
 static void testVersion2AndHaltSnapshot() {
   char directory[] = "/tmp/st20-v2-snapshot-XXXXXX";
-  if (!mkdtemp(directory)) {
+  if (!makeTempDirectory(directory)) {
     expect("v2 snapshot directory", 0, 1);
     return;
   }
@@ -5232,7 +5266,7 @@ static void testVersion2AndHaltSnapshot() {
     uint32_t version = 2;
     std::fwrite(&version, sizeof(version), 1, file);
     std::fflush(file);
-    ftruncate(fileno(file), prefix + 39 * static_cast<uint32_t>(sizeof(uint32_t)));
+    truncateFile(file, filename, prefix + 39 * static_cast<uint32_t>(sizeof(uint32_t)));
     std::fclose(file);
     resetScheduler();
     cpuState.move2dBlockLength = 4;
@@ -5255,7 +5289,7 @@ static void testVersion2AndHaltSnapshot() {
   expect("halted processor retains faulting workspace", cpuState.wptr, stoppedWorkspace);
   expect("halted processor does not enter generated trap", requestTrap(BREAKPOINT_TRAPENB, LOW_PRIORITY) == CPU_HALTED, 1);
   std::remove(filename.c_str());
-  rmdir(directory);
+  removePath(directory);
   schedulerFixture(0x20000);
 }
 
@@ -5621,7 +5655,7 @@ static void testAltNotificationRaces() {
 
 static void testAltSnapshots() {
   char directory[] = "/tmp/st20-alt-snapshot-XXXXXX";
-  if (!mkdtemp(directory)) {
+  if (!makeTempDirectory(directory)) {
     expect("ALT snapshot directory", 0, 1);
     return;
   }
@@ -5658,7 +5692,7 @@ static void testAltSnapshots() {
   expect("restored timed ALT clock", omrState.ClockRegLP, 6);
   std::string filename = std::string(directory) + "/cpu.bin";
   std::remove(filename.c_str());
-  rmdir(directory);
+  removePath(directory);
   schedulerFixture(0x20000);
 }
 

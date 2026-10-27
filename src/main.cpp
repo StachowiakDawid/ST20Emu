@@ -1,7 +1,7 @@
 #include "main.h"
-#include "terminal_util.h"
 
 #include "cli/cli_engine.h"
+#include "cli/line_reader.h"
 #include "common/defines.h"
 #include "core/cpu/omr.h"
 #include "core/cpu/st20.h"
@@ -23,9 +23,8 @@
 #include <thread>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
-#include <fcntl.h>
-#include <unistd.h>
 
 constexpr uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
 constexpr uint64_t warnInstr = WARN_UNPROMPTED_INSTR;
@@ -352,19 +351,19 @@ int main(int argc, char **argv) {
     char timestamp[32]{};
     std::strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &localTime);
     std::string logPath = std::format("st20emu-log-{}.txt", timestamp);
-    int logFd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0666);
-    if (logFd < 0) {
+    /* "x" fails if the log exists; both streams then append to it, so neither overwrites the other */
+    std::FILE *created = std::fopen(logPath.c_str(), "wx");
+    if (!created) {
       std::perror("Cannot create batch log");
       return 1;
     }
+    std::fclose(created);
     compat::println("Batch log: {}", logPath);
     std::fflush(stdout);
-    if (dup2(logFd, STDOUT_FILENO) < 0 || dup2(logFd, STDERR_FILENO) < 0) {
+    if (!std::freopen(logPath.c_str(), "a", stdout) || !std::freopen(logPath.c_str(), "a", stderr)) {
       std::perror("Cannot redirect batch output");
-      close(logFd);
       return 1;
     }
-    close(logFd);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     compat::println("Firmware: {} (load address: 0x{:08x}, 0 means auto-place)", firmware, loadAddress);
   }
@@ -412,7 +411,7 @@ int main(int argc, char **argv) {
 
   compat::println("");
 
-  // throttle how often we ask the OS for keyboard input
+  // how often a free run checks for a "g" line that stops it
   constexpr uint64_t KEY_POLL_INTERVAL = 100000;
   constexpr uint64_t SERIAL_INTERVAL = 1000;
   uint64_t serialCount = 0;
@@ -471,8 +470,8 @@ int main(int argc, char **argv) {
       }
 
       if (instrCount % KEY_POLL_INTERVAL == 0) {
-        if (pollInterruptKey()) {
-          compat::println("\nExecution interrupted by user (pressed 'g').");
+        if (cli::take_stop_request()) {
+          compat::println("\nExecution interrupted by user (entered 'g').");
           cli.set_need_prompt(true);
         }
       }

@@ -36,6 +36,7 @@ sources = core_sources + files(
   'src/main.cpp',
   'src/cli/cli_commands.cpp',
   'src/cli/cli_engine.cpp',
+  'src/cli/line_reader.cpp',
   'src/cli/cmds/control.cpp',
   'src/cli/cmds/devices.cpp',
   'src/cli/cmds/memory.cpp',

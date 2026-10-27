@@ -104,7 +104,7 @@ Values, addresses and indexes are hexadecimal; `register` is `a`, `b`, `c` or `i
 | Command | Syntax | Description |
 | --- | --- | --- |
 | `ENTER` | _(Press Enter)_ | Executes the next instruction. |
-| `g` | `g` | Runs until a watch condition is met or 10,000,000 instructions pass. Press `g` again to stop. |
+| `g` | `g` | Runs until a watch condition is met or 10,000,000 instructions pass. Type `g` + `ENTER` again to stop; other commands typed meanwhile run at the next prompt. |
 | `s` | `s register value` | Stops execution when the register reaches the value. |
 | `a`, `b`, `c`, `i` | `a value` | Sets the A, B, C register or Iptr. |
 | `w` | `w index value` | Sets workspace word `index`. |

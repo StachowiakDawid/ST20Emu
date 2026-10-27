@@ -1,12 +1,12 @@
 #include "cli_engine.h"
 
 #include "cli_commands.h"
+#include "line_reader.h"
 
 #include "../common/compat.h"
 #include "../core/cpu/st20.h"
 
 #include <algorithm>
-#include <iostream>
 #include <sstream>
 
 namespace cli {
@@ -45,13 +45,10 @@ CliError CliEngine::prompt_and_execute() {
   std::fflush(stdout);
 
   std::string line;
-  if (!std::getline(std::cin, line)) {
-    if (std::cin.eof()) { // no more input: end the session instead of prompting forever
-      request_quit();
-      set_need_cmd(false);
-      return CliError::Success;
-    }
-    return CliError::GetCommandError;
+  if (!read_line(line)) { // no more input: end the session instead of prompting forever
+    request_quit();
+    set_need_cmd(false);
+    return CliError::Success;
   }
 
   // parse the line into dynamic tokens

@@ -5,12 +5,6 @@
 #include "../cpu/st20.h"
 #include <cinttypes>
 
-// posix / linux
-#include <dirent.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 // std
 #include <algorithm>
 #include <bit>
@@ -18,15 +12,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <string>
 #include <iterator>
 #include <new>
 #include <regex>
 #include <vector>
-
-// O_BINARY is Windows-only, but it would be preferable to use std for files manipulation
-#ifndef O_BINARY
-#define O_BINARY 0
-#endif
 
 /* this structure holds the state of the memory */
 struct MEMBLK {
@@ -435,25 +428,21 @@ MEMBLK *getMemBlk(uint32_t address, bool create_flag) {
  * stores a large number of bytes in memory blocks
  */
 int bulkLoadBytes(uint32_t address, const char *byteFile, char *usedFile, uint32_t *totalBytes) {
-  int nBytesRead = 0;
-  int byteFd = -1;
-  int usedFd = -1;
-  struct stat st{};
-
   if (byteFile == nullptr || *byteFile == '\0') {
     compat::println(stderr, "No byte filename specified");
     return INVALID_BYTE_FILENAME;
   }
 
-  if (stat(byteFile, &st) != 0) {
-    perror("Memory file stat failed");
+  std::error_code error;
+  std::uintmax_t fileSize = std::filesystem::file_size(byteFile, error);
+  if (error) {
+    compat::println(stderr, "Memory file stat failed: {}", error.message());
     return INVALID_BYTE_FILE;
   }
-
-  if (st.st_size < 0 || static_cast<uint64_t>(st.st_size) > UINT32_MAX) {
+  if (fileSize > UINT32_MAX) {
     return INVALID_BYTE_FILE;
   }
-  uint32_t size = static_cast<uint32_t>(st.st_size);
+  uint32_t size = static_cast<uint32_t>(fileSize);
 
   if (address == 0) {
     address = WordSignBit - size;
@@ -462,198 +451,107 @@ int bulkLoadBytes(uint32_t address, const char *byteFile, char *usedFile, uint32
 
   uint32_t nextAddress = address;
   char data[BLKSIZE];
-  MEMBLK *cBlk = nullptr;
 
   *totalBytes = 0;
 
-  /* check if the byte file can be opened properly */
-  if ((byteFd = open(byteFile, O_RDONLY | O_BINARY)) < 0) {
-    perror("Memory file cannot be opened");
+  std::ifstream bytes(byteFile, std::ios::binary);
+  if (!bytes) {
+    compat::println(stderr, "Memory file cannot be opened: {}", byteFile);
     return INVALID_BYTE_FILE;
   }
 
-  /* check the name of the used file */
-  if (usedFile == nullptr || *usedFile == '\0') {
-    usedFd = -1;
-  } else if ((usedFd = open(usedFile, O_RDONLY | O_BINARY)) < 0) {
-    /* check if the used file can be opened properly */
-    perror("Used memory file cannot be opened");
-    close(byteFd);
-    return INVALID_BYTE_FILE;
-  }
-
-  /* read one block of data at a time from the input file */
-  do {
-    /*
-     * since the memory blocks are allocated on BLKSIZE boundaries, we
-     * have to fill the block starting at the proper byte address within
-     * the block
-     */
-    uint32_t blockOffset = nextAddress & ADDR_IN_BLK_MASK;
-    nBytesRead = static_cast<int>(read(byteFd, data, BLKSIZE - blockOffset));
-    if (nBytesRead < 0) {
-      close(byteFd);
-      if (usedFd >= 0) close(usedFd);
+  /* without a used file every loaded byte is marked as written */
+  bool haveUsed = usedFile != nullptr && *usedFile != '\0';
+  std::ifstream used;
+  if (haveUsed) {
+    used.open(usedFile, std::ios::binary);
+    if (!used) {
+      compat::println(stderr, "Used memory file cannot be opened: {}", usedFile);
       return INVALID_BYTE_FILE;
     }
+  }
 
-    /* if we haven't reached the end of the file's data */
+  /* read one block of data at a time; the first block starts at the load address's offset
+   * within its memory block */
+  int nBytesRead = 0;
+  do {
+    uint32_t blockOffset = nextAddress & ADDR_IN_BLK_MASK;
+    bytes.read(data, static_cast<std::streamsize>(BLKSIZE - blockOffset));
+    nBytesRead = static_cast<int>(bytes.gcount());
+    if (bytes.bad()) return INVALID_BYTE_FILE;
+
     if (nBytesRead > 0) {
-      /* get the memory block to store the next block of bytes in */
-      cBlk = getMemBlk(nextAddress, true);
-
+      MEMBLK *cBlk = getMemBlk(nextAddress, true);
       if (cBlk == nullptr) {
         compat::println(stderr, "Cannot allocate memory for byte file");
-        close(byteFd);
-        if (usedFd >= 0)
-          close(usedFd);
         return FAILED_MALLOC;
       }
 
-      /* copy the data into the memory block */
       memcpy(&(cBlk->data[blockOffset]), data, static_cast<size_t>(nBytesRead));
       ++blockVersion[cBlk->startAddr >> BLKSHIFT];
 
-      /* if there is no used byte file, set all of the bytes to used */
-      if (usedFd < 0) {
-        /* set the bits in the used array to show which bytes have been stored */
-        for (int i = 0; i < nBytesRead; i++) {
-          /* set the used bit for the bytes that were read */
+      if (!haveUsed) {
+        for (int i = 0; i < nBytesRead; i++)
           byteUsedBit(cBlk, static_cast<int>(blockOffset + static_cast<uint32_t>(i)), SET_BIT);
-        }
       } else {
-        /* if there is a used byte file, load it */
-        size_t usedBytesToRead =
-            (static_cast<size_t>(BLKSIZE) - static_cast<size_t>(blockOffset)) / 8U;
-        if (read(usedFd, &(cBlk->used[blockOffset / 8]), usedBytesToRead) <= 0) {
-          close(byteFd);
-          close(usedFd);
-          return INVALID_OUT_FILE;
-        }
+        std::streamsize usedBytesToRead =
+            static_cast<std::streamsize>((static_cast<size_t>(BLKSIZE) - static_cast<size_t>(blockOffset)) / 8U);
+        used.read(reinterpret_cast<char *>(&(cBlk->used[blockOffset / 8])), usedBytesToRead);
+        if (used.gcount() <= 0) return INVALID_OUT_FILE;
       }
-    } /* end of if nBytesRead > 0 */
+    }
 
     *totalBytes += static_cast<uint32_t>(nBytesRead);
     nextAddress += static_cast<uint32_t>(nBytesRead);
-
   } while (nBytesRead > 0);
-
-  close(byteFd);
-  if (usedFd >= 0) {
-    close(usedFd);
-  }
 
   return 0;
 }
 
 int saveMemory(const char *dirName) {
-  char dataFileName[NAME_SIZE];
-  int dataFileFd = 0;
-  char usedFileName[NAME_SIZE];
-  int usedFileFd = 0;
-  uint32_t nextAddress = 0xFFFFFFFFU;
-  MEMBLK *cBlk = nullptr;
-
-  /* check the directory name */
   if (dirName == nullptr || *dirName == '\0') {
     compat::println(stderr, "No output filename specified");
     return INVALID_BYTE_FILENAME;
   }
 
-  /* create the directory */
-#ifdef _WIN32
-  if (mkdir(dirName) < 0) {
-#else
-  if (mkdir(dirName, S_IRWXU) < 0) {
-#endif
+  std::error_code error;
+  if (!std::filesystem::create_directory(dirName, error)) {
     return INVALID_DIR;
   }
 
-  for (cBlk = memoryMap; cBlk != nullptr; cBlk = cBlk->next) {
-    auto blkAddr = cBlk->startAddr;
-
-    /* omit the ROM code addresses */
-    /*	 if (cBlk->startAddr >= 0x7FF80000 && cBlk->startAddr <= 0x7FFFFFFF) {
-        continue;
-       }
-    */
-    /* omit the Wptr addresses */
-    /*	 if (cBlk->startAddr >= WPTR_START_ADDR && cBlk->startAddr <= WPTR_END_ADDR) {
-        continue;
-       }
-    */
-
-    /*
-     * If this memory block is contiguous with the last, append it to
-     * the last file rather than creating a new file.
-     * If not, create a new file.
-     */
-    if (blkAddr != nextAddress) {
-      /* close the file if it is already open */
-      if (dataFileFd > 0) {
-        close(dataFileFd);
-      }
-      if (usedFileFd > 0) {
-        close(usedFileFd);
-      }
-
-      /* create the file names */
-      if (snprintf(dataFileName, NAME_SIZE, "%s/%08" PRIx32 ".bin", dirName, cBlk->startAddr) < 0) {
+  /* contiguous memory blocks are appended to one file pair, named after the first block's address */
+  std::ofstream dataFile;
+  std::ofstream usedFile;
+  uint32_t nextAddress = 0xFFFFFFFFU;
+  for (MEMBLK *cBlk = memoryMap; cBlk != nullptr; cBlk = cBlk->next) {
+    if (cBlk->startAddr != nextAddress) {
+      dataFile.close();
+      usedFile.close();
+      std::string base = std::format("{}/{:08x}", dirName, cBlk->startAddr);
+      dataFile.open(base + ".bin", std::ios::binary | std::ios::trunc);
+      if (!dataFile) {
+        compat::println(stderr, "Output memory file cannot be opened: {}.bin", base);
         return INVALID_OUT_FILE;
       }
-      if (snprintf(usedFileName, NAME_SIZE, "%s/%08" PRIx32 ".use", dirName, cBlk->startAddr) < 0) {
+      usedFile.open(base + ".use", std::ios::binary | std::ios::trunc);
+      if (!usedFile) {
+        compat::println(stderr, "Output used memory file cannot be opened: {}.use", base);
         return INVALID_OUT_FILE;
       }
-
-/* check if the files can be opened properly */
-#if defined(S_IREAD) && defined(S_IWRITE)
-      if ((dataFileFd = open(dataFileName, O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE)) < 0) {
-        perror("Output memory file cannot be opened");
-        return INVALID_OUT_FILE;
-      }
-      if ((usedFileFd = open(usedFileName, O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE)) < 0) {
-        perror("Output used memory file cannot be opened");
-        return INVALID_OUT_FILE;
-      }
-#else
-      if ((dataFileFd = open(dataFileName, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
-        perror("Output memory file cannot be opened");
-        return INVALID_OUT_FILE;
-      }
-      if ((usedFileFd = open(usedFileName, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
-        perror("Output used memory file cannot be opened");
-        return INVALID_OUT_FILE;
-      }
-#endif
-
-      nextAddress = blkAddr;
+      nextAddress = cBlk->startAddr;
     }
 
-    if (write(dataFileFd, cBlk->data, static_cast<size_t>(BLKSIZE)) < 0) {
-      if (dataFileFd > 0)
-        close(dataFileFd);
-      if (usedFileFd > 0)
-        close(usedFileFd);
-      return WRITE_FAILURE;
-    }
-    if (write(usedFileFd, cBlk->used, static_cast<size_t>(BLKSIZE / 8)) < 0) {
-      if (dataFileFd > 0)
-        close(dataFileFd);
-      if (usedFileFd > 0)
-        close(usedFileFd);
+    dataFile.write(reinterpret_cast<const char *>(cBlk->data), static_cast<std::streamsize>(BLKSIZE));
+    usedFile.write(reinterpret_cast<const char *>(cBlk->used), static_cast<std::streamsize>(BLKSIZE / 8));
+    if (!dataFile || !usedFile) {
       return WRITE_FAILURE;
     }
     nextAddress += static_cast<uint32_t>(BLKSIZE);
   }
 
-  if (dataFileFd > 0) {
-    close(dataFileFd);
-  }
-  if (usedFileFd > 0) {
-    close(usedFileFd);
-  }
-
-  return 0;
+  dataFile.close();
+  usedFile.close();
+  return dataFile.fail() || usedFile.fail() ? WRITE_FAILURE : 0;
 }
 
 int loadMemory(const char *dirName) {
@@ -662,77 +560,39 @@ int loadMemory(const char *dirName) {
     return INVALID_BYTE_FILENAME;
   }
 
-  char fileMask[NAME_SIZE];
-  if (snprintf(fileMask, sizeof(fileMask), "%s/???????0.bin", dirName) < 0) {
-    compat::println("filemask failed");
+  std::error_code error;
+  std::filesystem::directory_iterator files(dirName, error);
+  if (error) {
+    compat::println("Cannot open directory {}: {}", dirName, error.message());
     return INVALID_OUT_FILE;
   }
-  compat::println("filemask: {}", fileMask);
 
-  DIR *dirBlk = opendir(dirName);
-  if (dirBlk == nullptr) {
-    compat::println("opendir failed");
-    return INVALID_OUT_FILE;
-  }
-  compat::println("opendir succeeded");
-
-  // exactly 7 chars, then "0.bin"
+  // data files are named after their 16-byte aligned start address: exactly 7 chars, then "0.bin"
   std::regex filePattern("^.......0\\.bin$");
 
-  struct dirent *entry = nullptr;
-  while ((entry = readdir(dirBlk)) != nullptr) { /* for each file */
-    if (!std::regex_match(entry->d_name, filePattern)) {
-      continue; // skip non-matching files
+  for (const auto &entry : files) {
+    std::string name = entry.path().filename().string();
+    if (!std::regex_match(name, filePattern)) {
+      continue;
     }
-
-    compat::println("d_name: {}", entry->d_name);
 
     uint32_t address = 0;
-    if (sscanf(entry->d_name, "%8" SCNx32, &address) != 1) {
-      closedir(dirBlk);
+    if (sscanf(name.c_str(), "%8" SCNx32, &address) != 1) {
       return INVALID_OUT_FILE;
     }
 
-    /* build the full byte filename */
-    char byteFileName[NAME_SIZE];
-    if (snprintf(byteFileName, sizeof(byteFileName), "%s/%s", dirName, entry->d_name) < 0) {
-      closedir(dirBlk);
-      return INVALID_OUT_FILE;
-    }
-
-    /* build the used byte filename from the data file name */
-    char usedFileName[NAME_SIZE];
-    if (snprintf(usedFileName, sizeof(usedFileName), "%s", byteFileName) < 0) {
-      closedir(dirBlk);
-      return INVALID_OUT_FILE;
-    }
-
-    char *dotLoc = strrchr(usedFileName, '.');
-    if (dotLoc == nullptr) {
-      closedir(dirBlk);
-      return INVALID_OUT_FILE;
-    }
-
-    /* replace .bin extension with .use */
-    if (snprintf(dotLoc, sizeof(usedFileName) - static_cast<size_t>(dotLoc - usedFileName),
-                 ".use") < 0) {
-      closedir(dirBlk);
-      return INVALID_OUT_FILE;
-    }
-
-    compat::print(stderr, "{}", byteFileName);
-    compat::print(stderr, "   ");
-    compat::println(stderr, "{}", usedFileName);
+    std::filesystem::path byteFile = entry.path();
+    std::filesystem::path usedPath = byteFile;
+    usedPath.replace_extension(".use");
+    std::string usedName = usedPath.string();
+    compat::println(stderr, "{}   {}", byteFile.string(), usedName);
 
     uint32_t dataLength = 0;
-    int result = bulkLoadBytes(address, byteFileName, usedFileName, &dataLength);
+    int result = bulkLoadBytes(address, byteFile.string().c_str(), usedName.data(), &dataLength);
     if (result != 0) {
-      closedir(dirBlk);
       return result;
     }
-  } /* end of for each data file */
-
-  closedir(dirBlk);
+  }
   return 0;
 }
 

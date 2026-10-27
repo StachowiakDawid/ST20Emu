@@ -8,6 +8,4 @@
 inline constexpr uint32_t UNDEFINED_WORD_OLD = 0xCCCCCCCCU;
 inline uint32_t undefinedWord = UNDEFINED_WORD_OLD;
 
-inline constexpr int NAME_SIZE = 100;
-
 #endif
