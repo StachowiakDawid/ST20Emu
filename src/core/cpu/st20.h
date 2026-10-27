@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "../../common/defines.h"
+#include "../memory/memory.h"
 
 /* this is the starting address for CPU execution */
 #define START_ADDR 0x7FFFFFFE

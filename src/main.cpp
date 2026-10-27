@@ -2,7 +2,6 @@
 
 #include "cli/cli_engine.h"
 #include "cli/line_reader.h"
-#include "common/defines.h"
 #include "core/cpu/omr.h"
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
@@ -340,16 +339,9 @@ int main(int argc, char **argv) {
   if (batch) {
     auto now = std::chrono::system_clock::now();
     std::time_t time = std::chrono::system_clock::to_time_t(now);
-    std::tm localTime{};
-
-#ifdef _WIN32
-    localtime_s(&localTime, &time);
-#else
-    localtime_r(&time, &localTime);
-#endif
-
+    /* std::localtime's shared result is safe here: no other thread runs yet */
     char timestamp[32]{};
-    std::strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &localTime);
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", std::localtime(&time));
     std::string logPath = std::format("st20emu-log-{}.txt", timestamp);
     /* "x" fails if the log exists; both streams then append to it, so neither overwrites the other */
     std::FILE *created = std::fopen(logPath.c_str(), "wx");

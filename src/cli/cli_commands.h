@@ -5,7 +5,9 @@
 
 #include "cli_engine.h"
 
+#include <charconv>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 
@@ -15,6 +17,14 @@ using CmdFunc = CliError (*)(CliEngine &engine, std::span<const std::string_view
 
 // defined in cli_commands.cpp
 extern const std::unordered_map<std::string_view, CmdFunc> cmd_dictionary;
+
+/* parses a hexadecimal command argument */
+template <typename T> bool parseHex(const std::string &str, T &value) {
+  if (str.empty())
+    return false;
+  auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), value, 16);
+  return ec == std::errc{};
+}
 
 namespace cmds {
 // control

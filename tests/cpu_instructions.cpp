@@ -66,18 +66,21 @@ static void expect(const char *name, uint64_t actual, uint64_t expected) {
   }
 }
 
-/* creates a new directory, replacing the trailing XXXXXX of pattern like mkdtemp */
-static char *makeTempDirectory(char *pattern) {
+/* creates a new directory named prefix-XXXXXX in the system temp directory; empty on failure */
+static std::string makeTempDirectory(std::string_view prefix) {
   static std::mt19937 random{std::random_device{}()};
   constexpr std::string_view letters = "abcdefghijklmnopqrstuvwxyz0123456789";
-  std::size_t length = std::strlen(pattern);
-  if (length < 6) return nullptr;
+  std::error_code error;
+  std::filesystem::path base = std::filesystem::temp_directory_path(error);
+  if (error) return {};
   for (int attempt = 0; attempt < 100; ++attempt) {
-    for (std::size_t index = length - 6; index < length; ++index) pattern[index] = letters[random() % letters.size()];
-    std::error_code error;
-    if (std::filesystem::create_directory(pattern, error)) return pattern;
+    std::string name{prefix};
+    name += '-';
+    for (int index = 0; index < 6; ++index) name += letters[random() % letters.size()];
+    std::filesystem::path path = base / name;
+    if (std::filesystem::create_directory(path, error)) return path.string();
   }
-  return nullptr;
+  return {};
 }
 
 /* removes a file or an empty directory */
@@ -432,12 +435,12 @@ static void testMultiplyAndShifts() {
     if (count >= 64) {
       reset(count, 0xffffffff, 0x1234);
       lshl_(0);
-      expect("lshl out-of-range low", cpuState.areg, UNDEFINED_WORD_OLD);
-      expect("lshl out-of-range high", cpuState.breg, UNDEFINED_WORD_OLD);
+      expect("lshl out-of-range low", cpuState.areg, UNDEFINED_WORD);
+      expect("lshl out-of-range high", cpuState.breg, UNDEFINED_WORD);
       reset(count, 0xffffffff, 0x1234);
       lshr_(0);
-      expect("lshr out-of-range low", cpuState.areg, UNDEFINED_WORD_OLD);
-      expect("lshr out-of-range high", cpuState.breg, UNDEFINED_WORD_OLD);
+      expect("lshr out-of-range low", cpuState.areg, UNDEFINED_WORD);
+      expect("lshr out-of-range high", cpuState.breg, UNDEFINED_WORD);
     }
   }
 }
@@ -468,7 +471,7 @@ static void testBitInstructions() {
   for (uint32_t count : {33U, 65536U, 0xffffffffU}) {
     reset(count, 0xffffffff, 0x1234);
     bitrevnbits_(0);
-    expect("bitrevnbits undefined policy", cpuState.areg, UNDEFINED_WORD_OLD);
+    expect("bitrevnbits undefined policy", cpuState.areg, UNDEFINED_WORD);
   }
   for (uint32_t value = 0; value <= 255; ++value) {
     reset(0xdeadbe00U | value, 0x1234, 0x5678);
@@ -492,11 +495,11 @@ static void testBitInstructions() {
   for (uint32_t signMask : {0U, 3U, 0xffffffffU}) {
     reset(signMask, 0, 0);
     xword_(0);
-    expect("xword invalid mask policy", cpuState.areg, UNDEFINED_WORD_OLD);
+    expect("xword invalid mask policy", cpuState.areg, UNDEFINED_WORD);
   }
   reset(0x80, 0x100, 0);
   xword_(0);
-  expect("xword too many bits policy", cpuState.areg, UNDEFINED_WORD_OLD);
+  expect("xword too many bits policy", cpuState.areg, UNDEFINED_WORD);
 
   for (uint32_t value : {0U, 1U, 0x7fffU, 0x8000U, 0xffffU}) {
     storeBytes(0x7fff, 2, value);
@@ -719,7 +722,7 @@ static void testFractionMultiply() {
   undefinedWord = 0xa5a5a5a5;
   fmul_(0);
   expect("fmul configured undefined overflow result", cpuState.areg, 0xa5a5a5a5);
-  undefinedWord = UNDEFINED_WORD_OLD;
+  undefinedWord = UNDEFINED_WORD;
   reset(0x1234, 0x5678, 0x9abc);
   omrState.HP_ErrorFlag = 1;
   omrState.LP_ErrorFlag = 1;
@@ -889,8 +892,9 @@ static void testResetAnalysis() {
   }
   expect("ordinary reset succeeds", initCPUState() != 0, 0);
   expect("ordinary reset clears analyse latch", omrState.analysedOnReset, 0);
-  char directory[] = "/tmp/st20-analysis-XXXXXX";
-  expect("analyse snapshot temp directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-analysis");
+  const char *directory = directoryPath.c_str();
+  expect("analyse snapshot temp directory", !directoryPath.empty(), 1);
   expect("analysed reset for snapshot", initCPUState(true) != 0, 0);
   expect("save analysed reset snapshot", saveCPUState(directory) != 0, 0);
   omrState.analysedOnReset = false;
@@ -1029,8 +1033,9 @@ static void testLegacySnapshot() {
     int nWptr;
     bool wptrUsed[MAX_WPTR];
   };
-  char directory[] = "/tmp/st20-snapshot-XXXXXX";
-  if (!makeTempDirectory(directory)) {
+  std::string directoryPath = makeTempDirectory("st20-snapshot");
+  const char *directory = directoryPath.c_str();
+  if (directoryPath.empty()) {
     expect("snapshot temporary directory", 0, 1);
     return;
   }
@@ -1158,8 +1163,10 @@ static void testMemoryReaders() {
   expect("word read wraps guest address space", readBytes(WordMask, BytesPerWord, &wrapped) != 0, 0);
   expect("wrapped word preserves all bits", wrapped, 0x88776655);
 
-  char directory[] = "/tmp/st20-oversized-XXXXXX";
-  expect("oversized firmware fixture directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-oversized");
+
+  const char *directory = directoryPath.c_str();
+  expect("oversized firmware fixture directory", !directoryPath.empty(), 1);
   std::string filename = std::string(directory) + "/firmware.bin";
   bool created = static_cast<bool>(std::ofstream(filename, std::ios::binary));
   expect("oversized firmware fixture opens", created, 1);
@@ -1190,7 +1197,7 @@ static void testRuntimeDefaults() {
   allocBytes(0xa000, 4);
   readBytes(0xa000, 4, &value);
   expect("configured undefined allocation", value, undefinedWord);
-  undefinedWord = UNDEFINED_WORD_OLD;
+  undefinedWord = UNDEFINED_WORD;
 }
 
 static void testDeviceAccess() {
@@ -2370,8 +2377,9 @@ static void testTimerOrderingAndPreemption() {
 }
 
 static void testSchedulerSnapshot() {
-  char directory[] = "/tmp/st20-runtime-snapshot-XXXXXX";
-  if (!makeTempDirectory(directory)) {
+  std::string directoryPath = makeTempDirectory("st20-runtime-snapshot");
+  const char *directory = directoryPath.c_str();
+  if (directoryPath.empty()) {
     expect("runtime snapshot temporary directory", 0, 1);
     return;
   }
@@ -2858,8 +2866,9 @@ static void testMove2d() {
 }
 
 static void testBlockedChannelSnapshot() {
-  char directory[] = "/tmp/st20-channel-snapshot-XXXXXX";
-  if (!makeTempDirectory(directory)) {
+  std::string directoryPath = makeTempDirectory("st20-channel-snapshot");
+  const char *directory = directoryPath.c_str();
+  if (directoryPath.empty()) {
     expect("channel snapshot temporary directory", 0, 1);
     return;
   }
@@ -3224,8 +3233,9 @@ static void testShadowRegisters() {
     readBytes(0x199100 + index * 4U, 4, &value);
     expect("native trap shadow roundtrip value", value, trapInput[index]);
   }
-  char trapDirectory[] = "/tmp/st20-native-trap-shadow-XXXXXX";
-  expect("native trap shadow snapshot directory", makeTempDirectory(trapDirectory) != nullptr, 1);
+  std::string trapDirectoryPath = makeTempDirectory("st20-native-trap-shadow");
+  const char *trapDirectory = trapDirectoryPath.c_str();
+  expect("native trap shadow snapshot directory", !trapDirectoryPath.empty(), 1);
   expect("native trap shadow snapshot saves", saveCPUState(trapDirectory) != 0, 0);
   resetScheduler();
   expect("native trap shadow snapshot restores", loadCPUState(trapDirectory) != 0, 0);
@@ -3282,8 +3292,9 @@ static void testShadowRegisters() {
   expect("native captured invalid export retains workspace", value, 0x191000);
   readBytes(0x199810, 4, &value);
   expect("native captured invalid export retains A", value, 0x4444);
-  char invalidDirectory[] = "/tmp/st20-invalid-captured-bank-XXXXXX";
-  expect("native invalid captured snapshot directory", makeTempDirectory(invalidDirectory) != nullptr, 1);
+  std::string invalidDirectoryPath = makeTempDirectory("st20-invalid-captured-bank");
+  const char *invalidDirectory = invalidDirectoryPath.c_str();
+  expect("native invalid captured snapshot directory", !invalidDirectoryPath.empty(), 1);
   expect("native invalid captured snapshot saves", saveCPUState(invalidDirectory) != 0, 0);
   resetScheduler();
   expect("native invalid captured snapshot restores", loadCPUState(invalidDirectory) != 0, 0);
@@ -3311,8 +3322,9 @@ static void testShadowRegisters() {
     readBytes(trapped + index * 4, 4, &value);
     expect("native captured load leaves trapped control record unchanged", value, savedRecord[index]);
   }
-  char capturedDirectory[] = "/tmp/st20-native-captured-shadow-XXXXXX";
-  expect("native captured bank snapshot directory", makeTempDirectory(capturedDirectory) != nullptr, 1);
+  std::string capturedDirectoryPath = makeTempDirectory("st20-native-captured-shadow");
+  const char *capturedDirectory = capturedDirectoryPath.c_str();
+  expect("native captured bank snapshot directory", !capturedDirectoryPath.empty(), 1);
   expect("native captured bank snapshot saves", saveCPUState(capturedDirectory) != 0, 0);
   resetScheduler();
   expect("native captured bank snapshot restores", loadCPUState(capturedDirectory) != 0, 0);
@@ -3343,8 +3355,9 @@ static void testShadowRegisters() {
   cpuState.breg = LOW_PRIORITY;
   cpuState.creg = 0x19b000;
   expect("ldshadow edits bank before snapshot", ldshadow_(0) != 0, 0);
-  char directory[] = "/tmp/st20-shadow-XXXXXX";
-  expect("shadow snapshot directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-shadow");
+  const char *directory = directoryPath.c_str();
+  expect("shadow snapshot directory", !directoryPath.empty(), 1);
   expect("save edited shadow snapshot", saveCPUState(directory) != 0, 0);
   resetScheduler();
   expect("load edited shadow snapshot", loadCPUState(directory) != 0, 0);
@@ -3669,8 +3682,9 @@ static void testSti5512DisplayDevices() {
   storeBigEndian(0xc0012400, 0xffffffff);
   storeBigEndian(0xc0012404, 0xffffffff);
   storeBytes(0x91, 1, 0x04);
-  char directory[] = "/tmp/st20-screen-XXXXXX";
-  expect("screen temp directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-screen");
+  const char *directory = directoryPath.c_str();
+  expect("screen temp directory", !directoryPath.empty(), 1);
   std::string path = std::string(directory) + "/screen.bmp";
   int regions = 0;
   expect("render screen", writeSti5512Screen(path, &regions).empty(), 1);
@@ -4144,8 +4158,9 @@ static void testInterruptReturns() {
   enqueueProcess(0x186000, HIGH_PRIORITY);
   pollTimers();
   storeBytes(0x186000, 4, 0);
-  char directory[] = "/tmp/st20-iret-XXXXXX";
-  expect("iret snapshot directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-iret");
+  const char *directory = directoryPath.c_str();
+  expect("iret snapshot directory", !directoryPath.empty(), 1);
   expect("save pending low-shadow return", saveCPUState(directory) != 0, 0);
   resetScheduler();
   expect("restore pending low-shadow return", loadCPUState(directory) != 0, 0);
@@ -4265,8 +4280,9 @@ static void testNativeExternalChannels() {
     reset(2, channel, 0x251004);
     expect("native modeled input blocks", in_(0) != 0, 0);
     expect("native modeled input suspended", cpuState.running, 0);
-    char directory[] = "/tmp/st20-native-fifo-XXXXXX";
-    expect("native modeled snapshot directory", makeTempDirectory(directory) != nullptr, 1);
+    std::string directoryPath = makeTempDirectory("st20-native-fifo");
+    const char *directory = directoryPath.c_str();
+    expect("native modeled snapshot directory", !directoryPath.empty(), 1);
     expect("native modeled blocked snapshot saves", saveCPUState(directory) != 0, 0);
     reset(channel, 0, 0);
     resetch_(0);
@@ -4366,8 +4382,9 @@ static void testNativeExternalChannels() {
     readBytes(0x251018, 2, &value);
     expect("native modeled data committed before kernel", value, 0x3412);
     expect("native modeled kernel owns enqueue", omrState.ProcQueueFPtr[priority], NO_PROCESS);
-    char trapDirectory[] = "/tmp/st20-native-channel-trap-XXXXXX";
-    expect("native modeled trapped snapshot directory", makeTempDirectory(trapDirectory) != nullptr, 1);
+    std::string trapDirectoryPath = makeTempDirectory("st20-native-channel-trap");
+    const char *trapDirectory = trapDirectoryPath.c_str();
+    expect("native modeled trapped snapshot directory", !trapDirectoryPath.empty(), 1);
     expect("native modeled completed transfer snapshot saves", saveCPUState(trapDirectory) != 0, 0);
     cpuState.areg = channel;
     resetch_(0);
@@ -4467,8 +4484,9 @@ static void testPeriodicTimeslicing() {
   expect("periodic race yields at next low point", cpuState.wptr, 0x1b1000);
   fixture();
   advanceTimers(period + period / 2);
-  char directory[] = "/tmp/st20-periodic-XXXXXX";
-  expect("periodic snapshot directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-periodic");
+  const char *directory = directoryPath.c_str();
+  expect("periodic snapshot directory", !directoryPath.empty(), 1);
   expect("save periodic quantum", saveCPUState(directory) != 0, 0);
   resetScheduler();
   expect("restore periodic quantum", loadCPUState(directory) != 0, 0);
@@ -4532,8 +4550,9 @@ static void testTimesliceTrapsAndSnapshots() {
     expect("timeslice caller resumes after waiter", cpuState.wptr, 0x176000);
   }
   schedulerFixture(0x179000);
-  char directory[] = "/tmp/st20-interrupt-XXXXXX";
-  expect("interrupt snapshot directory", makeTempDirectory(directory) != nullptr, 1);
+  std::string directoryPath = makeTempDirectory("st20-interrupt");
+  const char *directory = directoryPath.c_str();
+  expect("interrupt snapshot directory", !directoryPath.empty(), 1);
   intdis_(0);
   cpuState.status &= ~STATUS_TIMESLICE_ENABLE;
   expect("save disabled interruption snapshot", saveCPUState(directory) != 0, 0);
@@ -5083,8 +5102,9 @@ static void testSchedulerTrapDelivery() {
 }
 
 static void testTrapSnapshot() {
-  char directory[] = "/tmp/st20-trap-snapshot-XXXXXX";
-  if (!makeTempDirectory(directory)) {
+  std::string directoryPath = makeTempDirectory("st20-trap-snapshot");
+  const char *directory = directoryPath.c_str();
+  if (directoryPath.empty()) {
     expect("trap snapshot directory", 0, 1);
     return;
   }
@@ -5247,8 +5267,9 @@ static void testSignalAndChannelDelivery() {
 }
 
 static void testVersion2AndHaltSnapshot() {
-  char directory[] = "/tmp/st20-v2-snapshot-XXXXXX";
-  if (!makeTempDirectory(directory)) {
+  std::string directoryPath = makeTempDirectory("st20-v2-snapshot");
+  const char *directory = directoryPath.c_str();
+  if (directoryPath.empty()) {
     expect("v2 snapshot directory", 0, 1);
     return;
   }
@@ -5654,8 +5675,9 @@ static void testAltNotificationRaces() {
 }
 
 static void testAltSnapshots() {
-  char directory[] = "/tmp/st20-alt-snapshot-XXXXXX";
-  if (!makeTempDirectory(directory)) {
+  std::string directoryPath = makeTempDirectory("st20-alt-snapshot");
+  const char *directory = directoryPath.c_str();
+  if (directoryPath.empty()) {
     expect("ALT snapshot directory", 0, 1);
     return;
   }

@@ -1,7 +1,6 @@
 #include "memory.h"
 
 #include "../../common/compat.h"
-#include "../../common/defines.h"
 #include "../cpu/st20.h"
 #include <cinttypes>
 

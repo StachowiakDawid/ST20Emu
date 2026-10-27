@@ -1,10 +1,12 @@
 #ifndef MEMORY_H
 #define MEMORY_H
 
-#include "../../common/defines.h"
-
 #include <bit>
 #include <cstdint>
+
+/* value of undefined registers, memory and instruction results */
+inline constexpr uint32_t UNDEFINED_WORD = 0xCCCCCCCCU;
+inline uint32_t undefinedWord = UNDEFINED_WORD;
 
 inline constexpr uint32_t BLKSIZE = 8 * 1024;
 inline constexpr uint32_t ADDR_IN_BLK_MASK = BLKSIZE - 1U;

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <charconv>
 #include <format>
 #include <iterator>
 #include <string_view>
@@ -12,14 +11,13 @@
 
 #include <cstdio>
 
-// C++23 <print> fallback emulator
+/* Formatted output used by every module. Output can be collected in a per-thread buffer (the
+ * batch log), and per-access trace notes can be turned off (free runs). */
 namespace compat {
-inline bool outputEnabled = true;
 inline thread_local std::string *outputBuffer = nullptr;
 
 template <typename... Args>
 void println(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
-  if (!outputEnabled) return;
   if (outputBuffer && (stream == stdout || stream == stderr)) {
     std::format_to(std::back_inserter(*outputBuffer), fmt, std::forward<Args>(args)...);
     outputBuffer->push_back('\n');
@@ -35,7 +33,6 @@ template <typename... Args> void println(std::format_string<Args...> fmt, Args &
 
 template <typename... Args>
 void print(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) {
-  if (!outputEnabled) return;
   if (outputBuffer && (stream == stdout || stream == stderr)) {
     std::format_to(std::back_inserter(*outputBuffer), fmt, std::forward<Args>(args)...);
   } else {
@@ -55,13 +52,5 @@ template <typename... Args> void note(std::format_string<Args...> fmt, Args &&..
   if (notesEnabled) println(stdout, fmt, std::forward<Args>(args)...);
 }
 } // namespace compat
-
-// Helper utility for safe C++23 hexadecimal parsing
-template <typename T> static bool parseHex(const std::string &str, T &value) {
-  if (str.empty())
-    return false;
-  auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), value, 16);
-  return ec == std::errc{};
-}
 
 #endif

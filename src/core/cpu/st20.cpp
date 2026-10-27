@@ -35,7 +35,6 @@
 #include "omr.h"
 
 #include "../../common/compat.h"
-#include "../../common/defines.h"
 #include "../memory/memory.h"
 
 // std
