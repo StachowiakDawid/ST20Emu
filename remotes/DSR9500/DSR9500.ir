@@ -153,7 +153,7 @@ protocol: NEC
 address: 01 00 00 00
 command: 19 00 00 00
 #
-name: Red
+name: Blue
 type: parsed
 protocol: NEC
 address: 01 00 00 00
@@ -171,7 +171,7 @@ protocol: NEC
 address: 01 00 00 00
 command: 1D 00 00 00
 #
-name: Blue_Info
+name: Red
 type: parsed
 protocol: NEC
 address: 01 00 00 00

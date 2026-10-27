@@ -118,40 +118,19 @@ The selected SoC is printed at startup and included in batch logs.
 
 ### Boards
 
-`--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's I2C chips as register
-files: the QPSK demodulator (`0xaa` on SSC1, identity `0x5a` in register 0), the CI controller
-(`0x80`) and the RF modulator (`0xca`) on SSC0. There is no tuner, signal, CI module or RF
-model. The board also connects:
-
-- the front panel: a 16-bit shift register on PIO4 (data bit 3, clock bit 4) latched by PIO1
-  bit 7. Its four LED digits are printed as `LED> text` when they change; `led` shows them.
-  `fp KEY` holds a key of the matrix (`up`, `down` or a column bit 1, 2, 4, 8, 0x80) for 150 ms.
-- the IR receiver on PIO3 bit 3 and PWM CaptureIn0: `ir KEY...` sends NEC frames with the
-  customer code 0xfe01. Keys are `0`-`9`, `ok`, `menu`, `exit`, `up`, `down`, `left`, `right`,
-  `pgup`, `pgdn`, `power` or a command number. The receiver starts in standby, where only
-  `power` (remote or front panel) is accepted.
-
-Stop a free run (`g`) to type these commands, then continue with `g`. With the DSR9500
-firmware the main menu appears after about 90 million instructions (`screen menu.bmp`). The DSR9500 main firmware boots with:
-
-```bash
-./st20emu-release --soc sti5512 --board dsr9500 --firmware firmware/dsr9500mcmain.bin --batch
-```
+`--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's board devices and the
+`fp`, `ir` and `led` commands. See [src/board/README.md](src/board/README.md).
 
 ### Serial Console
 
 Bytes the firmware sends through the ASC ports are printed line by line as `ASCn> text`
 (to the terminal, or to the batch log).
 
-### Portable Instruction ABI
+### Host Channels and Reset
 
-Set `PORTABLE_INSTRUCTION_ABI = 0x1` in the configuration to enable the emulator-specific saved-operation and floating-point formats. The default is `0x0`, preserving the reference-oriented fallback behavior. Embedders can use `setPortableInstructionAbi(true)`.
+Explicitly configured FIFO endpoints via `registerExternalChannel`, `feedExternalChannel` and `drainExternalChannel` support blocking input/output, scalar sends, ALT guards and reset. Transfers are atomic with RAM-only buffers. These host-configured endpoints are not an automatic STi5518 hardware channel map.
 
-Portable mode adds resumable moves and channel copies, complete tagged shadow records, `restart`, alternative FP formats, and queued/nested external interrupts. It is **not a verified ST20 silicon ABI** and may be incompatible with existing firmware. The record and FP formats, host event APIs, snapshot behavior, and remaining limits are specified in [the instruction status document](docs/instruction-status.md#portable-emulator-abi). Native `postnormsn` and `roundsn` are available without this option and use the separately [simulator-verified intermediate format](docs/instruction-status.md#native-floating-point-helpers).
-
-Explicitly configured FIFO endpoints via `registerExternalChannel`, `feedExternalChannel` and `drainExternalChannel` also work in native mode, including blocking input/output, scalar sends, ALT guards and reset. Native transfers are atomic with RAM-only buffers; portable transfers retain resumable state. These host-configured endpoints are not an automatic STi5518 hardware channel map.
-
-`reboot` performs a boot-from-ROM cold reset: processor and device-model state return to their reset values, memory is kept, and execution restarts at `START_ADDR`. Exact chip-specific bus timings, alignment rules, and peripheral register-map integration are not certified by portable mode.
+`reboot` performs a boot-from-ROM cold reset: processor and device-model state return to their reset values, memory is kept, and execution restarts at `START_ADDR`. Exact chip-specific bus timings and alignment rules are not modelled.
 
 > **Note:** The INI file is a legacy behaviour of old code. It is expected to be removed and replaced later.
 

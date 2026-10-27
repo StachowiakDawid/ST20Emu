@@ -133,3 +133,4 @@ $RECYCLE.BIN/
 obj
 st20emu
 st20emu-release
+st20emu-pgo

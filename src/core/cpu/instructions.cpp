@@ -108,10 +108,6 @@ int copy2d(Move2dFilter filter) {
   uint32_t width = pop();
   uint32_t destination = pop();
   uint32_t source = pop();
-  if (portableInstructionAbiEnabled()) {
-    uint32_t operation = filter == Move2dFilter::All ? 3U : filter == Move2dFilter::Zero ? 4U : 5U;
-    return beginResumableMove(operation, width, destination, source);
-  }
   uint32_t rows = cpuState.move2dBlockLength;
   uint32_t sourceStride = cpuState.move2dSourceStride;
   uint32_t destinationStride = cpuState.move2dDestStride;
@@ -288,72 +284,35 @@ int testpranal_(uint32_t /*unused*/) {
 
 int postnormsn_(uint32_t /*unused*/) {
   uint32_t count = cpuState.creg;
-  if (portableInstructionAbiEnabled() && count > BitsPerDoubleWord) return INVALID_PORTABLE_STATE;
   uint32_t temporary = 0;
   int result = readWptrWord(pw::Temp, &temporary);
   if (result) return result;
-  if (!portableInstructionAbiEnabled()) {
-    int64_t exponent = static_cast<int32_t>(temporary - count);
-    if (exponent < -23) {
-      cpuState.areg = 0;
-      cpuState.breg = 0;
-      exponent = 0;
-    } else if (exponent <= 0) {
-      uint64_t significand = (static_cast<uint64_t>(cpuState.breg) << BitsPerWord) | cpuState.areg;
-      int64_t shift = 1 - exponent;
-      significand = (significand >> shift) | cpuState.areg;
-      cpuState.areg = static_cast<uint32_t>(significand);
-      cpuState.breg = static_cast<uint32_t>(significand >> BitsPerWord);
-      exponent = 0;
-    }
-    cpuState.creg = static_cast<uint32_t>(std::min<int64_t>(exponent, 255));
-    return 0;
+  int64_t exponent = static_cast<int32_t>(temporary - count);
+  if (exponent < -23) {
+    cpuState.areg = 0;
+    cpuState.breg = 0;
+    exponent = 0;
+  } else if (exponent <= 0) {
+    uint64_t significand = (static_cast<uint64_t>(cpuState.breg) << BitsPerWord) | cpuState.areg;
+    int64_t shift = 1 - exponent;
+    significand = (significand >> shift) | cpuState.areg;
+    cpuState.areg = static_cast<uint32_t>(significand);
+    cpuState.breg = static_cast<uint32_t>(significand >> BitsPerWord);
+    exponent = 0;
   }
-  uint32_t word = temporary;
-  int64_t exponent = static_cast<int32_t>(word << 1) / 2;
-  exponent -= count;
-  exponent = std::clamp<int64_t>(exponent, -(int64_t{1} << 30), (int64_t{1} << 30) - 1);
-  if (cpuState.areg == 0 && cpuState.breg == 0) exponent = 0;
-  cpuState.creg = (word & WordSignBit) | (static_cast<uint32_t>(exponent) & 0x7fffffffU);
+  cpuState.creg = static_cast<uint32_t>(std::min<int64_t>(exponent, 255));
   return 0;
 }
 
 int roundsn_(uint32_t /*unused*/) {
-  if (!portableInstructionAbiEnabled()) {
-    uint64_t significand = (static_cast<uint64_t>(cpuState.breg & 0x7fffffffU) << BitsPerWord) | cpuState.areg;
-    uint64_t rounded = roundEvenShift(significand, 40);
-    uint32_t exponent = cpuState.creg;
-    uint32_t packed = static_cast<int32_t>(exponent) >= 255 ? 0x7f800000U
-        : (exponent << 23) + static_cast<uint32_t>(rounded);
-    cpuState.areg = packed;
-    cpuState.breg = undefinedWord;
-    cpuState.creg = undefinedWord;
-    return 0;
-  }
-  uint64_t significand = (static_cast<uint64_t>(cpuState.breg) << BitsPerWord) |
-                         cpuState.areg;
-  uint32_t word = cpuState.creg;
-  uint32_t sign = word & WordSignBit;
-  int64_t exponent = static_cast<int32_t>(word << 1) / 2;
-  if (significand != 0 && !(significand & (uint64_t{1} << 63))) return INVALID_PORTABLE_STATE;
-  uint32_t packed = sign;
-  if (significand != 0) {
-    if (exponent > 127) packed |= 0x7f800000U;
-    else if (exponent < -126) packed |= static_cast<uint32_t>(roundEvenShift(significand, 40 - 126 - exponent));
-    else {
-      uint64_t rounded = roundEvenShift(significand, 40);
-      if (rounded == (uint64_t{1} << 24)) {
-        rounded >>= 1;
-        ++exponent;
-      }
-      if (exponent > 127) packed |= 0x7f800000U;
-      else packed |= (static_cast<uint32_t>(exponent + 127) << 23) | (static_cast<uint32_t>(rounded) & 0x7fffffU);
-    }
-  }
-  pop();
-  pop();
-  pop();
-  push(packed);
+  uint64_t significand = (static_cast<uint64_t>(cpuState.breg & 0x7fffffffU) << BitsPerWord) | cpuState.areg;
+  uint64_t rounded = roundEvenShift(significand, 40);
+  uint32_t exponent = cpuState.creg;
+  uint32_t packed = static_cast<int32_t>(exponent) >= 255 ? 0x7f800000U
+      : (exponent << 23) + static_cast<uint32_t>(rounded);
+  cpuState.areg = packed;
+  cpuState.breg = undefinedWord;
+  cpuState.creg = undefinedWord;
   return 0;
 }
 
@@ -1317,7 +1276,6 @@ int devmove_(uint32_t /*unused*/) {
   uint32_t length = pop();
   uint32_t destination = pop();
   uint32_t source = pop();
-  if (portableInstructionAbiEnabled()) return beginResumableMove(2, length, destination, source);
   return copyDeviceBytes(source, destination, length);
 }
 
@@ -1325,9 +1283,6 @@ int move_(uint32_t /*unused*/) {
   uint32_t oldAreg = pop();
   uint32_t oldBreg = pop();
   uint32_t oldCreg = pop();
-  if (portableInstructionAbiEnabled())
-    return beginResumableMove(1, oldAreg, oldBreg, oldCreg);
-
   int result = storeByteRange(oldCreg, oldBreg, oldAreg);
 
   compat::note("NOTE: Copy of {:0x} bytes from address {:08x} to address {:08x}", oldAreg,
@@ -1480,14 +1435,11 @@ int rev_(uint32_t /*unused*/) {
 int runp_(uint32_t /*unused*/) {
   uint32_t descriptor = cpuState.areg;
   unsigned char priority = static_cast<unsigned char>(descriptor & 1U);
-  bool trapped = (trapEnableMask(priority) & RUN_TRAPENB) != 0;
-  if (trapped && !portableInstructionAbiEnabled())
+  if (trapEnableMask(priority) & RUN_TRAPENB)
     return requestTrap(RUN_TRAPENB, priority, false, descriptor);
   pop();
   pop();
   pop();
-  if (trapped)
-    return requestTrap(RUN_TRAPENB, priority, false, descriptor);
   int result = enqueueProcess(descriptor & WordSelectMask, static_cast<unsigned char>(descriptor & 1U));
   return result ? result : pollTimers();
 }

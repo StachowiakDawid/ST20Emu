@@ -752,7 +752,6 @@ static void testUnpackSingle() {
 }
 
 static void testNativeFloatHelpers() {
-  setPortableInstructionAbi(false);
   struct RoundCase { uint32_t guard; uint32_t fraction; uint32_t exponent; uint32_t expected; };
   const RoundCase rounding[] = {
       {0, 0, 0, 0}, {0, 0x80000000, 127, 0x3f800000},
@@ -830,53 +829,6 @@ static void testNativeFloatHelpers() {
   expect("native encoded roundsn decode", decodeNextInstr() != 0, 0);
   expect("native encoded roundsn executes", execInstr(&watchFlag) != 0, 0);
   expect("native encoded FP sequence", cpuState.areg, 0x3f800001);
-}
-
-static void testPortableFloatHelpers() {
-  setPortableInstructionAbi(true);
-  struct Case { uint64_t significand; int32_t exponent; uint32_t expected; };
-  const Case cases[] = {{0x8000000000000000ULL, 0, 0x3f800000},
-      {0xc000000000000000ULL, 0, 0x3fc00000}, {0x8000000000000000ULL, -1, 0x3f000000},
-      {0x8000008000000000ULL, 0, 0x3f800000}, {0x8000008000000001ULL, 0, 0x3f800001},
-      {0x8000018000000000ULL, 0, 0x3f800002}, {0xffffffffffffffffULL, 127, 0x7f800000},
-      {0x8000000000000000ULL, -126, 0x00800000}, {0xffffffffffffffffULL, -127, 0x00800000},
-      {0x8000000000000000ULL, -149, 1}, {0x8000000000000000ULL, -150, 0},
-      {0x8000000000000001ULL, -150, 1}, {0x8000000000000000ULL, -151, 0},
-      {0, 0, 0}};
-  for (uint32_t sign : {0U, 0x80000000U}) {
-    for (const Case &entry : cases) {
-      reset(static_cast<uint32_t>(entry.significand), static_cast<uint32_t>(entry.significand >> 32),
-            sign | (static_cast<uint32_t>(entry.exponent) & 0x7fffffffU));
-      expect("portable roundsn succeeds", roundsn_(0) != 0, 0);
-      expect("portable roundsn IEEE packing", cpuState.areg, sign | entry.expected);
-      expect("portable roundsn B undefined", cpuState.breg, undefinedWord);
-      expect("portable roundsn C undefined", cpuState.creg, undefinedWord);
-    }
-  }
-  uint32_t seed = 0x456789ab;
-  for (int iteration = 0; iteration < 1024; ++iteration) {
-    uint64_t significand = (static_cast<uint64_t>(nextWord(seed) | 0x80000000U) << 32) | nextWord(seed);
-    significand &= ~uint64_t{0x7ff};
-    int32_t exponent = static_cast<int32_t>(nextWord(seed) % 280U) - 150;
-    float expected = static_cast<float>(std::ldexp(static_cast<double>(significand), exponent - 63));
-    reset(static_cast<uint32_t>(significand), static_cast<uint32_t>(significand >> 32),
-          static_cast<uint32_t>(exponent) & 0x7fffffffU);
-    roundsn_(0);
-    expect("portable roundsn independent IEEE conversion", cpuState.areg, std::bit_cast<uint32_t>(expected));
-  }
-  cpuState.wptr = 0x1c0000;
-  storeBytes(0x1c0000, 4, 0);
-  reset(0, 0x40000000, 0);
-  norm_(0);
-  expect("portable postnormsn executes", postnormsn_(0) != 0, 0);
-  expect("portable postnormsn adjusts exponent", cpuState.creg, 0x7fffffff);
-  roundsn_(0);
-  expect("portable norm-round sequence", cpuState.areg, 0x3f000000);
-  reset(1, 2, 65);
-  expect("portable postnormsn rejects invalid shift", postnormsn_(0) == INVALID_PORTABLE_STATE, 1);
-  reset(1, 2, 0);
-  expect("portable roundsn rejects nonnormalized input", roundsn_(0) == INVALID_PORTABLE_STATE, 1);
-  setPortableInstructionAbi(false);
 }
 
 static void testResetAnalysis() {
@@ -1099,8 +1051,8 @@ static void testLegacySnapshot() {
     expect("snapshot saved file open", 0, 1);
   }
   constexpr uint32_t runtimeWords[] = {0, 33, 39, 169, 170, 180, 192, 212, 229, 550, 550};
-  for (uint32_t version = 0; version <= 12; ++version) {
-    if (version == 11) continue;
+  for (uint32_t version = 0; version <= 13; ++version) {
+    if (version == 12) continue;
     expect("rewrite current snapshot for version rejection", saveCPUState(directory) != 0, 0);
     file = std::fopen(filename.c_str(), "rb+");
     expect("open version rejection fixture", file != nullptr, 1);
@@ -3038,23 +2990,6 @@ static void testShadowRegisters() {
     expect("shadow fixture high process", cpuState.wptr, 0x191000);
   };
   preemptLow();
-  setPortableInstructionAbi(true);
-  storeBytes(0x18f300, 4, 0xa500c000);
-  cpuState.areg = 1;
-  cpuState.breg = LOW_PRIORITY;
-  cpuState.creg = 0x18f300;
-  expect("portable enable export succeeds", stshadow_(0) != 0, 0);
-  uint32_t portableEnables = 0;
-  readBytes(0x18f300, 4, &portableEnables);
-  expect("portable enable export preserves reserved bits", portableEnables, 0xa5a5c006);
-  storeBytes(0x18f300, 4, 0x12341234);
-  cpuState.areg = 1;
-  cpuState.breg = LOW_PRIORITY;
-  cpuState.creg = 0x18f300;
-  expect("portable enable import succeeds", ldshadow_(0) != 0, 0);
-  expect("portable import preserves upper global byte", omrState.Enables >> 24, 0xff);
-  expect("portable import replaces active global byte", (omrState.Enables >> 16) & 0xffU, 0x34);
-  setPortableInstructionAbi(false);
   for (uint32_t selection = 0; selection < 16; ++selection) {
     preemptLow();
     const uint32_t seed = 0xa500c000;
@@ -3825,7 +3760,6 @@ static void testSti5512VideoDecoder() {
 
 static void testIdleInterruptKeepsRegisters() {
   schedulerFixture(0x180000);
-  setPortableInstructionAbi(false);
   expect("initialize STi5512 for idle interrupt", initSti5512Devices() != 0, 0);
   storeBytes(0x184018, 4, 0x80000000);
   storeBytes(0x18401c, 4, 0x9400);
@@ -3902,7 +3836,6 @@ static void testReboot() {
 
 static void testSti5512Interrupts() {
   schedulerFixture(0x180000);
-  setPortableInstructionAbi(false);
   expect("initialize STi5512 interrupt devices", initSti5512Devices() != 0, 0);
   uint32_t value = 0xffffffffU;
   storeBytes(0x184018, 4, 0x80000000);
@@ -3964,7 +3897,6 @@ static void testSti5512Interrupts() {
 
 static void testSti5518Devices() {
   schedulerFixture(0x180000);
-  setPortableInstructionAbi(false);
   expect("initialize native chip devices", initSti5518Devices() != 0, 0);
   uint32_t value = 0xffffffffU;
   expect("native ASC RX readable", readBytes(0x20005008, 4, &value) != 0, 0);
@@ -4099,7 +4031,6 @@ static void testInterruptReturns() {
   testSti5518Devices();
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
     schedulerFixture(0x180000, priority);
-    setPortableInstructionAbi(false);
     cpuState.areg = 0x1111;
     cpuState.breg = 0x2222;
     cpuState.creg = 0x3333;
@@ -4110,7 +4041,7 @@ static void testInterruptReturns() {
     expect("native IRQ masked", serviceNativeInterrupt(6, 0x184020, &accepted) != 0, 0);
     expect("native IRQ masking defers entry", accepted, 0);
     omrState.Enables |= LP_EXTERNALEVENT_ENB | HP_EXTERNALEVENT_ENB;
-    expect("native IRQ enters without portable ABI", serviceNativeInterrupt(6, 0x184020, &accepted) != 0, 0);
+    expect("native IRQ enters", serviceNativeInterrupt(6, 0x184020, &accepted) != 0, 0);
     expect("native IRQ accepted", accepted, 1);
     expect("native IRQ save workspace", cpuState.wptr, 0x184000);
     expect("native IRQ handler Iptr", cpuState.iptr, 0x9400);
@@ -4265,204 +4196,13 @@ static void testInterruptReturns() {
   schedulerFixture(0x20000);
 }
 
-static void testResumableMoves() {
-  setPortableInstructionAbi(true);
-  schedulerFixture(0x1c1000);
-  for (uint32_t index = 0; index < 16; ++index) storeBytes(0x1c2000 + index, 1, index + 1);
-  storeBytes(0x1c4000 - 4, 4, 0xa500);
-  enqueueProcess(0x1c4000, HIGH_PRIORITY);
-  cpuState.areg = 16;
-  cpuState.breg = 0x1c3000;
-  cpuState.creg = 0x1c2000;
-  expect("portable move preempts at checkpoint", move_(0) != 0, 0);
-  expect("portable move high process runs", cpuState.wptr, 0x1c4000);
-  stopp_(0);
-  expect("portable move resumes low shadow", cpuState.wptr, 0x1c1000);
-  expect("portable move retains remaining count", cpuState.areg, 12);
-  char directory[] = "/tmp/st20-move-XXXXXX";
-  expect("resumable snapshot directory", mkdtemp(directory) != nullptr, 1);
-  expect("save resumable move", saveCPUState(directory) != 0, 0);
-  resetScheduler();
-  expect("load resumable move", loadCPUState(directory) != 0, 0);
-  expect("decode pending move without fetching", decodeNextInstr() != 0, 0);
-  int watchFlag = 0;
-  expect("execute pending move", execInstr(&watchFlag) != 0, 0);
-  for (uint32_t index = 0; index < 16; ++index) {
-    uint32_t value = 0;
-    readBytes(0x1c3000 + index, 1, &value);
-    expect("resumable move exact data", value, index + 1);
-  }
-  std::string filename = std::string(directory) + "/cpu.bin";
-  unlink(filename.c_str());
-  rmdir(directory);
-  struct Device { int reads{0}; int writes{0}; bool fail{true}; } device;
-  MemoryDevice region{0x40040000, 0x4004000f, &device,
-      +[](void *context, uint32_t, int, uint32_t *value) {
-        ++static_cast<Device *>(context)->reads;
-        *value = 0x12345678;
-        return 0;
-      },
-      +[](void *context, uint32_t, int, uint32_t) {
-        auto &state = *static_cast<Device *>(context);
-        ++state.writes;
-        return state.fail ? WRITE_FAILURE : 0;
-      }};
-  registerMemoryDevice(region);
-  schedulerFixture(0x1c1000);
-  cpuState.areg = 4;
-  cpuState.breg = region.start + 8;
-  cpuState.creg = region.start;
-  expect("portable devmove caches successful read", devmove_(0) == WRITE_FAILURE, 1);
-  expect("portable devmove read cache present", cpuState.status & STATUS_BUFFERED_WORD, STATUS_BUFFERED_WORD);
-  char cacheDirectory[] = "/tmp/st20-cache-XXXXXX";
-  expect("cached-write snapshot directory", mkdtemp(cacheDirectory) != nullptr, 1);
-  expect("save cached successful read", saveCPUState(cacheDirectory) != 0, 0);
-  resetScheduler();
-  expect("restore cached successful read", loadCPUState(cacheDirectory) != 0, 0);
-  device.fail = false;
-  expect("portable devmove retries cached write", resumePendingOperation() != 0, 0);
-  expect("portable devmove does not repeat MMIO read", static_cast<uint32_t>(device.reads), 1);
-  expect("portable devmove attempts failed and successful writes", static_cast<uint32_t>(device.writes), 2);
-  std::string cacheFile = std::string(cacheDirectory) + "/cpu.bin";
-  unlink(cacheFile.c_str());
-  rmdir(cacheDirectory);
-  unregisterMemoryDevice(region.start);
-  setPortableInstructionAbi(false);
-  schedulerFixture(0x20000);
-}
-
-static void testPortableRestartAndShadow() {
-  setPortableInstructionAbi(true);
-  schedulerFixture(0x1d0000);
-  cpuState.moveRowWidth = 16;
-  cpuState.move2dBlockLength = 2;
-  cpuState.move2dDestStride = 20;
-  cpuState.move2dSourceStride = 24;
-  cpuState.moveBufferedWord = 0x12345678;
-  intdis_(0);
-  cpuState.areg = 15;
-  cpuState.breg = LOW_PRIORITY;
-  cpuState.creg = 0x1d1000;
-  expect("portable stshadow stores complete state", stshadow_(0) != 0, 0);
-  uint32_t value = 0;
-  readBytes(0x1d101c, 4, &value);
-  expect("portable shadow row-width word", value, 16);
-  readBytes(0x1d102c, 4, &value);
-  expect("portable shadow cached word", value, 0x12345678);
-  readBytes(0x1d1004, 4, &value);
-  expect("portable shadow format tag", value & STATUS_PORTABLE_ABI, STATUS_PORTABLE_ABI);
-  expect("portable shadow interruption flag", value & STATUS_PORTABLE_INTDIS, STATUS_PORTABLE_INTDIS);
-  storeBytes(0x1d1004, 4, STATUS_VALID | STATUS_PORTABLE_ABI | STATUS_TIMESLICE_ENABLE);
-  storeBytes(0x1d1008, 4, 0x1d2000);
-  storeBytes(0x1d100c, 4, 0xa600);
-  storeBytes(0x1d1010, 4, 0xaaaa);
-  storeBytes(0x1d1014, 4, 0xbbbb);
-  storeBytes(0x1d1018, 4, 0xcccc);
-  cpuState.areg = 0x1d1000;
-  expect("portable restart executes", restart_(0) != 0, 0);
-  expect("portable restart workspace", cpuState.wptr, 0x1d2000);
-  expect("portable restart entry", cpuState.iptr, 0xa600);
-  expect("portable restart A", cpuState.areg, 0xaaaa);
-  expect("portable restart row-width", cpuState.moveRowWidth, 16);
-  expect("portable restart cached-word", cpuState.moveBufferedWord, 0x12345678);
-  storeBytes(0x1d1004, 4, STATUS_VALID);
-  cpuState.areg = 0x1d1000;
-  expect("portable restart rejects untagged frame", restart_(0) == INVALID_PORTABLE_STATE, 1);
-  expect("invalid restart preserves workspace", cpuState.wptr, 0x1d2000);
-  storeBytes(0x1d1004, 4, STATUS_VALID | STATUS_PORTABLE_ABI | (1U << 26));
-  storeBytes(0x1d1010, 4, 4);
-  storeBytes(0x1d1014, 4, 0x1d4000);
-  storeBytes(0x1d1018, 4, 0x1d3000);
-  storeBytes(0x1d101c, 4, 4);
-  storeBytes(0x1d1020, 4, 1);
-  storeBytes(0x1d3000, 4, 0x89abcdef);
-  cpuState.areg = 0x1d1000;
-  expect("portable restart imports pending move", restart_(0) != 0, 0);
-  expect("portable restarted move resumes", resumePendingOperation() != 0, 0);
-  readBytes(0x1d4000, 4, &value);
-  expect("portable restarted move data", value, 0x89abcdef);
-  setPortableInstructionAbi(false);
-  schedulerFixture(0x20000);
-}
-
-static void testPortableChannelCopy() {
-  setPortableInstructionAbi(true);
-  schedulerFixture(0x1e0000);
-  storeBytes(0x1e1000, 4, NO_PROCESS);
-  cpuState.areg = 16;
-  cpuState.breg = 0x1e1000;
-  cpuState.creg = 0x1e2000;
-  expect("portable input waits for sender", in_(0) != 0, 0);
-  cpuState.running = true;
-  cpuState.wptr = 0x1e3000;
-  cpuState.iptr = 0xa700;
-  for (uint32_t index = 0; index < 16; ++index) storeBytes(0x1e4000 + index, 1, index + 1);
-  storeBytes(0x1e5000 - 4, 4, 0xa800);
-  enqueueProcess(0x1e5000, HIGH_PRIORITY);
-  cpuState.areg = 16;
-  cpuState.breg = 0x1e1000;
-  cpuState.creg = 0x1e4000;
-  expect("portable channel copy can preempt", out_(0) != 0, 0);
-  expect("portable channel high process runs", cpuState.wptr, 0x1e5000);
-  expect("peer remains blocked until copy finishes", omrState.ProcQueueFPtr[LOW_PRIORITY], NO_PROCESS);
-  stopp_(0);
-  expect("portable channel resumes sender", cpuState.wptr, 0x1e3000);
-  expect("portable channel continuation completes", resumePendingOperation() != 0, 0);
-  expect("portable channel releases receiver once", omrState.ProcQueueFPtr[LOW_PRIORITY], 0x1e0000);
-  for (uint32_t index = 0; index < 16; ++index) {
-    uint32_t value = 0;
-    readBytes(0x1e2000 + index, 1, &value);
-    expect("portable channel exact data", value, index + 1);
-  }
-  setPortableInstructionAbi(false);
-  schedulerFixture(0x20000);
-}
-
-static void testPortableInterruptController() {
-  setPortableInstructionAbi(true);
-  schedulerFixture(0x1f0000);
-  cpuState.areg = 0x1234;
-  expect("queue portable external interrupt", queueExternalInterrupt(2, 0x1f1000, 0xa900) != 0, 0);
-  expect("deliver portable external interrupt", pollTimers() != 0, 0);
-  expect("portable interrupt handler workspace", cpuState.wptr, 0x1f1000);
-  expect("portable interrupt active level", static_cast<uint32_t>(activeExternalInterruptLevel()), 2);
-  expect("portable interrupt cannot deschedule", stopp_(0) == TRAP_HANDLER_BLOCKED, 1);
-  queueExternalInterrupt(1, 0x1f2000, 0xaa00);
-  pollTimers();
-  expect("lower interrupt waits", cpuState.wptr, 0x1f1000);
-  queueExternalInterrupt(5, 0x1f3000, 0xab00);
-  pollTimers();
-  expect("higher interrupt nests", cpuState.wptr, 0x1f3000);
-  expect("nested iret restores outer", iret_(0) != 0, 0);
-  expect("nested outer workspace restored", cpuState.wptr, 0x1f1000);
-  expect("outer iret restores low", iret_(0) != 0, 0);
-  expect("portable low interrupted A restored", cpuState.areg, 0x1234);
-  pollTimers();
-  expect("deferred lower interrupt delivered", cpuState.wptr, 0x1f2000);
-  char directory[] = "/tmp/st20-irq-XXXXXX";
-  expect("portable IRQ snapshot directory", mkdtemp(directory) != nullptr, 1);
-  expect("save portable IRQ stack", saveCPUState(directory) != 0, 0);
-  resetScheduler();
-  expect("load portable IRQ stack", loadCPUState(directory) != 0, 0);
-  expect("portable IRQ return after snapshot", iret_(0) != 0, 0);
-  expect("snapshot IRQ restores low", cpuState.wptr, 0x1f0000);
-  std::string filename = std::string(directory) + "/cpu.bin";
-  unlink(filename.c_str());
-  rmdir(directory);
-  expect("portable IRQ invalid level", queueExternalInterrupt(8, 0x1f1000, 0) == INVALID_EXTERNAL_INTERRUPT, 1);
-  setPortableInstructionAbi(false);
-  schedulerFixture(0x20000);
-}
-
 static void testNativeExternalChannels() {
-  setPortableInstructionAbi(false);
   constexpr uint32_t channel = 0x80000010;
   const uint8_t input[] = {0x12, 0x34};
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
     schedulerFixture(0x250000);
     cpuState.priority = priority;
     expect("register native modeled channel", registerExternalChannel(channel, 8) != 0, 0);
-    expect("native channel registration keeps ABI disabled", portableInstructionAbiEnabled(), 0);
     expect("native modeled ALT starts", alt_(0) != 0, 0);
     cpuState.areg = 1;
     cpuState.breg = channel;
@@ -4515,7 +4255,7 @@ static void testNativeExternalChannels() {
     expect("native modeled blocked snapshot restores", loadCPUState(directory) != 0, 0);
     expect("native modeled input wakes", feedExternalChannel(channel, input) != 0, 0);
     expect("native modeled input resumed", cpuState.running, 1);
-    expect("native modeled input has no portable continuation", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+    expect("native modeled input has no interrupted operation", cpuState.status & STATUS_INTERRUPTED_OPERATION_MASK, 0);
     readBytes(0x251004, 2, &value);
     expect("native modeled blocked input bytes", value, 0x3412);
     std::string filename = std::string(directory) + "/cpu.bin";
@@ -4530,7 +4270,7 @@ static void testNativeExternalChannels() {
     expect("native modeled writer suspended", cpuState.running, 0);
     expect("native modeled drain wakes writer", drainExternalChannel(channel, output, &count) != 0, 0);
     expect("native modeled writer resumed", cpuState.running, 1);
-    expect("native modeled writer has no portable continuation", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+    expect("native modeled writer has no interrupted operation", cpuState.status & STATUS_INTERRUPTED_OPERATION_MASK, 0);
     drainExternalChannel(channel, output, &count);
     expect("native modeled blocked scalar count", count, 1);
     expect("native modeled blocked scalar byte", output[0], 0x5a);
@@ -4619,7 +4359,7 @@ static void testNativeExternalChannels() {
     expect("native modeled post-trap scheduler dispatches", pollTimers() != 0, 0);
     expect("native modeled completed owner resumes", cpuState.wptr, owner);
     expect("native modeled completed owner running", cpuState.running, 1);
-    expect("native modeled trap return has no portable state", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+    expect("native modeled trap return has no interrupted operation", cpuState.status & STATUS_INTERRUPTED_OPERATION_MASK, 0);
     filename = std::string(trapDirectory) + "/cpu.bin";
     unlink(filename.c_str());
     rmdir(trapDirectory);
@@ -4631,154 +4371,6 @@ static void testNativeExternalChannels() {
     expect("native modeled reset does not wake waiter", cpuState.running, 0);
     expect("unregister native modeled channel", unregisterExternalChannel(channel) != 0, 0);
   }
-  schedulerFixture(0x20000);
-}
-
-static void testPortableExternalChannels() {
-  setPortableInstructionAbi(true);
-  constexpr uint32_t channel = 0x80000010;
-  expect("register portable external channel", registerExternalChannel(channel, 8) != 0, 0);
-  schedulerFixture(0x200000);
-  cpuState.areg = 4;
-  cpuState.breg = channel;
-  cpuState.creg = 0x201000;
-  expect("external input blocks without data", in_(0) != 0, 0);
-  expect("external input suspended", cpuState.running, 0);
-  const uint8_t input[] = {1, 2, 3, 4};
-  expect("external host feed wakes input", feedExternalChannel(channel, input) != 0, 0);
-  expect("external input context running", cpuState.running, 1);
-  expect("external input continuation", resumePendingOperation() != 0, 0);
-  uint32_t value = 0;
-  readBytes(0x201000, 4, &value);
-  expect("external input exact bytes", value, 0x04030201);
-  cpuState.areg = 4;
-  cpuState.breg = channel;
-  cpuState.creg = 0x201000;
-  expect("external output completes", out_(0) != 0, 0);
-  uint8_t output[8]{};
-  std::size_t count = 0;
-  expect("external host drains output", drainExternalChannel(channel, output, &count) != 0, 0);
-  expect("external output byte count", count, 4);
-  for (std::size_t index = 0; index < 4; ++index) expect("external output data", output[index], input[index]);
-  for (int iteration = 0; iteration < 2; ++iteration) {
-    cpuState.areg = 4;
-    cpuState.breg = channel;
-    cpuState.creg = 0x201000;
-    out_(0);
-  }
-  cpuState.areg = 0x5a;
-  cpuState.breg = channel;
-  expect("bounded external output blocks", outbyte_(0) != 0, 0);
-  expect("bounded external output suspended", cpuState.running, 0);
-  expect("draining external output wakes writer", drainExternalChannel(channel, output, &count) != 0, 0);
-  expect("external scalar output resumes", resumePendingOperation() != 0, 0);
-  drainExternalChannel(channel, output, &count);
-  expect("external scalar output byte", output[0], 0x5a);
-  schedulerFixture(0x202000);
-  alt_(0);
-  cpuState.areg = 1;
-  cpuState.breg = channel;
-  cpuState.creg = 0;
-  expect("external ALT guard enables", enbc_(0) != 0, 0);
-  expect("external ALT feed marks ready", feedExternalChannel(channel, input) != 0, 0);
-  expect("external ALT wait does not block", altwt_(0) != 0, 0);
-  cpuState.areg = 4;
-  cpuState.breg = 1;
-  cpuState.creg = channel;
-  expect("external ALT guard disables", disc_(0) != 0, 0);
-  expect("external ALT guard selected", cpuState.areg, 1);
-  cpuState.areg = channel;
-  expect("external channel reset", resetch_(0) != 0, 0);
-  expect("unregister portable external channel", unregisterExternalChannel(channel) != 0, 0);
-  setPortableInstructionAbi(false);
-  schedulerFixture(0x20000);
-}
-
-static void testPortableMove2d() {
-  setPortableInstructionAbi(true);
-  for (uint32_t operation : {3U, 4U, 5U}) {
-    schedulerFixture(0x210000);
-    cpuState.move2dBlockLength = 2;
-    cpuState.move2dDestStride = 8;
-    cpuState.move2dSourceStride = 8;
-    for (uint32_t index = 0; index < 16; ++index) {
-      storeBytes(0x211000 + index, 1, index % 3 == 0 ? 0 : index);
-      storeBytes(0x212000 + index, 1, 0xa5);
-    }
-    storeBytes(0x213000 - 4, 4, 0xac00);
-    enqueueProcess(0x213000, HIGH_PRIORITY);
-    expect("portable 2D preemption", beginResumableMove(operation, 4, 0x212000, 0x211000) != 0, 0);
-    expect("portable 2D high process", cpuState.wptr, 0x213000);
-    stopp_(0);
-    expect("portable 2D continuation", resumePendingOperation() != 0, 0);
-    for (uint32_t index = 0; index < 16; ++index) {
-      uint32_t byte = index % 3 == 0 ? 0 : index;
-      bool inRow = index % 8 < 4;
-      bool selected = operation == 3 || (operation == 4 ? byte == 0 : byte != 0);
-      uint32_t value = 0;
-      readBytes(0x212000 + index, 1, &value);
-      expect("portable 2D filter/stride data", value, inRow && selected ? byte : 0xa5U);
-    }
-  }
-  CPUSTATE invalid = cpuState;
-  invalid.status = STATUS_PORTABLE_ABI | (1U << 26) | STATUS_BUFFERED_WORD | STATUS_BUFFER_WIDTH;
-  invalid.running = true;
-  invalid.areg = 1;
-  invalid.moveRowWidth = 1;
-  invalid.move2dBlockLength = 1;
-  expect("portable pending cache bounds validated", validPendingOperation(invalid), 0);
-  setPortableInstructionAbi(false);
-  schedulerFixture(0x20000);
-}
-
-static void testPortableExternalSnapshots() {
-  setPortableInstructionAbi(true);
-  constexpr uint32_t channel = 0x80000018;
-  registerExternalChannel(channel, 8);
-  schedulerFixture(0x220000);
-  storeBytes(0x221000, 4, 0x44332211);
-  cpuState.areg = 4;
-  cpuState.breg = channel;
-  cpuState.creg = 0x221000;
-  out_(0);
-  cpuState.areg = 4;
-  cpuState.breg = channel;
-  cpuState.creg = 0x222000;
-  in_(0);
-  char directory[] = "/tmp/st20-fifo-XXXXXX";
-  expect("FIFO snapshot directory", mkdtemp(directory) != nullptr, 1);
-  expect("save FIFO and blocked owner", saveCPUState(directory) != 0, 0);
-  cpuState.areg = channel;
-  resetch_(0);
-  unregisterExternalChannel(channel);
-  expect("restore FIFO and blocked owner", loadCPUState(directory) != 0, 0);
-  uint8_t output[4]{};
-  std::size_t count = 0;
-  expect("snapshot restores queued output", drainExternalChannel(channel, output, &count) != 0, 0);
-  expect("snapshot queued output size", count, 4);
-  expect("snapshot queued output data", output[0], 0x11);
-  const uint8_t input[] = {5, 6, 7, 8};
-  expect("snapshot restores input waiter", feedExternalChannel(channel, input) != 0, 0);
-  expect("snapshot input continuation", resumePendingOperation() != 0, 0);
-  uint32_t value = 0;
-  readBytes(0x222000, 4, &value);
-  expect("snapshot input data", value, 0x08070605);
-  unregisterExternalChannel(channel);
-  std::string filename = std::string(directory) + "/cpu.bin";
-  unlink(filename.c_str());
-  rmdir(directory);
-  schedulerFixture(0x223000);
-  for (uint32_t index = 0; index < 12; ++index) storeBytes(0x224000 + index, 1, index + 9);
-  queueExternalInterrupt(3, 0x226000, 0xad00);
-  expect("copy suspends for external IRQ", beginResumableMove(1, 12, 0x225000, 0x224000) != 0, 0);
-  expect("copy IRQ handler active", cpuState.wptr, 0x226000);
-  expect("iret restores pending copy", iret_(0) != 0, 0);
-  expect("copy continues after iret", resumePendingOperation() != 0, 0);
-  for (uint32_t index = 0; index < 12; ++index) {
-    readBytes(0x225000 + index, 1, &value);
-    expect("IRQ-resumed copy data", value, index + 9);
-  }
-  setPortableInstructionAbi(false);
   schedulerFixture(0x20000);
 }
 
@@ -5119,7 +4711,6 @@ static void testTrapEntryReturn() {
 }
 
 static void testCapturedInvalidReturn() {
-  setPortableInstructionAbi(false);
   for (bool fallback : {false, true}) {
     schedulerFixture(0x290000, LOW_PRIORITY);
     cpuState.interruptsDisabled = true;
@@ -5162,33 +4753,28 @@ static void testCapturedInvalidReturn() {
 
 static void testTrapEnableEntryRules() {
   const uint32_t globals[] = {0, 0x1f, 0xff, 0x8000, 0xaa55, 0x55aa, 0xffff};
-  for (bool portable : {false, true}) {
-    setPortableInstructionAbi(portable);
-    for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
-      for (uint32_t callerValue : globals) {
-        for (uint32_t handlerValue : globals) {
-          uint32_t callerGlobal = callerValue & (portable ? 0xffU : 0xffffU);
-          uint32_t handlerGlobal = handlerValue & (portable ? 0xffU : 0xffffU);
-          constexpr uint32_t callerTraps = BREAKPOINT_TRAPENB | INTEGER_ERR_TRAPENB | RUN_TRAPENB;
-          constexpr uint32_t handlerTraps = INTEGER_ERR_TRAPENB | SIGNAL_TRAPENB;
-          schedulerFixture(0x280000, priority);
-          installTrap(priority, 0, 0x281000, 0xa980, (handlerGlobal << 16) | handlerTraps);
-          omrState.Enables = (callerGlobal << 16) | callerTraps;
-          expect("trap enable rule enters handler", requestTrap(BREAKPOINT_TRAPENB, priority) != 0, 0);
-          expect("trap global enable rule", omrState.Enables >> 16,
-              portable ? callerGlobal & handlerGlobal : handlerGlobal);
-          expect("trap trap-enable intersection", trapEnableMask(priority), callerTraps & handlerTraps);
-          uint32_t saved = 0;
-          readBytes(trapRecordAddress(priority, 0, true), 4, &saved);
-          expect("trap saved original enable word", saved, (callerGlobal << 16) | callerTraps);
-          expect("trap enable rule returns", tret_(0) != 0, 0);
-          expect("trap return restores global enables", omrState.Enables >> 16, callerGlobal);
-          expect("trap return restores trap enables", trapEnableMask(priority), callerTraps);
-        }
+  for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
+    for (uint32_t callerValue : globals) {
+      for (uint32_t handlerValue : globals) {
+        uint32_t callerGlobal = callerValue;
+        uint32_t handlerGlobal = handlerValue;
+        constexpr uint32_t callerTraps = BREAKPOINT_TRAPENB | INTEGER_ERR_TRAPENB | RUN_TRAPENB;
+        constexpr uint32_t handlerTraps = INTEGER_ERR_TRAPENB | SIGNAL_TRAPENB;
+        schedulerFixture(0x280000, priority);
+        installTrap(priority, 0, 0x281000, 0xa980, (handlerGlobal << 16) | handlerTraps);
+        omrState.Enables = (callerGlobal << 16) | callerTraps;
+        expect("trap enable rule enters handler", requestTrap(BREAKPOINT_TRAPENB, priority) != 0, 0);
+        expect("trap global enable rule", omrState.Enables >> 16, handlerGlobal);
+        expect("trap trap-enable intersection", trapEnableMask(priority), callerTraps & handlerTraps);
+        uint32_t saved = 0;
+        readBytes(trapRecordAddress(priority, 0, true), 4, &saved);
+        expect("trap saved original enable word", saved, (callerGlobal << 16) | callerTraps);
+        expect("trap enable rule returns", tret_(0) != 0, 0);
+        expect("trap return restores global enables", omrState.Enables >> 16, callerGlobal);
+        expect("trap return restores trap enables", trapEnableMask(priority), callerTraps);
       }
     }
   }
-  setPortableInstructionAbi(false);
   schedulerFixture(0x20000);
 }
 
@@ -5920,7 +5506,6 @@ static void testTimedAlt() {
 }
 
 static void testNativeTimedExternalAlt() {
-  setPortableInstructionAbi(false);
   constexpr uint32_t channel = 0x8000001c;
   const uint8_t input[] = {0x12, 0x34};
   for (unsigned char priority : {static_cast<unsigned char>(HIGH_PRIORITY), static_cast<unsigned char>(LOW_PRIORITY)}) {
@@ -5985,7 +5570,7 @@ static void testNativeTimedExternalAlt() {
         expect("native timed ALT exact FIFO bytes", value, 0x3412);
         expect("native timed ALT branch executes", altend_(0) != 0, 0);
         expect("native timed ALT branch offset", cpuState.iptr, 0x3000 + expectedOffset);
-        expect("native timed ALT has no portable continuation", cpuState.status & (STATUS_PORTABLE_ABI | STATUS_INTERRUPTED_OPERATION_MASK), 0);
+        expect("native timed ALT has no interrupted operation", cpuState.status & STATUS_INTERRUPTED_OPERATION_MASK, 0);
         expect("native timed ALT unregisters FIFO", unregisterExternalChannel(channel) != 0, 0);
       }
     }
@@ -6228,7 +5813,6 @@ static int runSimulatorTrace(const char *filename, const char *countText, bool f
     if (!words.eof() || !hasBytes) return 2;
   }
   if (first) return 2;
-  setPortableInstructionAbi(false);
   cpuState = {};
   cpuState.areg = cpuState.breg = cpuState.creg = undefinedWord;
   cpuState.iptr = entry;
@@ -6318,14 +5902,7 @@ int main(int argc, char **argv) {
   testFractionAndParallelTraps();
   testTimesliceTrapsAndSnapshots();
   testPeriodicTimeslicing();
-  testResumableMoves();
-  testPortableRestartAndShadow();
-  testPortableChannelCopy();
-  testPortableInterruptController();
   testNativeExternalChannels();
-  testPortableExternalChannels();
-  testPortableMove2d();
-  testPortableExternalSnapshots();
   testInterruptReturns();
   testShadowRegisters();
   testReadyQueueNotifications();
@@ -6345,7 +5922,6 @@ int main(int argc, char **argv) {
   testAltSnapshots();
   testAltBoundaryCases();
   testResetAnalysis();
-  testPortableFloatHelpers();
   testAsyncTrace();
   std::printf("CPU instruction tests: %d checks, %d failures\n", checks, failures);
   return failures ? 1 : 0;

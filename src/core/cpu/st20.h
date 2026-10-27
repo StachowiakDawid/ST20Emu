@@ -123,20 +123,11 @@ inline constexpr uint32_t ALT_NONE_SELECTED = 0xffffffffU;
 #define INTERRUPTED_OPERATION_UNSUPPORTED -2023
 #define INVALID_SHADOW_ACCESS -2024
 #define SHADOW_BLOCK_REGISTERS_UNSUPPORTED -2025
-#define INVALID_PORTABLE_STATE -2026
-#define PORTABLE_ABI_DISABLED -2027
 #define INVALID_EXTERNAL_INTERRUPT -2028
-
-void setPortableInstructionAbi(bool enabled);
-bool portableInstructionAbiEnabled();
 
 inline constexpr uint32_t STATUS_TIMESLICE_ENABLE = 1U << 20;
 inline constexpr uint32_t STATUS_INTERRUPTED_OPERATION_MASK = 0x7c000000U;
 inline constexpr uint32_t STATUS_VALID = 1U << 31;
-inline constexpr uint32_t STATUS_PORTABLE_ABI = 1U << 25;
-inline constexpr uint32_t STATUS_BUFFERED_WORD = 1U << 21;
-inline constexpr uint32_t STATUS_BUFFER_WIDTH = 3U << 22;
-inline constexpr uint32_t STATUS_PORTABLE_INTDIS = 1U << 24;
 
 using InterruptReturnObserver = void (*)();
 using PeripheralPoller = int (*)();
@@ -150,7 +141,6 @@ void setRebootObserver(RebootObserver observer);
 int rebootProcessor();
 /* processor cycles counted by advanceTimers() since startup, for peripheral timing */
 uint64_t elapsedCpuCycles();
-int queueExternalInterrupt(uint32_t level, uint32_t workspace, uint32_t iptr, uint32_t status = 0);
 int serviceNativeInterrupt(uint32_t level, uint32_t handlerDescriptor, bool *accepted);
 bool interruptHandlerActive();
 int activeExternalInterruptLevel();
@@ -174,8 +164,6 @@ struct CPUSTATE {
   uint32_t status{STATUS_TIMESLICE_ENABLE};
   bool interruptsDisabled{false};
   uint32_t timeslicePeriods{0};
-  uint32_t moveRowWidth{0};
-  uint32_t moveBufferedWord{0};
 };
 
 struct CPUTrace {
@@ -249,9 +237,6 @@ int suspendProcess();
 int endParallel(uint32_t workspace);
 int timesliceProcess();
 int checkPeriodicTimeslice();
-int beginResumableMove(uint32_t operation, uint32_t length, uint32_t destination, uint32_t source);
-int resumePendingOperation();
-bool validPendingOperation(const CPUSTATE &state);
 int restartProcess(uint32_t record);
 int waitSemaphore(uint32_t semaphore);
 int signalSemaphore(uint32_t semaphore);
