@@ -25,7 +25,7 @@ and 1,066,130 defined-value comparisons across 165 instructions**, with no
 divergences. Local ASan/UBSan tests passed 473,292 checks. These comparisons
 use the harness's defined-value filtering, frozen clocks and fixture-specific
 scope; they do not certify silicon timing, peripheral behavior or full boot.
-Traces and reports are retained under `obj/tests/st20sim-*`. Newly generated
+Traces and reports are retained under `builddir/tests/st20sim-*`. Newly generated
 reports identify the simulator executable/version and count blocked cases
 separately from completed comparisons.
 

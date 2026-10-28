@@ -130,7 +130,11 @@ $RECYCLE.BIN/
 ### ---------------------------------------------- Other
 
 # build artifacts
-obj
-st20emu
-st20emu-release
-st20emu-pgo
+builddir*/
+
+# outputs of the former Makefile build
+/obj/
+/st20emu
+/st20emu-release
+/st20emu-pgo
+*.dSYM/

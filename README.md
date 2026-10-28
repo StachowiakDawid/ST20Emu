@@ -7,21 +7,24 @@ ST20Emu is an emulator for the ST20, a 32-bit transputer-based processor archite
 ### Requirements
 
 - clang 18.1.3
-- make
+- meson and ninja
+- just (optional, wraps the commands below)
 
 ### Building
 
-Build a debug version:
+Build a debug version with AddressSanitizer and UBSan as `builddir/st20emu`:
 
 ```bash
-make clean && make
+meson setup builddir
+meson compile -C builddir
 ```
 
 Build an optimized release version (`-O3`, link-time optimization, no sanitizers) as
-`st20emu-release`, with its objects in `obj/release`, so it doesn't overwrite the debug build:
+`builddir-release/st20emu`, in its own directory so it doesn't overwrite the debug build:
 
 ```bash
-make release
+meson setup builddir-release --buildtype=release -Db_sanitize=none -Db_lto=true
+meson compile -C builddir-release
 ```
 
 Use the release build for long firmware runs; the sanitized debug build is many times slower.
@@ -29,32 +32,27 @@ Use the release build for long firmware runs; the sanitized debug build is many 
 Run the CPU instruction tests:
 
 ```bash
-make test
-```
-
-Alternatively, with Meson and Ninja installed:
-
-```bash
-meson setup builddir
-meson compile -C builddir
 meson test -C builddir --print-errorlogs
 ```
 
-The Meson executable is `builddir/st20emu`. With `just` installed, `just build`
-and `just test` run the same Meson workflow.
+With `just` installed, `just build`, `just release` and `just test` run the same steps.
+`just pgo` builds a profile-guided release version as `builddir-pgo/st20emu`: an instrumented
+build boots the DSR9500 firmware, and the recorded profile steers inlining and branch layout.
+`just test-st20sim` runs the differential tests against the ST20 toolset simulator (see
+[docs/instruction-status.md](docs/instruction-status.md)).
 
 ## Getting started
 
 Run the binary from your terminal:
 
 ```bash
-./st20emu
+./builddir/st20emu
 ```
 
 For unattended firmware execution:
 
 ```bash
-./st20emu --firmware firmware/6300.bin --batch
+./builddir/st20emu --firmware firmware/6300.bin --batch
 ```
 
 Batch mode runs until the first fetch or execution error (including a CPU halt, or an idle CPU
@@ -70,7 +68,7 @@ By default the image is placed immediately below `0x80000000` and execution star
 `START_ADDR` (default `0x7ffffffe`). To load and start at another address:
 
 ```bash
-./st20emu --firmware firmware/program.bin --address 0x1000 --batch
+./builddir/st20emu --firmware firmware/program.bin --address 0x1000 --batch
 ```
 
 Omit `--batch` to run interactively. Use `--help` for all options.

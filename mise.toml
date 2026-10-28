@@ -32,4 +32,4 @@ run = "./builddir/st20emu"
 
 [tasks.clean]
 description = "Wipe out the build files"
-run = "rm -rf builddir"
+run = "rm -rf builddir builddir-release builddir-pgo"

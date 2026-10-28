@@ -73,7 +73,7 @@ For starters, we should not try to build a Gearboy-style GUI. A huge advancement
 
 ### Testing
 
-An automated CPU instruction harness now exists in [tests/cpu_instructions.cpp](../tests/cpu_instructions.cpp). Run it with `make test` or `meson test -C builddir`. It checks instruction behavior, register state, scheduling, traps, and device access. The ST20 architecture should continue to be tested thoroughly as hardware fidelity improves.
+An automated CPU instruction harness now exists in [tests/cpu_instructions.cpp](../tests/cpu_instructions.cpp). Run it with `meson test -C builddir`. It checks instruction behavior, register state, scheduling, traps, and device access. The ST20 architecture should continue to be tested thoroughly as hardware fidelity improves.
 
 ### Compiler and linker
 

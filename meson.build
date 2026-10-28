@@ -2,10 +2,14 @@ project('st20emu', 'cpp',
   version: '0.1.0',
   default_options: [
     'cpp_std=c++23',
-    'optimization=3',
-    'warning_level=3'
+    'warning_level=3',
+    'buildtype=debug',
+    'b_sanitize=address,undefined',
+    'b_ndebug=if-release',
   ]
 )
+
+add_project_arguments('-Wconversion', '-Wshadow', '-Wold-style-cast', language: 'cpp')
 
 compiler = meson.get_compiler('cpp')
 if compiler.has_link_argument('-fuse-ld=mold')
@@ -43,14 +47,17 @@ sources = core_sources + files(
   'src/cli/cmds/registers.cpp',
 )
 
+threads = dependency('threads')
+
 executable('st20emu',
   sources,
-  dependencies: dependency('threads'),
+  dependencies: threads,
   install: false
 )
 
 cpu_test = executable('cpu-instructions',
   core_sources + files('tests/cpu_instructions.cpp'),
+  dependencies: threads,
   install: false
 )
 

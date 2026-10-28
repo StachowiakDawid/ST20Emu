@@ -877,7 +877,7 @@ function main() {
     throw new Error('intdis, intenb, settimeslice and stlf require --priority 1 and a separate LP batch');
   if (operations.length === 0 || operations.some(name => !selected.includes(name)))
     throw new Error('Operation not in the supported stateless test set');
-  fs.mkdirSync(path.join(root, 'obj', 'tests'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'builddir', 'tests'), { recursive: true });
   const reports = [];
   let failed = false;
   let blocked = false;
@@ -885,7 +885,7 @@ function main() {
   for (let round = 0; round < options.rounds; ++round) {
     for (const batch of batches) {
     const seed = (options.seed + round) >>> 0 || 1;
-    const directory = fs.mkdtempSync(path.join(root, 'obj', 'tests', 'st20sim-'));
+    const directory = fs.mkdtempSync(path.join(root, 'builddir', 'tests', 'st20sim-'));
     console.log(`Round ${round + 1}/${options.rounds}${options.isolate ? ` [${batch.join(',')}]` : ''}, seed ${seed}, artifacts ${path.relative(root, directory)}`);
     let program;
     try {
@@ -992,7 +992,7 @@ function main() {
     }
     if (batch.some(name => nativeUnavailable.has(name)))
       simulator = executeSimulator(directory, batch.includes('reboot') ? 1000 : 30000);
-    const localText = run(path.join(root, 'obj', 'tests', 'cpu-instructions'),
+    const localText = run(path.join(root, 'builddir', 'cpu-instructions'),
       ['--sim-trace', path.join(directory, 'probe.hex'), String(program.instructions.length), '--frozen-clocks',
         ...(identityConfiguration ? ['--product-id', identityConfiguration.value] : [])]);
     fs.writeFileSync(path.join(directory, 'emulator.trace'), localText);
