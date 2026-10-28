@@ -6,6 +6,7 @@
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
 #include "board/DSR9500.h"
+#include "board/Stb6300.h"
 #include "soc/sti5512/STi5512_Devices.h"
 #include "soc/sti5518/STi5518_Devices.h"
 
@@ -35,9 +36,8 @@ static std::array<std::string, 4> serialLines;
 static void printSerialOutput(bool flush) {
   for (int port = 0; port < 4; ++port) {
     std::vector<uint8_t> bytes;
-    if (serialSti5512) bytes = takeSti5512AscTransmit(port);
-    else if (port == 1) bytes = takeSti5518Asc1Transmit();
-    else if (port == 2) bytes = takeSti5518Asc2Transmit();
+    if (serialSti5512) bytes = sti5512Peripherals().takeAscTransmit(port);
+    else bytes = sti5518Peripherals().takeAscTransmit(port);
     std::string &line = serialLines[static_cast<std::size_t>(port)];
     for (uint8_t byte : bytes) {
       if (byte == '\n') {
@@ -257,10 +257,10 @@ int main(int argc, char **argv) {
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--no-fast-path]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--no-fast-path]\n"
               "  --soc NAME       Emulated SoC (default: sti5518)\n"
               "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
-              "  --board NAME     Board parts outside the SoC: dsr9500 (STi5512 only)\n"
+              "  --board NAME     Board parts outside the SoC: dsr9500 (STi5512 only), 6300 (STi5518 only)\n"
                       "  --firmware FILE  Load raw firmware at startup\n"
                       "  --address HEX    Load and entry address (0/default: auto-place, START_ADDR entry)\n"
                       "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt\n"
@@ -288,8 +288,8 @@ int main(int argc, char **argv) {
       }
     } else if (option == "--board" && index + 1 < argc) {
       board = argv[++index];
-      if (board != "dsr9500") {
-        compat::println(stderr, "Invalid board: {} (expected dsr9500)", board);
+      if (board != "dsr9500" && board != "6300") {
+        compat::println(stderr, "Invalid board: {} (expected dsr9500 or 6300)", board);
         return 2;
       }
     } else if (option == "--soc-revision" && index + 1 < argc) {
@@ -321,6 +321,10 @@ int main(int argc, char **argv) {
   }
   if (board == "dsr9500" && soc != "sti5512") {
     compat::println(stderr, "--board dsr9500 requires --soc sti5512");
+    return 2;
+  }
+  if (board == "6300" && soc != "sti5518") {
+    compat::println(stderr, "--board 6300 requires --soc sti5518");
     return 2;
   }
   if (revisionSpecified && soc != "sti5512") {
@@ -380,9 +384,9 @@ int main(int argc, char **argv) {
     compat::println(stderr, "Cannot initialize {} devices: {}", soc, memoryError(deviceResult));
     return 1;
   }
-  if (board == "dsr9500") {
+  if (!board.empty()) {
     compat::println("Board: {}", board);
-    if (initDsr9500Board()) {
+    if (board == "dsr9500" ? initDsr9500Board() : initStb6300Board()) {
       compat::println(stderr, "Cannot initialize board {}", board);
       return 1;
     }

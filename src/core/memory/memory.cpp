@@ -18,6 +18,7 @@
 #include <iterator>
 #include <new>
 #include <regex>
+#include <unordered_map>
 #include <vector>
 
 /* this structure holds the state of the memory */
@@ -46,6 +47,39 @@ std::vector<MemoryDevice> memoryDevices;
 /* unwritten bytes in this inclusive range read as zero (SDRAM); disabled while start > end */
 uint32_t zeroFillStart = 1;
 uint32_t zeroFillEnd = 0;
+
+uint32_t interceptStart = 1;
+uint32_t interceptEnd = 0;
+WriteInterceptor writeInterceptor = nullptr;
+bool intercepting = false;
+
+/* ST20_IOTRACE=N: log the first N accesses to each address of the peripheral region
+ * (0x20000000-0x3fffffff), the MPEG registers (below 0x5000) and writes to the flash (0x7f...)
+ * on stderr, with access counts per address at exit */
+const long ioTraceLimit = [] {
+  const char *value = std::getenv("ST20_IOTRACE");
+  return value ? std::strtol(value, nullptr, 0) : 0L;
+}();
+std::unordered_map<uint32_t, long> ioTraceCounts;
+
+void traceIo(bool write, uint32_t address, int width, uint32_t value) {
+  bool flashWrite = write && address >= 0x7f000000U && address <= 0x7fffffffU;
+  bool mpeg = address < 0x5000U;
+  if ((address < 0x20000000U || address > 0x3fffffffU) && !flashWrite && !mpeg) return;
+  static bool summary = [] {
+    std::atexit([] {
+      std::vector<std::pair<uint32_t, long>> counts(ioTraceCounts.begin(), ioTraceCounts.end());
+      std::sort(counts.begin(), counts.end());
+      for (auto [traced, total] : counts) std::fprintf(stderr, "IOCOUNT %08x %ld\n", traced, total);
+    });
+    return true;
+  }();
+  (void)summary;
+  long &count = ioTraceCounts[address];
+  if (count++ >= ioTraceLimit) return;
+  std::fprintf(stderr, "IO %c %08x/%d %08x @%08x\n", write ? 'W' : 'R', address, width, value,
+               get_iptr());
+}
 
 bool isZeroFillAddress(uint32_t address) {
   return address >= zeroFillStart && address <= zeroFillEnd;
@@ -120,6 +154,12 @@ bool isMemoryDeviceAddress(uint32_t address) {
   return false;
 }
 
+void setWriteInterceptor(uint32_t start, uint32_t end, WriteInterceptor interceptor) {
+  interceptStart = start;
+  interceptEnd = end;
+  writeInterceptor = interceptor;
+}
+
 void setZeroFillRange(uint32_t start, uint32_t end) {
   zeroFillStart = start;
   zeroFillEnd = end;
@@ -178,7 +218,15 @@ int byteUsedBit(MEMBLK *block, int offset, int usedOperation) {
  * Returns 0 if the bytes were read properly.
  */
 
+static int readBytesUntraced(uint32_t address, int nBytes, uint32_t *value);
+
 int readBytes(uint32_t address, int nBytes, uint32_t *value) {
+  int result = readBytesUntraced(address, nBytes, value);
+  if (ioTraceLimit && value) traceIo(false, address, nBytes, *value);
+  return result;
+}
+
+static int readBytesUntraced(uint32_t address, int nBytes, uint32_t *value) {
   MEMBLK *cBlk = nullptr;
   unsigned char cByte = 0;
   uint32_t cWord = 0;
@@ -261,6 +309,13 @@ int storeBytes(uint32_t address, int nBytes, uint32_t value) {
   }
 
   uint32_t cWord = value;
+  if (ioTraceLimit) traceIo(true, address, nBytes, value);
+  if (address >= interceptStart && address <= interceptEnd && writeInterceptor && !intercepting) {
+    intercepting = true;
+    bool consumed = writeInterceptor(address, nBytes, value);
+    intercepting = false;
+    if (consumed) return 0;
+  }
 
   const MemoryDevice *mappedDevice = nullptr;
   int deviceResult = deviceForAccess(address, nBytes, &mappedDevice);

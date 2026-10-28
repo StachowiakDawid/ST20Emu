@@ -1,4 +1,5 @@
 #include "DSR9500.h"
+#include "Board.h"
 
 #include "../common/compat.h"
 #include "../core/cpu/omr.h"
@@ -138,7 +139,7 @@ void pollBoard() {
     irEdges.pop_front();
     if (level == irLevel) continue;
     irLevel = level;
-    sti5512PwmCaptureEdge(0, level);
+    sti5512Peripherals().pwmCaptureEdge(0, level);
   }
 }
 
@@ -175,13 +176,14 @@ int initDsr9500Board() {
   heldColumn = 0;
   irLevel = true;
   irEdges.clear();
-  setSti5512PioObserver(observeOutput);
-  setSti5512PioInputSource(inputLevels);
-  setSti5512BoardPoller(pollBoard);
+  sti5512Peripherals().setPioObserver(observeOutput);
+  sti5512Peripherals().setPioInputSource(inputLevels);
+  sti5512Peripherals().boardPoller = pollBoard;
   active = true;
-  int result = attachSti5512I2cDevice(tunerBus, &qpskDemodulator);
-  if (!result) result = attachSti5512I2cDevice(frontBus, &ciController);
-  if (!result) result = attachSti5512I2cDevice(frontBus, &rfModulator);
+  setActiveBoard(Board::Dsr9500);
+  int result = sti5512Peripherals().attachI2cDevice(tunerBus, &qpskDemodulator);
+  if (!result) result = sti5512Peripherals().attachI2cDevice(frontBus, &ciController);
+  if (!result) result = sti5512Peripherals().attachI2cDevice(frontBus, &rfModulator);
   return result;
 }
 

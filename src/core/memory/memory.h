@@ -47,6 +47,12 @@ int registerMemoryDevice(const MemoryDevice &device);
 int unregisterMemoryDevice(uint32_t start);
 bool isMemoryDeviceAddress(uint32_t address);
 
+/* Stores into [start, end] go to the interceptor first; it returns true when it consumed the
+ * store (storeBytes calls made by the interceptor itself are not intercepted). Reads are
+ * unaffected. Used for flash chips, whose array changes only through commands. */
+using WriteInterceptor = bool (*)(uint32_t address, int width, uint32_t value);
+void setWriteInterceptor(uint32_t start, uint32_t end, WriteInterceptor interceptor);
+
 /* Operations to perform on the used bit */
 inline constexpr int SET_BIT = 1;
 inline constexpr int CLEAR_BIT = 2;

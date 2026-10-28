@@ -8,6 +8,10 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
 #include <cstdint>
 #include <limits>
 #include <string_view>
@@ -518,8 +522,34 @@ int bsub_(uint32_t /*unused*/) {
   return 0;
 }
 
+/* ST20_PRINT_HOOK=ADDR[,ADDR...]: firmware debug printf entry points; each call to one of
+ * them prints the emulated time and the format string, its second argument (Wptr[2] after the
+ * call), on stderr */
+const std::vector<uint32_t> printHooks = [] {
+  std::vector<uint32_t> hooks;
+  const char *value = std::getenv("ST20_PRINT_HOOK");
+  for (const char *text = value; text && *text;) {
+    char *end = nullptr;
+    hooks.push_back(static_cast<uint32_t>(std::strtoul(text, &end, 16)));
+    text = *end ? end + 1 : end;
+  }
+  return hooks;
+}();
+
+void printHookString(uint32_t address) {
+  std::string text;
+  for (uint32_t value = 0; text.size() < 200 && !readBytes(address + static_cast<uint32_t>(text.size()), 1, &value) && value;)
+    text.push_back(static_cast<char>(value));
+  while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+  std::fprintf(stderr, "PRINT> [%llu ms] %s\n",
+               static_cast<unsigned long long>(elapsedCpuCycles() / (CPU_CLOCK / 1000)), text.c_str());
+}
+
 int call_(uint32_t offset) {
   uint32_t addr = cpuState.iptr;
+  if (!printHooks.empty() &&
+      std::ranges::find(printHooks, cpuState.iptr + offset) != printHooks.end())
+    printHookString(cpuState.breg);
 
   int result = wptrPushState();
   if (result != 0) {
@@ -1407,8 +1437,16 @@ int rev_(uint32_t /*unused*/) {
 int runp_(uint32_t /*unused*/) {
   uint32_t descriptor = cpuState.areg;
   unsigned char priority = static_cast<unsigned char>(descriptor & 1U);
-  if (trapEnableMask(priority) & RUN_TRAPENB)
-    return requestTrap(RUN_TRAPENB, priority, false, descriptor);
+  if (trapEnableMask(priority) & RUN_TRAPENB) {
+    /* a low priority run trap raised at high priority waits for low priority; runp completes */
+    bool deferred = priority == LOW_PRIORITY && cpuState.priority == HIGH_PRIORITY;
+    int result = requestTrap(RUN_TRAPENB, priority, false, descriptor);
+    if (result || !deferred) return result;
+    pop();
+    pop();
+    pop();
+    return pollTimers();
+  }
   pop();
   pop();
   pop();

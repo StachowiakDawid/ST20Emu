@@ -4,6 +4,7 @@
 #include "../../core/cpu/st20.h"
 #include "../../core/memory/memory.h"
 
+#include <fstream>
 #include <string>
 
 #include <cstdint>
@@ -33,6 +34,21 @@ CliError cmd_save(CliEngine & /*engine*/, std::span<const std::string_view> args
   }
 
   return result == 0 ? CliError::Success : CliError::InputError;
+}
+
+/* dump FILE ADDRESS LENGTH: write memory as raw bytes (unwritten bytes as 0) */
+CliError cmd_dump(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  uint32_t address, length;
+  if (args.size() < 3 || !parseHex(std::string(args[1]), address) ||
+      !parseHex(std::string(args[2]), length))
+    return CliError::BadParameter;
+  std::ofstream out{std::string(args[0]), std::ios::binary};
+  for (uint32_t offset = 0; offset < length; ++offset) {
+    uint32_t value = 0;
+    if (readBytes(address + offset, 1, &value)) value = 0;
+    out.put(static_cast<char>(value));
+  }
+  return out ? CliError::Success : CliError::InputError;
 }
 
 CliError cmd_view(CliEngine & /*engine*/, std::span<const std::string_view> args) {

@@ -25,6 +25,11 @@ struct DisplayConfig {
 
 enum class Vsync { None, Top, Bottom };
 
+/* the VID_ITS bit of a VSYNC event (bit 6 VST, bit 5 VSB at 0x63), or 0 for none */
+inline uint32_t vsyncInterruptEvent(Vsync vsync) {
+  return vsync == Vsync::Top ? 0x40U : vsync == Vsync::Bottom ? 0x20U : 0;
+}
+
 struct DisplayTiming {
   uint64_t nextField = 0;
   bool bottomField = false;

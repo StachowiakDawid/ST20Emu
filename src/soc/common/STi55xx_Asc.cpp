@@ -27,7 +27,8 @@ int writeAsc(void *context, uint32_t address, int width, uint32_t value) {
   if (offset == 4) {
     asc[1] = value & 0x1ffU;
     if (asc[3] & 0x80U) {
-      device.transmitted.push_back(static_cast<uint8_t>(value));
+      if (device.transmitObserver) device.transmitObserver(static_cast<uint8_t>(value));
+      else device.transmitted.push_back(static_cast<uint8_t>(value));
       device.transmitDelay = 2;
       asc[5] &= ~6U;
     }
@@ -50,11 +51,24 @@ void resetAsc(AscDevice &device) {
   device.registers[10] = 1;
   device.previousSource = false;
   device.transmitDelay = 0;
+  device.receiveDelay = 0;
+}
+
+void feedAscReceive(AscDevice &device, const std::vector<uint8_t> &bytes) {
+  device.received.insert(device.received.end(), bytes.begin(), bytes.end());
 }
 
 bool tickAsc(AscDevice &device) {
   auto &asc = device.registers;
   if (device.transmitDelay && --device.transmitDelay == 0) asc[5] |= 6U;
   if (device.transmitDelay == 0 && (asc[3] & 0x80U)) asc[5] |= 6U;
+  /* RxEnable and Run: the next byte arrives a few polls after RxBuffer was read */
+  if ((asc[3] & 0x180U) == 0x180U && !(asc[5] & 1U) && !device.received.empty() &&
+      ++device.receiveDelay >= 4) {
+    device.receiveDelay = 0;
+    asc[2] = device.received.front();
+    device.received.pop_front();
+    asc[5] |= 1U;
+  }
   return (asc[3] & 0x80U) && (asc[5] & asc[4]);
 }

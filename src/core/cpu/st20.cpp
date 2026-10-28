@@ -116,6 +116,9 @@ struct PendingTrap {
   uint32_t descriptor{NO_PROCESS};
 };
 PendingTrap pendingTimerTrap;
+/* low priority scheduler traps raised while high priority ran (run, signal): taken in the low
+ * priority context once high priority is idle */
+std::deque<PendingTrap> pendingLowTraps;
 bool queueEmptyReported[2]{};
 
 /* instructions decoded from memory, keyed by address and revalidated with the block's write
@@ -580,6 +583,21 @@ int dispatchProcess() {
     if (!result) queueEmptyReported[priority] = true;
     return result;
   }
+  /* An idle high priority with nothing to run and no interrupted low priority process drops
+   * to low priority, whose scheduler then finds its own queue empty (OS20 runs its kernel
+   * from the low priority QueueEmpty trap). */
+  if (!cpuState.running && cpuState.priority == HIGH_PRIORITY && !lowPriorityShadowValid &&
+      omrState.ProcQueueFPtr[HIGH_PRIORITY] == NO_PROCESS && omrState.ProcQueueFPtr[LOW_PRIORITY] == NO_PROCESS &&
+      (trapEnableMask(LOW_PRIORITY) & QUEUE_EMPTY_TRAPENB) && !queueEmptyReported[LOW_PRIORITY]) {
+    selectPriority(LOW_PRIORITY);
+    CPUSTATE idle = lowPriorityShadow;
+    idle.priority = LOW_PRIORITY;
+    idle.running = false;
+    cpuState = idle;
+    int result = requestTrap(QUEUE_EMPTY_TRAPENB, LOW_PRIORITY);
+    if (!result) queueEmptyReported[LOW_PRIORITY] = true;
+    return result;
+  }
   if (cpuState.running) {
     if (cpuState.priority == HIGH_PRIORITY || omrState.ProcQueueFPtr[HIGH_PRIORITY] == NO_PROCESS ||
       cpuState.interruptsDisabled ||
@@ -591,6 +609,7 @@ int dispatchProcess() {
     selectPriority(LOW_PRIORITY);
     cpuState = lowPriorityShadow;
     lowPriorityShadowValid = false;
+    queueEmptyReported[LOW_PRIORITY] = false;
     return 0;
   }
   uint32_t workspace = omrState.ProcQueueFPtr[priority];
@@ -607,6 +626,9 @@ int dispatchProcess() {
   if (cpuState.running) {
     lowPriorityShadow = cpuState;
     lowPriorityShadowValid = true;
+  } else if (cpuState.priority == LOW_PRIORITY) {
+    /* an idle low priority keeps its last process's registers for its next scheduler trap */
+    lowPriorityShadow = cpuState;
   }
   selectPriority(priority);
   omrState.ProcQueueFPtr[priority] = next;
@@ -771,6 +793,7 @@ void resetScheduler() {
   executingInstruction = false;
   trapFrames.clear();
   pendingTimerTrap = {};
+  pendingLowTraps.clear();
   omrState.halted = false;
   cpuState.running = true;
   cpuState.status = 0;
@@ -925,13 +948,35 @@ int pollTimers() {
   }
   /* the common case, after nearly every instruction: the process keeps running and nothing below
    * has work (no interrupt request or timer trap pending, no external channel, no preemption) */
-  if (cpuState.running && !pendingTimerTrap.cause && externalChannels.empty() &&
+  if (cpuState.running && !pendingTimerTrap.cause && pendingLowTraps.empty() && externalChannels.empty() &&
       (trapHandlerActive() || interruptHandlerActive() || cpuState.priority == HIGH_PRIORITY ||
        omrState.ProcQueueFPtr[HIGH_PRIORITY] == NO_PROCESS || cpuState.interruptsDisabled ||
        !(omrState.Enables & LP_PROCESS_INT_ENB)))
     return 0;
   result = pollExternalChannels();
   if (result) return result;
+  if (!executingInstruction && !trapHandlerActive() && !interruptHandlerActive() && !pendingLowTraps.empty() &&
+      (cpuState.priority == LOW_PRIORITY ||
+       (!cpuState.running && omrState.ProcQueueFPtr[HIGH_PRIORITY] == NO_PROCESS))) {
+    if (cpuState.priority == HIGH_PRIORITY) {
+      /* high priority is idle: drop to the preempted low priority process, or the idle bank */
+      selectPriority(LOW_PRIORITY);
+      bool preempted = lowPriorityShadowValid;
+      cpuState = lowPriorityShadow;
+      cpuState.priority = LOW_PRIORITY;
+      cpuState.running = preempted;
+      lowPriorityShadowValid = false;
+    }
+    /* bit 31 of the trapped status tells the handler a process was running (OS20's scheduler
+     * only saves a preempted task when it is set) */
+    if (cpuState.running) cpuState.status |= STATUS_VALID;
+    PendingTrap pending = pendingLowTraps.front();
+    pendingLowTraps.pop_front();
+    if (trapEnableMask(LOW_PRIORITY) & pending.cause)
+      return requestTrap(pending.cause, LOW_PRIORITY, false, pending.descriptor);
+    result = enqueueProcess(pending.descriptor & WordSelectMask, LOW_PRIORITY);
+    return result ? result : dispatchProcess();
+  }
   if (!executingInstruction && !trapHandlerActive() && !interruptHandlerActive() && pendingTimerTrap.cause) {
     if (cpuState.running && cpuState.priority == LOW_PRIORITY && cpuState.interruptsDisabled &&
         pendingTimerTrap.priority == HIGH_PRIORITY) return dispatchProcess();
@@ -947,8 +992,9 @@ int pollTimers() {
       if (cpuState.priority == HIGH_PRIORITY) {
         if (cpuState.running || omrState.ProcQueueFPtr[HIGH_PRIORITY] != NO_PROCESS) return 0;
         selectPriority(LOW_PRIORITY); // nothing to run at either priority: idle low priority
-        cpuState = {undefinedWord, undefinedWord, undefinedWord, 0, 0, LOW_PRIORITY, NO_PROCESS, false,
-                    0, 0, 0, 0};
+        cpuState = lowPriorityShadow;
+        cpuState.priority = LOW_PRIORITY;
+        cpuState.running = false;
       }
     }
     PendingTrap pending = pendingTimerTrap;
@@ -1062,11 +1108,25 @@ int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t
     if (result) return INVALID_TRAP_HANDLER;
   }
   if (descriptorWords[2] == 0 || (descriptorWords[2] & 3U)) return INVALID_TRAP_HANDLER;
+  /* A low priority run or signal trap raised while high priority runs (a high priority process
+   * running or signalling a low priority one) is taken at low priority: it waits until high
+   * priority is idle and then traps the low priority context, the process high priority
+   * preempted or the idle bank with its last process's Wptr (OS20 starts tasks this way and
+   * records the task in that workspace). */
+  if ((cause == RUN_TRAPENB || cause == SIGNAL_TRAPENB) && priority == LOW_PRIORITY &&
+      cpuState.priority == HIGH_PRIORITY) {
+    pendingLowTraps.push_back({cause, priority, descriptor});
+    return 0;
+  }
+  CPUSTATE trappedState = cpuState;
   TrapFrame frame{cause, priority, generated, cpuState};
   uint32_t enables = (omrState.Enables & ~0x3fffU) | trapEnableMask(priority);
-  uint32_t status = cpuState.status | cause | (generated ? 0x8000U : 0U);
-  if (group == TRAP_GROUP_SCHEDULER) status = (status & ~0x30000U) | (static_cast<uint32_t>(cpuState.priority) << 16);
-  std::array<uint32_t, 4> saved{enables, status, cpuState.wptr, cpuState.iptr};
+  /* bit 31 of the trapped status tells the handler whether a process was running (OS20's
+   * scheduler only saves a preempted task when it is set) */
+  uint32_t status = trappedState.status | cause | (generated ? 0x8000U : 0U);
+  if (!trappedState.running) status &= ~STATUS_VALID; // nothing to resume: an idle priority
+  if (group == TRAP_GROUP_SCHEDULER) status = (status & ~0x30000U) | (static_cast<uint32_t>(trappedState.priority) << 16);
+  std::array<uint32_t, 4> saved{enables, status, trappedState.wptr, trappedState.iptr};
   uint32_t trapped = trapRecordAddress(priority, group, true);
   for (int index = 0; index < 4; ++index) {
     int result = writeProcessWord(trapped, index, saved[static_cast<std::size_t>(index)]);
@@ -1082,13 +1142,15 @@ int requestTrap(uint32_t cause, unsigned char priority, bool generated, uint32_t
                      (omrState.Enables & descriptorWords[0] & 0xffffU);
   cpuState.status = descriptorWords[1];
   if (group == TRAP_GROUP_SCHEDULER)
-    cpuState.status = (cpuState.status & ~0x30000U) | (static_cast<uint32_t>(frame.caller.priority) << 16);
+    cpuState.status = (cpuState.status & ~0x30000U) | (static_cast<uint32_t>(trappedState.priority) << 16);
   cpuState.wptr = descriptorWords[2];
   cpuState.iptr = descriptorWords[3];
   cpuState.nWptr = 0;
   cpuState.running = true;
   /* Areg, Breg and Creg are not saved and keep the trapped process's values (ST20-TP2
-   * datasheet 3.6.3); the descriptor is passed in the handler's entry workspace word 0. */
+   * datasheet 3.6.3); the descriptor is passed in the handler's entry workspace word 0. A low
+   * priority context handler runs in the low priority register bank. */
+
   return 0;
 }
 
@@ -1230,6 +1292,9 @@ int returnFromTrap() {
       : (saved[1] & STATUS_VALID) != 0 || frame.caller.running || saved[2] != frame.caller.wptr ||
         saved[3] != static_cast<uint32_t>(frame.caller.iptr);
   if (cpuState.running) queueEmptyReported[cpuState.priority] = false;
+  /* another handler at this priority (run, timer, signal...) may have given its scheduler
+   * work, so it reports an empty queue again the next time it becomes idle */
+  if (frame.cause != QUEUE_EMPTY_TRAPENB) queueEmptyReported[frame.priority] = false;
   trapFrames.pop_back();
   return 0;
 }
@@ -1565,7 +1630,10 @@ int resetChannel(uint32_t channel, uint32_t *previous) {
     endpoint = ExternalChannel{capacity, {}, {}};
     return 0;
   }
-  if (!softwareChannelAddress(channel)) return CHANNEL_HARDWARE_UNSUPPORTED;
+  /* link channel words (0x80000000-0x8000001f): no link hardware to reset, but the manual's
+   * word update still applies; loaders reset all eight before jumping to an application */
+  bool linkChannel = channel >= 0x80000000U && channel < 0x80000020U;
+  if (!softwareChannelAddress(channel) && !linkChannel) return CHANNEL_HARDWARE_UNSUPPORTED;
   if (channel & 3U) return INVALID_CHANNEL;
   int result = readProcessWord(channel, 0, *previous);
   if (result && result != READ_UNUSED_MEM) return result;
@@ -2458,11 +2526,20 @@ const CodeBlock *codeBlock(uint32_t iptr) {
     int length = 0;
     unsigned char bytes[16];
     if (decodeAt(address, BLKSIZE - (address & ADDR_IN_BLK_MASK), code, value, length, bytes, sizeof bytes)) break;
-    bool pure = leavesSchedulerAlone(code);
+    /* the classification compares mnemonics: do it once per instruction code */
+    static std::array<int8_t, 0x201> pureCodes = [] {
+      std::array<int8_t, 0x201> codes{};
+      for (uint32_t index = 0; index < codes.size(); ++index)
+        codes[index] = static_cast<int8_t>(leavesSchedulerAlone(index) | endsBlock(index) << 1);
+      return codes;
+    }();
+    int8_t kind = code < pureCodes.size() ? pureCodes[code]
+                                          : static_cast<int8_t>(leavesSchedulerAlone(code) | endsBlock(code) << 1);
+    bool pure = kind & 1;
     block.instrs[block.count++] = {instrEntry[code].function, value, code, instrEntry[code].cpucycles,
                                    static_cast<uint32_t>(length), pure};
     address += static_cast<uint32_t>(length);
-    if (!pure || endsBlock(code) || (address & ADDR_IN_BLK_MASK) == 0) break;
+    if (!pure || (kind & 2) || (address & ADDR_IN_BLK_MASK) == 0) break;
   }
   return block.count ? &block : nullptr;
 }

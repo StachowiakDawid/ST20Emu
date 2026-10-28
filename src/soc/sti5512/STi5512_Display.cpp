@@ -9,8 +9,6 @@
  * OSD starts at OSD_TOP/OSD_BOT and honours OSD_CFG.LLG.
  */
 namespace {
-constexpr uint32_t vsyncTop = 0x40;
-constexpr uint32_t vsyncBottom = 0x20;
 constexpr DisplayConfig display{sti5512VideoRegister, sti5512OsdPointer, true, false};
 DisplayTiming timing;
 }
@@ -23,7 +21,7 @@ bool tickSti5512Display() {
   Vsync vsync = tickDisplayTiming(timing);
   if (vsync != Vsync::None) {
     sti5512VideoDecoderVsync();
-    raiseSti5512VideoInterrupt(vsync == Vsync::Bottom ? vsyncBottom : vsyncTop);
+    raiseSti5512VideoInterrupt(vsyncInterruptEvent(vsync));
   }
   tickSti5512VideoDecoder();
   return sti5512VideoInterruptLine();

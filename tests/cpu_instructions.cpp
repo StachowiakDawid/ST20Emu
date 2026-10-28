@@ -2677,6 +2677,12 @@ static void testInternalChannels() {
   cpuState.creg = 0;
   expect("hardware channel not treated as RAM rendezvous", in_(0) == CHANNEL_HARDWARE_UNSUPPORTED, 1);
   cpuState.areg = 0x80000000;
+  storeBytes(0x80000000, 4, 0x81001);
+  expect("link channel reset accepted", resetch_(0), 0);
+  expect("link channel reset returns waiting word", cpuState.areg, 0x81001);
+  readBytes(0x80000000, 4, &value);
+  expect("link channel reset empties word", value, NO_PROCESS);
+  cpuState.areg = 0x80000020;
   expect("core-reserved channel reset rejected", resetch_(0) == CHANNEL_HARDWARE_UNSUPPORTED, 1);
   schedulerFixture(0x20000);
 }
@@ -3513,8 +3519,8 @@ static void testSti5512I2c() {
   static I2cRegisterDevice slave{0xaa};
   slave.registers = {};
   slave.registers[0] = 0x5a;
-  expect("attach I2C slave to SSC1", attachSti5512I2cDevice(1, &slave) != 0, 0);
-  expect("reject I2C slave on missing SSC", attachSti5512I2cDevice(2, &slave) == INVALID_MEMORY_DEVICE, 1);
+  expect("attach I2C slave to SSC1", sti5512Peripherals().attachI2cDevice(1, &slave) != 0, 0);
+  expect("reject I2C slave on missing SSC", sti5512Peripherals().attachI2cDevice(2, &slave) == INVALID_MEMORY_DEVICE, 1);
   constexpr uint32_t ssc1 = 0x2000a000;
   uint32_t value = 0;
   readBytes(ssc1 + 0x14, 2, &value);
@@ -3555,6 +3561,45 @@ static void testSti5512I2c() {
   expect("soft reset releases bus", value, 2);
   expect("SSC rejects byte access", readBytes(ssc1 + 0x14, 1, &value) == INVALID_DEVICE_ACCESS, 1);
   shutdownSti5512Devices();
+  schedulerFixture(0x20000);
+}
+
+/* software I2C: START/STOP generated on PIO pins, frames shifted by the SSC outside I2C mode */
+static void testSti5518RawI2c() {
+  schedulerFixture(0x180000);
+  expect("initialize STi5518 SSC devices", initSti5518Devices() != 0, 0);
+  static I2cRegisterDevice slave{0xd0};
+  slave.registers = {};
+  slave.registers[0] = 0x42;
+  expect("attach raw I2C slave to SSC0", sti5518Peripherals().attachI2cDevice(0, &slave) != 0, 0);
+  constexpr uint32_t ssc0 = 0x20009000;
+  storeBytes(ssc0 + 0x0c, 4, 0x318);
+  auto frame = [](uint32_t value) {
+    uint32_t received = 0;
+    storeBytes(ssc0 + 4, 4, value);
+    pollSti5518Devices();
+    pollSti5518Devices();
+    readBytes(ssc0 + 8, 4, &received);
+    return received;
+  };
+  expect("raw frame without START reads back as sent", frame((0xd0 << 1) | 1), (0xd0 << 1) | 1);
+  sti5518Peripherals().i2cBusCondition(0, true);
+  expect("raw address acknowledged", frame((0xd0 << 1) | 1), 0xd0 << 1);
+  expect("raw register byte acknowledged", frame((0x05 << 1) | 1), 0x05 << 1);
+  expect("raw data byte acknowledged", frame((0x77 << 1) | 1), 0x77 << 1);
+  expect("raw write stored", slave.registers[5], 0x77);
+  sti5518Peripherals().i2cBusCondition(0, false);
+  sti5518Peripherals().i2cBusCondition(0, true);
+  frame((0xd0 << 1) | 1);
+  frame(1);
+  sti5518Peripherals().i2cBusCondition(0, true);
+  expect("raw read address acknowledged", frame((0xd1 << 1) | 1), 0xd1 << 1);
+  expect("raw read returns register with master NACK", frame(0x1ff), (0x42 << 1) | 1);
+  sti5518Peripherals().i2cBusCondition(0, false);
+  sti5518Peripherals().i2cBusCondition(0, true);
+  expect("raw missing slave does not acknowledge", frame((0xa0 << 1) | 1) & 1, 1);
+  sti5518Peripherals().i2cBusCondition(0, false);
+  shutdownSti5518Devices();
   schedulerFixture(0x20000);
 }
 
@@ -3641,10 +3686,10 @@ static void testSti5512DisplayDevices() {
   storeBytes(0x2000b030, 4, 2);
   storeBytes(0x2000b050, 4, 0x7cf);
   advanceTimers(29 * 10);
-  sti5512PwmCaptureEdge(0, true);
+  sti5512Peripherals().pwmCaptureEdge(0, true);
   readBytes(0x2000b058, 4, &value);
   expect("rising edge ignored by falling capture", value & 2, 0);
-  sti5512PwmCaptureEdge(0, false);
+  sti5512Peripherals().pwmCaptureEdge(0, false);
   readBytes(0x2000b058, 4, &value);
   expect("falling edge raises capture 0", value & 2, 2);
   readBytes(0x2000b010, 4, &value);
@@ -3897,10 +3942,10 @@ static void testSti5512Interrupts() {
   expect("STi5512 ASC3 IRQ return", iret_(0) != 0, 0);
   readBytes(0x20000100, 4, &value);
   expect("STi5512 iret acknowledges controller", value, 0);
-  auto bytes = takeSti5512AscTransmit(3);
+  auto bytes = sti5512Peripherals().takeAscTransmit(3);
   expect("STi5512 ASC3 captures byte", bytes.size(), 1);
   if (bytes.size() == 1) expect("STi5512 ASC3 captured value", bytes[0], 0x4f);
-  expect("STi5512 ASC0 capture separate", takeSti5512AscTransmit(0).empty(), 1);
+  expect("STi5512 ASC0 capture separate", sti5512Peripherals().takeAscTransmit(0).empty(), 1);
   expect("STi5512 INL input status read only", storeBytes(0x2001107c, 4, 0) == DEVICE_ACCESS_UNSUPPORTED, 1);
   storeBytes(0x20011000, 4, 0xff);
   readBytes(0x20011000, 4, &value);
@@ -3919,7 +3964,7 @@ static void testSti5512Interrupts() {
   expect("STi5512 reboot resets ASC3 control", value, 0);
   readBytes(0x20006014, 4, &value);
   expect("STi5512 reboot resets ASC3 status", value, 3);
-  expect("STi5512 reboot keeps sent bytes", takeSti5512AscTransmit(3).size(), 1);
+  expect("STi5512 reboot keeps sent bytes", sti5512Peripherals().takeAscTransmit(3).size(), 1);
   storeBytes(0x3a, 1, 0x1b);
   rebootProcessor();
   readBytes(0x3a, 1, &value);
@@ -3966,7 +4011,7 @@ static void testSti5518Devices() {
   expect("iret acknowledges controller", value, 0);
   storeBytes(0x20005004, 4, 0x48);
   storeBytes(0x20005004, 4, 0x69);
-  auto bytes = takeSti5518Asc2Transmit();
+  auto bytes = sti5518Peripherals().takeAscTransmit(2);
   expect("ASC transmit captures bytes", bytes.size(), 2);
   if (bytes.size() == 2) {
     expect("ASC first transmitted byte", bytes[0], 0x48);
@@ -4007,13 +4052,13 @@ static void testSti5518Devices() {
   storeBytes(0x20004004, 4, 0x41);
   storeBytes(0x2000500c, 4, 0x1189);
   storeBytes(0x20005004, 4, 0x42);
-  auto asc1Bytes = takeSti5518Asc1Transmit();
-  auto asc2Bytes = takeSti5518Asc2Transmit();
+  auto asc1Bytes = sti5518Peripherals().takeAscTransmit(1);
+  auto asc2Bytes = sti5518Peripherals().takeAscTransmit(2);
   expect("ASC1 transmit captures independently", asc1Bytes.size(), 1);
   expect("ASC2 transmit captures independently", asc2Bytes.size(), 1);
   if (asc1Bytes.size() == 1) expect("ASC1 captured byte", asc1Bytes[0], 0x41);
   if (asc2Bytes.size() == 1) expect("ASC2 captured byte", asc2Bytes[0], 0x42);
-  expect("ASC1 capture drains", takeSti5518Asc1Transmit().empty(), 1);
+  expect("ASC1 capture drains", sti5518Peripherals().takeAscTransmit(1).empty(), 1);
   pollSti5518Devices();
   pollSti5518Devices();
   storeBytes(0x20004010, 4, 4);
@@ -4054,6 +4099,7 @@ static void testInterruptReturns() {
   testSti5512Devices();
   testSti5512Interrupts();
   testSti5512I2c();
+  testSti5518RawI2c();
   testSti5512PtiDma();
   testSti5512Pwm();
   testSti5512DisplayDevices();
@@ -4985,6 +5031,74 @@ static void testSchedulerTrapDelivery() {
   tret_(0);
   expect("queue empty returns to idle", cpuState.running, 0);
   expect("queue empty is not repeatedly delivered", decodeNextInstr() == CPU_IDLE, 1);
+  /* OS20 queues a task from a run trap and returns: the scheduler must hear of its empty
+   * queue again (6300 firmware's low priority kernel never ran its new tasks otherwise) */
+  changeTrapMask(LOW_PRIORITY, RUN_TRAPENB, true, &previous);
+  expect("run trap enters idle scheduler", requestTrap(RUN_TRAPENB, LOW_PRIORITY, false, 0xd3000 | 1U), 0);
+  expect("run trap handler active", trapHandlerActive(), 1);
+  tret_(0);
+  expect("run trap returns to idle", cpuState.running, 0);
+  decodeNextInstr();
+  expect("queue empty reported again after run trap", cpuState.wptr, 0xd2000);
+  expect("queue empty handler active again", trapHandlerActive(), 1);
+  tret_(0);
+
+  /* OS20 starts tasks from a high priority process through the low priority run trap: runp
+   * completes at high priority, and once high priority is idle the trap is taken in the idle low
+   * priority context, where the handler installs the task (6300 firmware) */
+  schedulerFixture(0xd5000, HIGH_PRIORITY);
+  installTrap(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, 0xd6000, 0x5a00);
+  changeTrapMask(LOW_PRIORITY, RUN_TRAPENB, true, &previous);
+  cpuState.areg = 0xd7000 | LOW_PRIORITY;
+  expect("high runp of low process completes", runp_(0), 0);
+  expect("high process continues after low run trap", cpuState.wptr, 0xd5000);
+  expect("high priority continues after low run trap", cpuState.priority, HIGH_PRIORITY);
+  expect("low run trap waits for low priority", trapHandlerActive(), 0);
+  stopp_(0);
+  pollTimers();
+  expect("low run trap taken once high is idle", trapHandlerActive(), 1);
+  expect("low run trap handler runs at low priority", cpuState.priority, LOW_PRIORITY);
+  readBytes(0xd6000, 4, &parameter);
+  expect("low run trap handler gets the descriptor", parameter, 0xd7000 | LOW_PRIORITY);
+  uint32_t lowRecord = trapRecordAddress(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, true);
+  readBytes(lowRecord + 4, 4, &parameter);
+  expect("idle low context record is not valid", parameter & STATUS_VALID, 0);
+  storeBytes(lowRecord + 4, 4, STATUS_VALID | STATUS_TIMESLICE_ENABLE);
+  storeBytes(lowRecord + 8, 4, 0xd7000);
+  storeBytes(lowRecord + 12, 4, 0x5b00);
+  expect("low run trap handler returns", tret_(0), 0);
+  expect("installed low process runs", cpuState.wptr, 0xd7000);
+  expect("installed low process Iptr", cpuState.iptr, 0x5b00);
+  expect("installed low process priority", cpuState.priority, LOW_PRIORITY);
+
+  /* the same trap while a low priority process is preempted: it is the trapped process and the
+   * handler runs in its register bank */
+  schedulerFixture(0xd8000, LOW_PRIORITY);
+  installTrap(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, 0xd6000, 0x5a00);
+  changeTrapMask(LOW_PRIORITY, RUN_TRAPENB, true, &previous);
+  cpuState.areg = 0x11;
+  cpuState.breg = 0x22;
+  cpuState.creg = 0x33;
+  storeBytes(0xd9000 - 4, 4, 0x5c00);
+  enqueueProcess(0xd9000, HIGH_PRIORITY);
+  pollTimers();
+  expect("high process preempts low", cpuState.wptr, 0xd9000);
+  cpuState.areg = 0xda000 | LOW_PRIORITY;
+  expect("preempted low context run trap", runp_(0), 0);
+  stopp_(0);
+  pollTimers();
+  expect("preempted low context handler active", trapHandlerActive(), 1);
+  expect("low context handler sees preempted A", cpuState.areg, 0x11);
+  expect("low context handler sees preempted B", cpuState.breg, 0x22);
+  expect("low context handler sees preempted C", cpuState.creg, 0x33);
+  readBytes(lowRecord + 4, 4, &parameter);
+  expect("preempted low context record is valid", parameter & STATUS_VALID, STATUS_VALID);
+  readBytes(lowRecord + 8, 4, &parameter);
+  expect("preempted low context record workspace", parameter, 0xd8000);
+  expect("preempted low context handler returns", tret_(0), 0);
+  expect("preempted low process resumes", cpuState.wptr, 0xd8000);
+  expect("preempted low process keeps A", cpuState.areg, 0x11);
+  expect("preempted low process keeps C", cpuState.creg, 0x33);
 
   schedulerFixture(0xc04307b0);
   installTrap(LOW_PRIORITY, TRAP_GROUP_SCHEDULER, 0xc042a5e0, 0xc042a004, 0);

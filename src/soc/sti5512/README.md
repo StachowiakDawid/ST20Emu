@@ -16,7 +16,7 @@ The INC, ASC transmitter, SSC, PWM, PIO and display/OSD models live in `src/soc/
 STi5518 has the same blocks (it currently installs only the INC and ASC); the INC
 requires the `GloEn` mask bit (bit 16) for delivery, and bit 16 of its clear registers clears
 only `GloEn`.
-`takeSti5512AscTransmit(port)` returns each port's captured bytes. The register blocks below `0x8000` (video and configuration
+`sti5512Peripherals().takeAscTransmit(port)` returns each port's captured bytes. The register blocks below `0x8000` (video and configuration
 `0x0000`, audio `0x0800`, sub-picture `0x1000`, DENC `0x1800`, EMI `0x2000`, cache `0x4000`
 and MPEG control `0x5000`) are byte register files with the manual's reset values; writes to
 read-only registers are ignored, and decoder, clock and display side effects are not modelled.

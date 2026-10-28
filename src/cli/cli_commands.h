@@ -52,6 +52,7 @@ CliError cmd_omr(CliEngine &engine, std::span<const std::string_view> args);
 // memory
 CliError cmd_load(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_save(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_dump(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_view(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_view_a(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_view_aa(CliEngine &engine, std::span<const std::string_view> args);

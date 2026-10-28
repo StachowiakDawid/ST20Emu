@@ -2,10 +2,13 @@
 #include "../../core/memory/memory.h"
 
 /*
- * STi5512 Register Manual (7145562 B) chapter 24; the STi5518's SSC is the same. Only I2C master transfers are modelled:
- * a TBUF write while STRTG is set sends a START and the address frame; data frames follow
- * until STOPG releases the bus. Slave mode, SPI transfers, arbitration, clock stretching
- * and 10-bit addressing are not modelled.
+ * STi5512 Register Manual (7145562 B) chapter 24; the STi5518's SSC is the same. I2C master
+ * transfers: a TBUF write while STRTG is set sends a START and the address frame; data frames
+ * follow until STOPG releases the bus. Outside I2C mode a TBUF write in master mode shifts
+ * the frame out and RBUF receives the open-drain bus level: what was sent, ANDed with the
+ * acknowledge or data of a slave addressed after a START that software generated on the pins
+ * (sscBusCondition); with no slave selected that is the frame itself (a NACK). Slave mode, arbitration,
+ * clock stretching and 10-bit addressing are not modelled.
  */
 namespace {
 enum Register { BRG, TBUF, RBUF, CON, IEN, STAT, I2C, SLAD };
@@ -15,6 +18,7 @@ constexpr uint32_t statTir = 0x002;
 constexpr uint32_t statStop = 0x080;
 constexpr uint32_t statBusy = 0x200;
 constexpr uint32_t conSoftReset = 0x080;
+constexpr uint32_t conMaster = 0x100;
 constexpr uint32_t conEnable = 0x200;
 constexpr uint32_t i2cMode = 0x01;
 constexpr uint32_t i2cStart = 0x02;
@@ -60,9 +64,27 @@ uint32_t transferFrame(SscDevice &device, uint32_t frame) {
   return static_cast<uint32_t>(byte) << 1;
 }
 
+/* a 9-bit frame on a software-started bus: the master releases the lines it reads */
+uint32_t transferRawFrame(SscDevice &device, uint32_t frame) {
+  if (device.addressFrame) return transferFrame(device, frame);
+  if (device.reading) {
+    I2cRegisterDevice *slave = device.selected;
+    uint8_t data = slave ? slave->registers[slave->pointer++] : 0xff;
+    return static_cast<uint32_t>(data) << 1 | (frame & 1U);
+  }
+  return transferFrame(device, frame);
+}
+
 void writeTransmit(SscDevice &device, uint32_t frame) {
   auto &ssc = device.registers;
-  if ((ssc[CON] & (conSoftReset | conEnable)) != conEnable || !(ssc[I2C] & i2cMode)) return;
+  if ((ssc[CON] & (conSoftReset | conEnable)) != conEnable) return;
+  if (!(ssc[I2C] & i2cMode)) {
+    if (!(ssc[CON] & conMaster)) return;
+    ssc[STAT] &= ~statTir;
+    device.pendingReceive = device.busActive ? transferRawFrame(device, frame & 0x1ffU) : frame & 0xffffU;
+    device.frameDelay = frameCycles;
+    return;
+  }
   if (ssc[I2C] & i2cStart) {
     device.busActive = true;
     device.addressFrame = true;
@@ -116,6 +138,17 @@ int writeSsc(void *context, uint32_t address, int width, uint32_t value) {
     default: ssc[index] = value & 0xffffU; break;
   }
   return 0;
+}
+
+void sscBusCondition(SscDevice &device, bool start) {
+  if (device.registers[I2C] & i2cMode) return;
+  if (start) {
+    device.busActive = true;
+    device.addressFrame = true;
+  } else {
+    device.busActive = false;
+    device.selected = nullptr;
+  }
 }
 
 void resetSsc(SscDevice &device) {

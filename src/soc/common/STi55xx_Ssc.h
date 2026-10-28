@@ -36,6 +36,9 @@ inline constexpr uint32_t sscRegisterEnd = 0x1f;
 int readSsc(void *context, uint32_t address, int width, uint32_t *value);
 int writeSsc(void *context, uint32_t address, int width, uint32_t value);
 void resetSsc(SscDevice &device);
+/* START (true) or STOP (false) generated on the bus pins by software (outside I2C mode, with
+ * the SSC shifting the 9-bit frames in between) */
+void sscBusCondition(SscDevice &device, bool start);
 /* completes a frame in progress; returns the device's interrupt line */
 bool tickSsc(SscDevice &device);
 

@@ -24,8 +24,10 @@ core_sources = files(
   'src/soc/common/STi55xx_Asc.cpp',
   'src/soc/common/STi55xx_Display.cpp',
   'src/soc/common/STi55xx_Inc.cpp',
+  'src/soc/common/STi55xx_Peripherals.cpp',
   'src/soc/common/STi55xx_Pio.cpp',
   'src/soc/common/STi55xx_Pwm.cpp',
+  'src/soc/common/STi55xx_RegisterBlocks.cpp',
   'src/soc/common/STi55xx_Ssc.cpp',
   'src/soc/sti5512/STi5512_Devices.cpp',
   'src/soc/sti5512/STi5512_Display.cpp',
@@ -33,7 +35,13 @@ core_sources = files(
   'src/soc/sti5512/STi5512_RegisterBlocks.cpp',
   'src/soc/sti5512/STi5512_VideoDecoder.cpp',
   'src/soc/sti5518/STi5518_Devices.cpp',
+  'src/soc/sti5518/STi5518_Display.cpp',
+  'src/soc/sti5518/STi5518_Irb.cpp',
+  'src/soc/sti5518/STi5518_RegisterBlocks.cpp',
+  'src/board/Board.cpp',
   'src/board/DSR9500.cpp',
+  'src/board/Stb6300.cpp',
+  'src/board/AmdFlash.cpp',
 )
 
 sources = core_sources + files(
