@@ -50,7 +50,10 @@ CliError CliEngine::prompt_and_execute() {
     set_need_cmd(false);
     return CliError::Success;
   }
+  return execute_line(line);
+}
 
+CliError CliEngine::execute_line(const std::string &line) {
   // parse the line into dynamic tokens
   std::istringstream iss{line};
   std::vector<std::string> tokens;

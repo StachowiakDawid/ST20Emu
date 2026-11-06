@@ -45,22 +45,20 @@ uint32_t transferFrame(SscDevice &device, uint32_t frame) {
       if (slave->address == (byte & 0xfeU)) device.selected = slave;
     }
     device.reading = (byte & 1U) != 0;
-    if (device.selected && !device.reading) device.selected->pointerWritten = false;
+    if (device.selected && !device.reading) {
+      device.selected->pointerWritten = false;
+      device.selected->offsetBytesSeen = 0;
+    }
     return static_cast<uint32_t>(byte) << 1 | (device.selected ? 0U : 1U);
   }
   I2cRegisterDevice *slave = device.selected;
   if (device.reading) {
-    uint8_t data = slave ? slave->registers[slave->pointer++] : 0xff;
+    uint8_t data = slave ? i2cSlaveRead(*slave) : 0xff;
     uint32_t acknowledge = device.registers[I2C] & i2cAcknowledge ? 0U : 1U;
     return static_cast<uint32_t>(data) << 1 | acknowledge;
   }
   if (!slave) return static_cast<uint32_t>(byte) << 1 | 1U;
-  if (!slave->pointerWritten) {
-    slave->pointer = byte;
-    slave->pointerWritten = true;
-  } else {
-    slave->registers[slave->pointer++] = byte;
-  }
+  i2cSlaveWrite(*slave, byte);
   return static_cast<uint32_t>(byte) << 1;
 }
 
@@ -68,8 +66,7 @@ uint32_t transferFrame(SscDevice &device, uint32_t frame) {
 uint32_t transferRawFrame(SscDevice &device, uint32_t frame) {
   if (device.addressFrame) return transferFrame(device, frame);
   if (device.reading) {
-    I2cRegisterDevice *slave = device.selected;
-    uint8_t data = slave ? slave->registers[slave->pointer++] : 0xff;
+    uint8_t data = device.selected ? i2cSlaveRead(*device.selected) : 0xff;
     return static_cast<uint32_t>(data) << 1 | (frame & 1U);
   }
   return transferFrame(device, frame);
@@ -168,4 +165,43 @@ bool tickSsc(SscDevice &device) {
     ssc[STAT] |= statRir | statTir;
   }
   return (ssc[STAT] & ssc[IEN]) != 0;
+}
+
+void resetI2cDevice(I2cRegisterDevice &slave) {
+  slave.registers = {};
+  slave.pointer = 0;
+  slave.pointerWritten = false;
+  slave.offset = 0;
+  slave.offsetBytesSeen = 0;
+}
+
+void i2cSlaveBeginWrite(I2cRegisterDevice &slave) {
+  slave.pointerWritten = false;
+  slave.offsetBytesSeen = 0;
+}
+
+void i2cSlaveWrite(I2cRegisterDevice &slave, uint8_t byte) {
+  if (!slave.memory.empty()) {
+    if (slave.offsetBytesSeen < 2) {
+      slave.offset = (slave.offset << 8 | byte) & 0xffffU;
+      if (++slave.offsetBytesSeen == 2) slave.offset %= static_cast<uint32_t>(slave.memory.size());
+    } else {
+      slave.memory[slave.offset] = byte;
+      slave.offset = (slave.offset + 1) % static_cast<uint32_t>(slave.memory.size());
+    }
+    return;
+  }
+  if (!slave.pointerWritten) {
+    slave.pointer = byte;
+    slave.pointerWritten = true;
+  } else {
+    slave.registers[slave.pointer++] = byte;
+  }
+}
+
+uint8_t i2cSlaveRead(I2cRegisterDevice &slave) {
+  if (slave.memory.empty()) return slave.registers[slave.pointer++];
+  uint8_t data = slave.memory[slave.offset];
+  slave.offset = (slave.offset + 1) % static_cast<uint32_t>(slave.memory.size());
+  return data;
 }

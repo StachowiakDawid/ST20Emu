@@ -14,6 +14,7 @@
 #include <deque>
 #include <format>
 #include <initializer_list>
+#include <span>
 #include <utility>
 
 /*
@@ -43,32 +44,36 @@ I2cRegisterDevice qpskDemodulator{0xaa};
 I2cRegisterDevice ciController{0x80};
 I2cRegisterDevice rfModulator{0xca};
 
-constexpr int latchPort = 1;
-constexpr uint8_t latchBit = 0x80;
-constexpr int panelPort = 4;
-constexpr uint8_t dataBit = 0x08;
-constexpr uint8_t clockBit = 0x10;
-constexpr uint8_t keyReturnBit = 0x04;
-constexpr int irPort = 3;
-constexpr uint8_t irBit = 0x08;
 constexpr uint64_t cyclesPerMicrosecond = CPU_CLOCK / 1000000;
 constexpr uint64_t keyHoldCycles = CPU_CLOCK / 1000 * 150;
-constexpr uint32_t necCustomer = 0xfe01;
 
-/* ASCII 0x20-0x7f -> segments, the firmware's table at RAM 0x92a4d */
-constexpr std::array<uint8_t, 96> segmentTable{
+/* ASCII 0x20-0x7f -> segments, the DSR9500 firmware's table at RAM 0x92a4d */
+constexpr std::array<uint8_t, 96> dsr9500Segments{
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xbf, 0xff, 0xff,
     0xc0, 0xf9, 0xa4, 0xb0, 0x99, 0x92, 0x82, 0xf8, 0x80, 0x90, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0x88, 0xff, 0xff, 0xff, 0x86, 0x8e, 0x82, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc8, 0xab, 0xff,
     0x8c, 0xff, 0xff, 0xff, 0xff, 0xe3, 0xc1, 0xff, 0xff, 0xff, 0xff, 0xc6, 0xff, 0xf0, 0xff, 0xf7,
 };
 
-constexpr std::pair<std::string_view, int> irKeys[] = {
+constexpr std::pair<std::string_view, int> dsr9500IrKeys[] = {
     {"0", 0}, {"1", 1}, {"2", 2}, {"3", 3}, {"4", 4}, {"5", 5}, {"6", 6}, {"7", 7}, {"8", 8}, {"9", 9},
     {"left", 13}, {"right", 14}, {"pgup", 18}, {"pgdn", 19}, {"exit", 24}, {"ok", 27},
     {"menu", 28}, {"down", 30}, {"up", 31}, {"power", 10}};
 
-constexpr std::pair<std::string_view, int> panelKeys[] = {{"up", 0x04}, {"down", 0x08}, {"power", 0x80}};
+constexpr std::pair<std::string_view, int> dsr9500PanelKeys[] = {{"up", 0x04}, {"down", 0x08}, {"power", 0x80}};
+
+const SamsungPanelConfig dsr9500Panel{
+    .latchPort = 1, .latchBit = 0x80,
+    .shiftPort = 4, .dataBit = 0x08, .clockBit = 0x10,
+    .keyReturnPort = 4, .keyReturnBit = 0x04,
+    .irPort = 3, .irBit = 0x08,
+    .necCustomer = 0xfe01,
+    .segments = dsr9500Segments,
+    .irKeys = dsr9500IrKeys,
+    .panelKeys = dsr9500PanelKeys,
+};
+
+const SamsungPanelConfig *config = &dsr9500Panel;
 
 std::array<uint8_t, sti5512PioPorts> previousOut{};
 uint16_t shiftRegister = 0;
@@ -81,17 +86,11 @@ bool irLevel = true;
 std::deque<std::pair<uint64_t, bool>> irEdges;
 bool active = false;
 
-void resetChip(I2cRegisterDevice &chip) {
-  chip.registers = {};
-  chip.pointer = 0;
-  chip.pointerWritten = false;
-}
-
 char segmentChar(uint8_t segments) {
   segments |= 0x80; // the decimal point
   if (segments == 0xff) return ' ';
-  for (std::size_t i = 0; i < segmentTable.size(); ++i) {
-    if (segmentTable[i] == segments) return static_cast<char>(0x20 + i);
+  for (std::size_t i = 0; i < config->segments.size(); ++i) {
+    if (config->segments[i] == segments) return static_cast<char>(0x20 + i);
   }
   return '?';
 }
@@ -117,17 +116,20 @@ void latchOutputs() {
 void observeOutput(int port, uint8_t out) {
   uint8_t rising = static_cast<uint8_t>(out & ~previousOut[static_cast<std::size_t>(port)]);
   previousOut[static_cast<std::size_t>(port)] = out;
-  if (port == panelPort && (rising & clockBit))
-    shiftRegister = static_cast<uint16_t>(shiftRegister << 1 | ((out & dataBit) ? 1 : 0));
-  if (port == latchPort && (rising & latchBit)) latchOutputs();
+  if (port == config->shiftPort && (rising & config->clockBit))
+    shiftRegister = static_cast<uint16_t>(shiftRegister << 1 | ((out & config->dataBit) ? 1 : 0));
+  if (port == config->latchPort && (rising & config->latchBit)) latchOutputs();
+  if (config->observeExtra) config->observeExtra(port, out);
 }
 
 uint8_t inputLevels(int port, uint8_t out) {
-  if (port == panelPort) {
+  if (port == config->keyReturnPort) {
     bool line = heldColumn ? (latched & heldColumn) != 0 : true;
-    return static_cast<uint8_t>((out & ~keyReturnBit) | (line ? keyReturnBit : 0));
+    out = static_cast<uint8_t>((out & ~config->keyReturnBit) | (line ? config->keyReturnBit : 0));
   }
-  if (port == irPort) return static_cast<uint8_t>((out & ~irBit) | (irLevel ? irBit : 0));
+  if (port == config->irPort)
+    out = static_cast<uint8_t>((out & ~config->irBit) | (irLevel ? config->irBit : 0));
+  if (config->inputExtra) out = config->inputExtra(port, out);
   return out;
 }
 
@@ -154,8 +156,7 @@ bool parseNumber(std::string_view text, int limit, int *value) {
   return error == std::errc{} && end == text.data() + text.size() && *value >= 0 && *value <= limit;
 }
 
-template <std::size_t N>
-bool lookup(const std::pair<std::string_view, int> (&table)[N], std::string_view key, int *value) {
+bool lookup(std::span<const std::pair<std::string_view, int>> table, std::string_view key, int *value) {
   for (const auto &[name, number] : table) {
     if (name == key) {
       *value = number;
@@ -166,9 +167,8 @@ bool lookup(const std::pair<std::string_view, int> (&table)[N], std::string_view
 }
 }
 
-int initDsr9500Board() {
-  for (I2cRegisterDevice *chip : {&qpskDemodulator, &ciController, &rfModulator}) resetChip(*chip);
-  qpskDemodulator.registers[0] = qpskIdentity;
+int initSamsungPanel(const SamsungPanelConfig &panel) {
+  config = &panel;
   previousOut = {};
   shiftRegister = latched = 0;
   digits = {0xff, 0xff, 0xff, 0xff};
@@ -180,6 +180,13 @@ int initDsr9500Board() {
   sti5512Peripherals().setPioInputSource(inputLevels);
   sti5512Peripherals().boardPoller = pollBoard;
   active = true;
+  return 0;
+}
+
+int initDsr9500Board() {
+  for (I2cRegisterDevice *chip : {&qpskDemodulator, &ciController, &rfModulator}) resetI2cDevice(*chip);
+  qpskDemodulator.registers[0] = qpskIdentity;
+  initSamsungPanel(dsr9500Panel);
   setActiveBoard(Board::Dsr9500);
   int result = sti5512Peripherals().attachI2cDevice(tunerBus, &qpskDemodulator);
   if (!result) result = sti5512Peripherals().attachI2cDevice(frontBus, &ciController);
@@ -188,11 +195,11 @@ int initDsr9500Board() {
 }
 
 std::string dsr9500SendIr(std::string_view key) {
-  if (!active) return "remote control needs --board dsr9500";
+  if (!active) return "remote control needs --board dsr9500 or dsr7000";
   int command = 0;
-  if (!lookup(irKeys, key, &command) && !parseNumber(key, 0xff, &command))
+  if (!lookup(config->irKeys, key, &command) && !parseNumber(key, 0xff, &command))
     return "unknown remote key: " + std::string(key);
-  uint32_t frame = necCustomer | static_cast<uint32_t>(command) << 16 | static_cast<uint32_t>(~command & 0xff) << 24;
+  uint32_t frame = config->necCustomer | static_cast<uint32_t>(command) << 16 | static_cast<uint32_t>(~command & 0xff) << 24;
   uint64_t time = std::max(elapsedCpuCycles(), irEdges.empty() ? 0 : irEdges.back().first) + 1000 * cyclesPerMicrosecond;
   auto pulse = [&time](uint64_t mark, uint64_t space) {
     irEdges.emplace_back(time, false);
@@ -207,9 +214,9 @@ std::string dsr9500SendIr(std::string_view key) {
 }
 
 std::string dsr9500PressFrontPanel(std::string_view key) {
-  if (!active) return "front panel needs --board dsr9500";
+  if (!active) return "front panel needs --board dsr9500 or dsr7000";
   int column = 0;
-  if (!lookup(panelKeys, key, &column) && !parseNumber(key, 0xff, &column))
+  if (!lookup(config->panelKeys, key, &column) && !parseNumber(key, 0xff, &column))
     return "unknown front-panel key: " + std::string(key);
   if (column == 0 || (column & (column - 1)))
     return "front-panel key must be one matrix column bit: " + std::string(key);

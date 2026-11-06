@@ -5,6 +5,7 @@
 #include "core/cpu/omr.h"
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
+#include "board/DSR7000.h"
 #include "board/DSR9500.h"
 #include "board/Stb6300.h"
 #include "soc/sti5512/STi5512_Devices.h"
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -244,12 +246,50 @@ static int runFree(uint64_t count) {
   return result ? 1 : 0;
 }
 
+/* --script FILE: each line is `run N` (free-run N instructions, as --run) or a CLI command
+ * (screen FILE, ir KEY, fp KEY, led, dump ...); `#` starts a comment. Stops at the first run
+ * that ends early. */
+static int runScript(const std::string &path, cli::CliEngine &cli) {
+  std::FILE *file = std::fopen(path.c_str(), "r");
+  if (!file) {
+    std::perror("Cannot open script");
+    return 1;
+  }
+  char buffer[512];
+  int status = 0;
+  while (status == 0 && std::fgets(buffer, sizeof(buffer), file)) {
+    std::string line = buffer;
+    if (auto hash = line.find('#'); hash != std::string::npos) line.erase(hash);
+    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
+    std::size_t first = line.find_first_not_of(" \t");
+    if (first == std::string::npos) continue;
+    line.erase(0, first);
+    compat::println("script> {}", line);
+    if (line.starts_with("run ")) {
+      uint64_t count = 0;
+      std::string_view value = std::string_view(line).substr(4);
+      auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), count);
+      if (error != std::errc{} || end != value.data() + value.size() || count == 0) {
+        compat::println(stderr, "Invalid run count: {}", value);
+        status = 2;
+      } else {
+        status = runFree(count);
+      }
+    } else {
+      cli.execute_line(line);
+    }
+  }
+  std::fclose(file);
+  return status;
+}
+
 int main(int argc, char **argv) {
   std::string firmware;
   uint32_t loadAddress = 0;
   bool addressSpecified = false;
   bool batch = false;
   uint64_t runCount = 0;
+  std::string script;
   std::string_view soc = "sti5518";
   uint32_t socRevision = 0;
   bool revisionSpecified = false;
@@ -257,14 +297,15 @@ int main(int argc, char **argv) {
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--no-fast-path]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|dsr7000|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--script FILE] [--no-fast-path]\n"
               "  --soc NAME       Emulated SoC (default: sti5518)\n"
               "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
-              "  --board NAME     Board parts outside the SoC: dsr9500 (STi5512 only), 6300 (STi5518 only)\n"
+              "  --board NAME     Board parts outside the SoC: dsr9500, dsr7000 (STi5512 only), 6300 (STi5518 only)\n"
                       "  --firmware FILE  Load raw firmware at startup\n"
                       "  --address HEX    Load and entry address (0/default: auto-place, START_ADDR entry)\n"
                       "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt\n"
                       "  --run COUNT      Run COUNT instructions without the prompt, then report the speed\n"
+              "  --script FILE    Run FILE: lines `run N` and CLI commands (screen FILE, ir KEY, ...)\n"
                       "  --no-fast-path   Take the full timer/scheduler path for every instruction (reference)",
                       argv[0]);
       return 0;
@@ -280,6 +321,8 @@ int main(int argc, char **argv) {
         compat::println(stderr, "Invalid instruction count: {}", value);
         return 2;
       }
+    } else if (option == "--script" && index + 1 < argc) {
+      script = argv[++index];
     } else if (option == "--soc" && index + 1 < argc) {
       soc = argv[++index];
       if (soc != "sti5518" && soc != "sti5512") {
@@ -288,8 +331,8 @@ int main(int argc, char **argv) {
       }
     } else if (option == "--board" && index + 1 < argc) {
       board = argv[++index];
-      if (board != "dsr9500" && board != "6300") {
-        compat::println(stderr, "Invalid board: {} (expected dsr9500 or 6300)", board);
+      if (board != "dsr9500" && board != "dsr7000" && board != "6300") {
+        compat::println(stderr, "Invalid board: {} (expected dsr9500, dsr7000 or 6300)", board);
         return 2;
       }
     } else if (option == "--soc-revision" && index + 1 < argc) {
@@ -323,6 +366,10 @@ int main(int argc, char **argv) {
     compat::println(stderr, "--board dsr9500 requires --soc sti5512");
     return 2;
   }
+  if (board == "dsr7000" && soc != "sti5512") {
+    compat::println(stderr, "--board dsr7000 requires --soc sti5512");
+    return 2;
+  }
   if (board == "6300" && soc != "sti5518") {
     compat::println(stderr, "--board 6300 requires --soc sti5518");
     return 2;
@@ -331,7 +378,7 @@ int main(int argc, char **argv) {
     compat::println(stderr, "--soc-revision requires --soc sti5512");
     return 2;
   }
-  if ((batch || runCount || addressSpecified) && firmware.empty()) {
+  if ((batch || runCount || addressSpecified || !script.empty()) && firmware.empty()) {
     compat::println(stderr, "--batch, --run and --address require --firmware FILE");
     return 2;
   }
@@ -386,7 +433,7 @@ int main(int argc, char **argv) {
   }
   if (!board.empty()) {
     compat::println("Board: {}", board);
-    if (board == "dsr9500" ? initDsr9500Board() : initStb6300Board()) {
+    if (board == "dsr9500" ? initDsr9500Board() : board == "dsr7000" ? initDsr7000Board() : initStb6300Board()) {
       compat::println(stderr, "Cannot initialize board {}", board);
       return 1;
     }
@@ -403,6 +450,7 @@ int main(int argc, char **argv) {
     compat::println("Read {} bytes from {}", dataLength, firmware);
   }
   if (batch) return runBatch();
+  if (!script.empty()) return runScript(script, cli);
   if (runCount) return runFree(runCount);
 
   compat::println("");

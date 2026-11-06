@@ -47,32 +47,57 @@ int writeRegisterBytes(RegisterBlock &block, uint32_t offset, int width, uint32_
 void VideoInterruptRegisters::reset() {
   osdPointers = {};
   osdLowByte = {};
+  frameSize = 0;
+  frameSizeLowByte = false;
   interrupts = sample = 0;
 }
 
+namespace {
+constexpr uint32_t frameSizeOffset = 0x24; // VID_DFS
+
+uint8_t readSerial(uint16_t value, bool &lowByte) {
+  uint8_t byte = static_cast<uint8_t>(lowByte ? value : value >> 8);
+  lowByte = !lowByte;
+  return byte;
+}
+
+void writeSerial(uint16_t &value, bool &lowByte, uint8_t data) {
+  value = lowByte ? static_cast<uint16_t>((value & 0xff00) | data) : static_cast<uint16_t>((value & 0x00ff) | data << 8);
+  lowByte = !lowByte;
+}
+}
+
 bool VideoInterruptRegisters::read(uint32_t offset, uint8_t *value) {
-  int shift = offset == interruptStatusOffset ? 16 : offset == 0x62 ? 8 : offset == 0x63 ? 0 : -1;
-  if (shift < 0) return false;
-  if (!sampleOnStatusRead) {
-    *value = static_cast<uint8_t>(interrupts >> shift);
-    interrupts &= ~(0xffU << shift);
+  if (offset == osdTopOffset || offset == osdTopOffset + 1) {
+    std::size_t field = offset - osdTopOffset;
+    *value = readSerial(osdPointers[field], osdLowByte[field]);
     return true;
   }
-  if (offset == interruptStatusOffset) {
-    sample = interrupts;
+  if (frameSizeSerial && offset == frameSizeOffset) {
+    *value = readSerial(frameSize, frameSizeLowByte);
+    return true;
+  }
+  int shift = offset == interruptStatusOffset ? 16 : offset == 0x62 ? 8 : offset == 0x63 ? 0 : -1;
+  if (shift < 0) return false;
+  if (sampleOnStatusRead && offset == interruptStatusOffset) {
+    sample |= interrupts;
     interrupts = 0;
   }
-  *value = static_cast<uint8_t>(sample >> shift);
+  uint32_t byteMask = 0xffU << shift;
+  *value = static_cast<uint8_t>((sample | interrupts) >> shift);
+  sample &= ~byteMask;
+  interrupts &= ~byteMask;
   return true;
 }
 
 bool VideoInterruptRegisters::write(uint32_t offset, uint8_t data) {
+  if (frameSizeSerial && offset == frameSizeOffset) {
+    writeSerial(frameSize, frameSizeLowByte, data);
+    return true;
+  }
   if (offset != osdTopOffset && offset != osdTopOffset + 1) return false;
   std::size_t field = offset - osdTopOffset;
-  uint16_t &pointer = osdPointers[field];
-  pointer = osdLowByte[field] ? static_cast<uint16_t>((pointer & 0xff00) | data)
-                              : static_cast<uint16_t>((pointer & 0x00ff) | data << 8);
-  osdLowByte[field] = !osdLowByte[field];
+  writeSerial(osdPointers[field], osdLowByte[field], data);
   return true;
 }
 

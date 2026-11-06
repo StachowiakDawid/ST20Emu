@@ -18,6 +18,8 @@ public:
 
   // main interaction loop function
   CliError prompt_and_execute();
+  // runs one command line as typed at the prompt (an empty line steps one instruction)
+  CliError execute_line(const std::string &line);
 
   // state accessors
   bool is_quit_requested() const {

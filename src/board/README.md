@@ -22,6 +22,45 @@ firmware the main menu appears after about 90 million instructions (`screen menu
 ./builddir-release/st20emu --soc sti5512 --board dsr9500 --firmware firmware/dsr9500mcmain.bin --batch
 ```
 
+## Samsung DSR7000 (`firmware/dump Samsung DSR7000 (v1.14).bin`)
+
+`--board dsr7000` (with `--soc sti5512`) models the Samsung DSR7000 (Polsat, Nagra, OpenTV EN2),
+whose v1.14 flash dump is decompiled byte for byte in `../Decompilation/DSR7000` (the
+`a_<addr>.c` sources named below):
+
+- SDRAM at `0x40000000` (static link `0x40001000`); unwritten bytes read as zero, as the
+  loader reads its warm-restart mailbox at `0x40000000` before anything writes it.
+- the 4 MB flash at `0x7fc00000` as an AMD Am29LV320DT (`0x0001`/`0x22f6`); the loader accepts
+  manufacturer 1, 4, `0xec` or `0xbf` and otherwise prints "No supported flash memory".
+- two bit-banged I2C buses (SDA bit 0, SCL bit 2; no SSC): PIO1 with the 16 KB serial EEPROM
+  (24C128 at `0xa2`, 2-byte offsets; starts erased, not saved) and the RF modulator (`0xca`),
+  PIO3 with the LSI 64724 link IC (`0x1c`) and the HM1221 demodulator (`0xaa`) as register
+  files. Without the EEPROM the control task aborts and nothing is drawn. The tuner chips
+  are not modelled: the firmware reports "Channel Chip not found" and no lock.
+- the front panel: the DSR9500's 16-bit shift register with data on PIO4 bit 0, clock PIO4
+  bit 1, latch PIO3 bit 5 and the key line on PIO3 bit 4 (`a_7fc33088.c`). `fp KEY`: `power`,
+  `chup`, `chdown`, `volup`, `voldown` or a column bit.
+- the IR receiver on PIO3 bit 3 and PWM CaptureIn0, NEC customer code `0x0e86`. `ir KEY`:
+  `0`-`9`, `menu`, `ok`, `exit`, `up`, `down`, `left`, `right`, `chup`, `chdown`, `volup`,
+  `voldown`, `mute`, `power`, `guide`, `guide2`, `info` or a command number. The decoder's
+  timing windows fit a 50 MHz system clock, so the capture counter is clocked at 50 MHz
+  (`PwmDevice::systemClockHz`) while the CPU stays at 60.75 MHz.
+
+The firmware's debug print, `print_at` (`0x7fc18c29`), is patched in the ROM to return at
+once; `ST20_PRINT_HOOK=7fc18c29@c` shows its format strings (`@c`: the format is the third
+argument, after the static link and the level). The receiver comes up on the "no signal"
+message ("PROBLEM Z ODBIOREM SYGNAŁU...") after about 1 billion instructions; `ir menu` then
+opens "Menu Główne":
+
+```bash
+printf 'run 1200000000\nir menu\nrun 300000000\nscreen menu.bmp\n' > menu.txt
+./builddir-release/st20emu --soc sti5512 --board dsr7000 \
+  --firmware "firmware/dump Samsung DSR7000 (v1.14).bin" --script menu.txt
+```
+
+`--script FILE` runs `run N` lines (free runs, as `--run`) and CLI commands (`ir`, `fp`, `led`,
+`screen`, `dump`, ...) in order, without the interactive prompt.
+
 ## 6300 (`firmware/6300.bin`)
 
 `--board 6300` (with the default `--soc sti5518`) models the parts of the receiver whose flash is
@@ -58,4 +97,4 @@ Two environment variables help to follow firmware without sources: `ST20_IOTRACE
 first N accesses to each peripheral register (and flash writes) with the instruction address,
 plus per-address counts at exit; `ST20_PRINT_HOOK=ADDR,...` prints the format string of every
 call to the given firmware printf entry points with the emulated time (for `6300.bin`:
-`ST20_PRINT_HOOK=7fef25d6,7ff00898`).
+`ST20_PRINT_HOOK=7fef25d6,7ff00898`; `ADDR@c` takes the format from the third argument).

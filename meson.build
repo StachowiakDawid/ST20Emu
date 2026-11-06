@@ -40,6 +40,8 @@ core_sources = files(
   'src/soc/sti5518/STi5518_RegisterBlocks.cpp',
   'src/board/Board.cpp',
   'src/board/DSR9500.cpp',
+  'src/board/DSR7000.cpp',
+  'src/board/BitBangI2c.cpp',
   'src/board/Stb6300.cpp',
   'src/board/AmdFlash.cpp',
 )

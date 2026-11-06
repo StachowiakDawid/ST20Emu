@@ -1,5 +1,6 @@
 #include "STi55xx_Pwm.h"
 #include "STi55xx_Asc.h"
+#include "../../core/cpu/omr.h"
 #include "../../core/cpu/st20.h"
 #include "../../core/memory/memory.h"
 
@@ -29,8 +30,10 @@ void advance(PwmDevice &device, uint64_t cycles) {
     pwm[countRegister] = static_cast<uint32_t>(total & 0xffU);
   }
   if (control & captureEnable) {
-    device.capturePhase += cycles;
-    uint64_t divider = ((control >> 4) & 0x1fU) + 1;
+    /* the phase counts system clock periods in units of 1/CPU_CLOCK */
+    uint64_t systemClock = device.systemClockHz ? device.systemClockHz : CPU_CLOCK;
+    uint64_t divider = (((control >> 4) & 0x1fU) + 1) * CPU_CLOCK;
+    device.capturePhase += cycles * systemClock;
     uint64_t ticks = device.capturePhase / divider;
     device.capturePhase %= divider;
     uint32_t start = pwm[captureCountRegister];

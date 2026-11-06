@@ -522,15 +522,28 @@ int bsub_(uint32_t /*unused*/) {
   return 0;
 }
 
-/* ST20_PRINT_HOOK=ADDR[,ADDR...]: firmware debug printf entry points; each call to one of
- * them prints the emulated time and the format string, its second argument (Wptr[2] after the
- * call), on stderr */
-const std::vector<uint32_t> printHooks = [] {
-  std::vector<uint32_t> hooks;
+/* ST20_PRINT_HOOK=ADDR[@c][,ADDR...]: firmware debug printf entry points; each call to one of
+ * them prints the emulated time and the format string, its second argument (Breg at the call,
+ * Wptr[2] after it) or with @c its third (Creg: functions that also take a static link, such as
+ * the DSR7000's print_at(where, fmt, ...)), on stderr; with @r it prints the first three
+ * arguments (Areg, Breg, Creg) of each call instead */
+struct PrintHook {
+  enum class Mode { Breg, Creg, Registers };
+  uint32_t address;
+  Mode mode;
+};
+const std::vector<PrintHook> printHooks = [] {
+  std::vector<PrintHook> hooks;
   const char *value = std::getenv("ST20_PRINT_HOOK");
   for (const char *text = value; text && *text;) {
     char *end = nullptr;
-    hooks.push_back(static_cast<uint32_t>(std::strtoul(text, &end, 16)));
+    PrintHook hook{static_cast<uint32_t>(std::strtoul(text, &end, 16)), PrintHook::Mode::Breg};
+    if (*end == '@') {
+      if (end[1] == 'c') hook.mode = PrintHook::Mode::Creg;
+      if (end[1] == 'r') hook.mode = PrintHook::Mode::Registers;
+      end += end[1] ? 2 : 1;
+    }
+    hooks.push_back(hook);
     text = *end ? end + 1 : end;
   }
   return hooks;
@@ -547,9 +560,17 @@ void printHookString(uint32_t address) {
 
 int call_(uint32_t offset) {
   uint32_t addr = cpuState.iptr;
-  if (!printHooks.empty() &&
-      std::ranges::find(printHooks, cpuState.iptr + offset) != printHooks.end())
-    printHookString(cpuState.breg);
+  if (!printHooks.empty()) {
+    auto hook = std::ranges::find(printHooks, cpuState.iptr + offset, &PrintHook::address);
+    if (hook != printHooks.end()) {
+      if (hook->mode == PrintHook::Mode::Registers)
+        std::fprintf(stderr, "CALL> [%llu ms] %08x(%08x, %08x, %08x)\n",
+                     static_cast<unsigned long long>(elapsedCpuCycles() / (CPU_CLOCK / 1000)), hook->address,
+                     cpuState.areg, cpuState.breg, cpuState.creg);
+      else
+        printHookString(hook->mode == PrintHook::Mode::Creg ? cpuState.creg : cpuState.breg);
+    }
+  }
 
   int result = wptrPushState();
   if (result != 0) {

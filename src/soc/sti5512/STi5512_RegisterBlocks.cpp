@@ -11,7 +11,7 @@
  * Registers are plain storage: writes to read-only registers are ignored, reads return
  * the last written or reset value. Command bits the manual describes as resetting
  * automatically read back as 0, and the audio and DENC soft resets restore their reset
- * values. OSD_TOP and OSD_BOT are serial (high byte, then low byte). VID_ITS latches the
+ * values. OSD_TOP, OSD_BOT and VID_DFS are serial (high byte, then low byte, for reads and writes). VID_ITS latches the
  * interrupt events raised by the display model; reading its most significant byte (0x3d)
  * samples and clears it, and 0x62/0x63 return the sample. The video decoder model supplies
  * VID_VBL, VID_STA, VID_HDF and VID_HDS and sees every video register write. Other side
@@ -77,7 +77,7 @@ std::array<RegisterBlock, 7> blocks{{
 
 enum BlockIndex { videoBlock, audioBlock, subPictureBlock, dencBlock };
 
-VideoInterruptRegisters video{true};
+VideoInterruptRegisters video{.sampleOnStatusRead = true, .frameSizeSerial = true};
 
 /* audio-only reset, except AUD_MUT, AUD_PLY and AUD_SCP */
 void resetAudio(RegisterBlock &block) {

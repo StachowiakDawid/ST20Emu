@@ -39,18 +39,26 @@ int writeRegisterBytes(RegisterBlock &block, uint32_t offset, int width, uint32_
  * raises.
  */
 struct VideoInterruptRegisters {
-  /* reading 0x3d samples and clears every event, 0x62/0x63 return the sample (STi5512);
-   * otherwise each byte clears when read */
+  /* reading 0x3d samples and clears every event, which de-asserts the line (STi5512 Register
+   * Manual); each byte of 0x62/0x63 then returns its sample plus the events raised since and
+   * clears both when read, so a handler that re-reads 0x62 after the first read sees only new
+   * events (the DSR7000 and DSR9500 video handlers loop on that after a sequence end code).
+   * Without the sample, each byte simply clears when read (STi5518). */
   bool sampleOnStatusRead;
   std::array<uint16_t, 2> osdPointers{};
   std::array<bool, 2> osdLowByte{};
+  /* VID_DFS (0x24) is a serial register too (STi5512 Register Manual, 15 bits) */
+  bool frameSizeSerial = false;
+  uint16_t frameSize = 0;
+  bool frameSizeLowByte = false;
   uint32_t interrupts = 0;
   uint32_t sample = 0;
 
   void reset();
-  /* a VID_ITS byte; false for other registers */
+  /* a VID_ITS byte or the next byte of a serial register; false for other registers */
   bool read(uint32_t offset, uint8_t *value);
-  /* consumes an OSD pointer byte; false for other registers */
+  /* consumes a serial register byte (OSD pointers, VID_DFS); false for other registers.
+   * Reads and writes of a serial register share its byte toggle: high byte first, then low */
   bool write(uint32_t offset, uint8_t data);
   /* first OSD block of the top (0) or bottom (1) field, in units of 256 bytes of SDRAM */
   uint32_t osdPointer(int field) const;

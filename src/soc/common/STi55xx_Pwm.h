@@ -16,6 +16,10 @@ struct PwmDevice {
   uint64_t lastCycle = 0;
   uint64_t pwmPhase = 0;
   uint64_t capturePhase = 0;
+  /* the board's system clock, which drives the capture/compare counter (STi5512 datasheet
+   * 7145560 B, 29.5); 0 = the emulated CPU clock. A board whose firmware was built for
+   * another system clock than CPU_CLOCK sets it, so that capture times come out right. */
+  uint64_t systemClockHz = 0;
 };
 
 inline constexpr uint32_t pwmRegisterEnd = 0x67;

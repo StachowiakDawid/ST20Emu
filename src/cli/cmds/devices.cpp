@@ -18,9 +18,10 @@ CliError cmd_ir(CliEngine & /*engine*/, std::span<const std::string_view> args) 
   for (std::string_view key : args) {
     std::string error;
     switch (activeBoard()) {
-      case Board::Dsr9500: error = dsr9500SendIr(key); break;
+      case Board::Dsr9500:
+      case Board::Dsr7000: error = dsr9500SendIr(key); break;
       case Board::Stb6300: error = stb6300SendIr(key); break;
-      case Board::None: error = "remote control needs --board dsr9500 or 6300"; break;
+      case Board::None: error = "remote control needs --board dsr9500, dsr7000 or 6300"; break;
     }
     if (!error.empty()) {
       compat::println("{}", error);
@@ -34,9 +35,10 @@ CliError cmd_front_panel(CliEngine & /*engine*/, std::span<const std::string_vie
   if (args.size() != 1) return CliError::BadParameter;
   std::string error;
   switch (activeBoard()) {
-    case Board::Dsr9500: error = dsr9500PressFrontPanel(args[0]); break;
+    case Board::Dsr9500:
+    case Board::Dsr7000: error = dsr9500PressFrontPanel(args[0]); break;
     case Board::Stb6300: error = stb6300SendKey(args[0]); break;
-    case Board::None: error = "front panel needs --board dsr9500 or 6300"; break;
+    case Board::None: error = "front panel needs --board dsr9500, dsr7000 or 6300"; break;
   }
   if (!error.empty()) {
     compat::println("{}", error);

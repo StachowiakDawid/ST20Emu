@@ -13,6 +13,12 @@ struct I2cRegisterDevice {
   std::array<uint8_t, 256> registers{};
   uint8_t pointer = 0;
   bool pointerWritten = false;
+  /* serial EEPROM mode (24Cxx): when `memory` is not empty, the first two bytes written after
+   * the address are a big-endian offset into it (wrapping at its size) and `registers` and
+   * `pointer` are unused */
+  std::vector<uint8_t> memory{};
+  uint32_t offset = 0;
+  int offsetBytesSeen = 0;
 };
 
 /* SSC (synchronous serial controller) in I2C master mode. Registers are 16 bits wide at
@@ -32,6 +38,15 @@ struct SscDevice {
 };
 
 inline constexpr uint32_t sscRegisterEnd = 0x1f;
+
+/* register file, pointer and EEPROM offset back to power-up (the EEPROM contents stay) */
+void resetI2cDevice(I2cRegisterDevice &slave);
+/* byte-level slave access, also used for buses other than the SSC (bit-banged I2C on PIO pins):
+ * i2cSlaveBeginWrite after an address frame with the R/W bit clear, then i2cSlaveWrite for
+ * each byte written and i2cSlaveRead for each byte read */
+void i2cSlaveBeginWrite(I2cRegisterDevice &slave);
+void i2cSlaveWrite(I2cRegisterDevice &slave, uint8_t byte);
+uint8_t i2cSlaveRead(I2cRegisterDevice &slave);
 
 int readSsc(void *context, uint32_t address, int width, uint32_t *value);
 int writeSsc(void *context, uint32_t address, int width, uint32_t value);

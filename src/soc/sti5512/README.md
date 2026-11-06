@@ -34,12 +34,20 @@ Further STi5512 devices:
   wrapping from top to base; the decoders are not modelled, so the data is discarded.
 - PWM and capture/compare counters (`0x2000b000`, interrupt 11), clocked from the CPU cycle
   count through their prescalers: PWM overflow, compare and capture interrupts. Capture edges
-  come from the board (the DSR9500 IR receiver).
+  come from the board (the DSR9500 and DSR7000 IR receivers). A board can set the system
+  clock that drives the capture counter (`PwmDevice::systemClockHz`, the DSR7000's 50 MHz).
+- Serial video registers OSD_TOP, OSD_BOT (`0x2a`, `0x2b`) and VID_DFS (`0x24`): reads and
+  writes share one byte toggle, high byte first (Register Manual: "Ser. R/W"). The DSR7000
+  firmware writes and reads them back in a self-test; a mismatch there leaves the OSD
+  pointers misaligned.
 - PIO ports 0-4 (`0x2000c000`-`0x20010000`): output, set/clear aliases and configuration
   registers; input pins read back their output unless the board drives them. Compare
   interrupts are not modelled.
 - Display timing: 50 Hz PAL fields raise VSYNC top/bottom in `VID_ITS` (interrupt 21). Reading
-  `VID_ITS` at `0x3d` samples and clears it.
+  `VID_ITS` at `0x3d` samples and clears it (de-asserting the interrupt); each of `0x62`/`0x63`
+  then returns its sampled byte plus any event raised since and clears when read, so the
+  video handlers' re-read of `0x62` after a sequence end code sees only new events instead of
+  the stale start code hit (which left the DSR7000 handler looping on an empty header FIFO).
 - OSD output: the `screen FILE` command renders the OSD block lists (`OSD_TOP`/`OSD_BOT`,
   2/4/8 bpp, 14/24-bit palettes, mix weights) over the background colour as a 720x576 BMP.
 - MPEG video decoder control: bit buffer (fed by PTI DMA channel 1 or `CFG_CDR`, level in
