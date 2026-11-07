@@ -53,9 +53,17 @@
  * Remote control: the IR receiver feeds the IR blaster's RC receiver; the application decodes
  * NEC frames from the symbol periods (interrupt handler 0x7fe7abec) with customer code 0xfd01
  * (a second decoder, for PWM captures at 0x7fe7a7a6, expects 0xf708). The key task (0x7fe79e2d)
- * maps the commands to the application's key codes: 0xdc menu (0xd5); digits 0-9 are 0x86, 0x91,
- * 0x92, 0xcc, 0x8d, 0x8e, 0xc8, 0x89, 0x8a, 0xc4 (0x30-0x39); 0xc1, 0x99, 0xca, 0xd2 give
- * 0x9a-0x9d, the codes of the front-panel arrows; 0x94 gives 0xf7 and 0xc5 0xf9.
+ * maps the commands to the application's key codes (verified one command per run, at the key
+ * dispatcher 0x7fe31c78, and by the screen each one opens):
+ *   0xdc power (0xd5, standby toggle)   0x95 menu (0xf7, Main Page)   0xc5 exit (0xf9)
+ *   0xce ok (0xc3, channel list)        0xca up (0x9c)    0xd2 down (0x9d)
+ *   0x99 left (0x9b)                    0xc1 right (0x9a) 0xd6 epg (0xf2)
+ *   0x88 fav (0x9e)    0x03 sat (0x9f)  0xc3 text (0x1b)  0xd9 audio (0x83)
+ *   0x9d sleep (0x97)  0xda tv/radio (0x51)               0xc0 video output (0x8c)
+ *   digits 0-9: 0x87, 0x92, 0x93, 0xcc, 0x8e, 0x8f, 0xc8, 0x8a, 0x8b, 0xc4 (0x30-0x39).
+ * Front-panel key packets give the same codes: 0xbf power, 0xfd menu, 0xfe exit, 0x7f ok,
+ * 0xf7 up, 0xef down, 0xfb left, 0xdf right. In standby the dispatcher drops every key but
+ * power and the front panel shows a clock.
  */
 namespace {
 constexpr int frontPort = 1;
@@ -68,6 +76,14 @@ uint32_t firstModulus = 1;
 uint32_t secondModulus = 1;
 uint16_t exchanges = 0;
 constexpr uint8_t powerKey = 0xef;
+constexpr std::array<std::pair<std::string_view, uint8_t>, 26> irKeys{{
+  {"power", 0xdc}, {"menu", 0x95},  {"exit", 0xc5},   {"ok", 0xce},     {"up", 0xca},
+  {"down", 0xd2},  {"left", 0x99},  {"right", 0xc1},  {"epg", 0xd6},    {"fav", 0x88},
+  {"sat", 0x03},   {"text", 0xc3},  {"audio", 0xd9},  {"sleep", 0x9d},  {"tvradio", 0xda},
+  {"av", 0xc0},    {"0", 0x87},     {"1", 0x92},      {"2", 0x93},      {"3", 0xcc},
+  {"4", 0x8e},     {"5", 0x8f},     {"6", 0xc8},      {"7", 0x8a},      {"8", 0x8b},
+  {"9", 0xc4},
+}};
 bool powerPending = false;
 constexpr uint32_t necCustomer = 0xfd01;
 constexpr uint64_t cyclesPerMicrosecond = CPU_CLOCK / 1000000;
@@ -76,6 +92,32 @@ constexpr uint8_t sdaBit = 0x01;
 constexpr uint8_t sclBit = 0x02;
 I2cRegisterDevice demodulator{0xd0};
 uint8_t i2cLines = sdaBit | sclBit;
+
+/* PIO4 bit 5 is the input polled at 0x7fe24570 (application context + 0xa6c holds the PIO4
+ * base): while it reads low the application treats the TV as switched to another source and
+ * its key dispatcher (0x7fe31c78) passes on only power, AV, TV/radio and 0x53, so the remote
+ * cannot reach any menu. The receiver drives its own picture, so the pin reads high. */
+constexpr int sourcePioPort = 4;
+constexpr uint8_t sourceBit = 0x20;
+
+uint8_t inputLevels(int port, uint8_t out) {
+  if (port == sourcePioPort) out |= sourceBit;
+  return out;
+}
+
+/* The 8 MB SDRAM decodes 23 address bits, so 0xc0800000-0xc0ffffff repeats it; the OSD blitter
+ * (0x7fea945e) reads there when the channel list's favourite or satellite view is drawn. */
+constexpr uint32_t sdramMirrorStart = 0xc0800000U;
+constexpr uint32_t sdramMirrorEnd = 0xc0ffffffU;
+constexpr uint32_t sdramSize = 0x800000U;
+
+int readSdramMirror(void *, uint32_t address, int width, uint32_t *value) {
+  return readBytes(address - sdramSize, width, value);
+}
+
+int writeSdramMirror(void *, uint32_t address, int width, uint32_t value) {
+  return storeBytes(address - sdramSize, width, value);
+}
 
 void observePio(int port, uint8_t out) {
   if (port != i2cPioPort) return;
@@ -178,8 +220,12 @@ int initStb6300Board() {
   demodulator.pointerWritten = false;
   i2cLines = sdaBit | sclBit;
   sti5518Peripherals().setPioObserver(observePio);
+  sti5518Peripherals().setPioInputSource(inputLevels);
   sti5518Peripherals().boardPoller = pollBoard;
   result = sti5518Peripherals().attachI2cDevice(0, &demodulator);
+  if (result) return result;
+  unregisterMemoryDevice(sdramMirrorStart);
+  result = registerMemoryDevice({sdramMirrorStart, sdramMirrorEnd, nullptr, readSdramMirror, writeSdramMirror});
   if (result) return result;
   active = true;
   setActiveBoard(Board::Stb6300);
@@ -206,11 +252,19 @@ std::string stb6300SendKey(std::string_view key) {
 
 std::string stb6300SendIr(std::string_view key) {
   unsigned command = 0;
-  if (key == "menu") command = 0xdc;
-  else {
+  bool namedKey = false;
+  for (auto [name, code] : irKeys) {
+    if (key == name) {
+      command = code;
+      namedKey = true;
+      break;
+    }
+  }
+  if (!namedKey) {
+    if (key.starts_with("0x") || key.starts_with("0X")) key.remove_prefix(2);
     auto [end, error] = std::from_chars(key.data(), key.data() + key.size(), command, 16);
     if (error != std::errc{} || end != key.data() + key.size() || command > 0xff)
-      return std::format("Invalid remote command: {} (expected menu or a hex byte)", key);
+      return std::format("Invalid remote command: {} (expected a key name or a hex byte)", key);
   }
   uint32_t frame = necCustomer | command << 16 | (~command & 0xffU) << 24;
   uint64_t time = std::max(elapsedCpuCycles(), irSymbols.empty() ? 0 : irSymbols.back().time) + 1000 * cyclesPerMicrosecond;

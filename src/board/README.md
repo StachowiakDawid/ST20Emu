@@ -74,7 +74,10 @@ printf 'run 1200000000\nir menu\nrun 300000000\nscreen menu.bmp\n' > menu.txt
   the right `0x36` answer the application reboots through the watchdog), shows the display
   packets (`led`: active-low 7-segment digits) and sends key packets: `fp power` or `fp HEX`.
 - the IR receiver on the IR blaster's RC input: `ir KEY` sends a NEC frame with the customer
-  code `0xfd01` and command `KEY`, `menu` (`0xdc`) or a hex byte.
+  code `0xfd01` and command `KEY`: a key name (`menu`, `ok`, `exit`, arrows, digits, ...) or a
+  hex byte.
+- PIO4 bit 5 (TV source input) reads high; low makes the application ignore most keys.
+- the 8 MB SDRAM mirrored at `0xc0800000`.
 
 Standby is a watchdog reboot; the application only stays on when the controller reports the
 power key right after the handshake. `fp power` does that at the next boot, and

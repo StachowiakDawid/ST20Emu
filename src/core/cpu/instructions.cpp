@@ -526,7 +526,7 @@ int bsub_(uint32_t /*unused*/) {
  * them prints the emulated time and the format string, its second argument (Breg at the call,
  * Wptr[2] after it) or with @c its third (Creg: functions that also take a static link, such as
  * the DSR7000's print_at(where, fmt, ...)), on stderr; with @r it prints the first three
- * arguments (Areg, Breg, Creg) of each call instead */
+ * arguments (Areg, Breg, Creg) and the return address of each call instead */
 struct PrintHook {
   enum class Mode { Breg, Creg, Registers };
   uint32_t address;
@@ -564,9 +564,9 @@ int call_(uint32_t offset) {
     auto hook = std::ranges::find(printHooks, cpuState.iptr + offset, &PrintHook::address);
     if (hook != printHooks.end()) {
       if (hook->mode == PrintHook::Mode::Registers)
-        std::fprintf(stderr, "CALL> [%llu ms] %08x(%08x, %08x, %08x)\n",
+        std::fprintf(stderr, "CALL> [%llu ms] %08x(%08x, %08x, %08x) from %08x\n",
                      static_cast<unsigned long long>(elapsedCpuCycles() / (CPU_CLOCK / 1000)), hook->address,
-                     cpuState.areg, cpuState.breg, cpuState.creg);
+                     cpuState.areg, cpuState.breg, cpuState.creg, cpuState.iptr);
       else
         printHookString(hook->mode == PrintHook::Mode::Creg ? cpuState.creg : cpuState.breg);
     }
