@@ -10,6 +10,6 @@ const std::unordered_map<std::string_view, CmdFunc> cmd_dictionary = {
     {"v", cmds::cmd_view},        {"va", cmds::cmd_view_a},   {"vaa", cmds::cmd_view_aa},
     {"ver", cmds::cmd_show_enbreg}, {"vw", cmds::cmd_view_w}, {"w", cmds::cmd_store_wptr},
     {"ir", cmds::cmd_ir},         {"fp", cmds::cmd_front_panel}, {"led", cmds::cmd_led}, {"asc", cmds::cmd_asc},
-    {"screen", cmds::cmd_screen}};
+    {"screen", cmds::cmd_screen}, {"audio", cmds::cmd_audio}, {"tuner", cmds::cmd_tuner}, {"video", cmds::cmd_video}};
 
 } // namespace cli

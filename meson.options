@@ -1,0 +1,2 @@
+option('libav', type: 'feature', value: 'auto',
+       description: 'Decode MPEG video and audio with FFmpeg libavcodec (picture and sound output)')

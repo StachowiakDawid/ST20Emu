@@ -1831,7 +1831,7 @@ Error signals: none
 */
 
 int ldtimer_(uint32_t /*unused*/) {
-  if (cpuState.priority == HIGH_PRIORITY) {
+  if (cpuState.priority == HIGH_PRIORITY && !lowPriorityInterruptHandlerRunning()) {
     push(omrState.ClockRegHP);
     compat::note("Read of HIGH_PRIORITY timer. Value is 0x{:08x}", omrState.ClockRegHP);
   } else {

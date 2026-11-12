@@ -17,6 +17,8 @@ K=src/uclinux-dist/linux-2.4.x
 mkdir -p build
 # --- kernel modules (after every kernel build: a module is refused by any other kernel)
 mods=()
+mkdir -p build/mod
+python3 tools/mkptitc.py build/mod/pti_tc.h
 names=$(cd modules && ls *.c | sed 's/\.c$//')
 ./dbuild.sh /work/modules/build.sh $names >/dev/null
 for m in $names; do
@@ -41,6 +43,9 @@ python3 ../2.0/tools/mkromfs.py build/romfs.img dir:/dev dir:/dev/input dir:/pro
   blk:/dev/mtdblock0:31:0 blk:/dev/mtdblock1:31:1 blk:/dev/mtdblock2:31:2 \
   blk:/dev/mtdblock3:31:3 \
   chr:/dev/hello:61:0 \
+  dir:/dev/dvb dir:/dev/dvb/adapter0 chr:/dev/dvb/adapter0/video0:212:0 \
+  chr:/dev/dvb/adapter0/audio0:212:1 chr:/dev/dvb/adapter0/frontend0:212:3 \
+  chr:/dev/dvb/adapter0/demux0:212:4 chr:/dev/dvb/adapter0/dvr0:212:5 \
   chr:/dev/ptyp0:2:0 chr:/dev/ptyp1:2:1 chr:/dev/ptyp2:2:2 chr:/dev/ptyp3:2:3 \
   chr:/dev/ttyp0:3:0 chr:/dev/ttyp1:3:1 chr:/dev/ttyp2:3:2 chr:/dev/ttyp3:3:3 \
   file:/bin/busybox:$B/busybox.bflt:x "${links[@]}" \
@@ -49,6 +54,8 @@ python3 ../2.0/tools/mkromfs.py build/romfs.img dir:/dev dir:/dev/input dir:/pro
   file:/bin/fbtest:$B/fbtest.bflt:x file:/bin/evtest:$B/evtest.bflt:x \
   file:/bin/nettest:$B/nettest.bflt:x file:/bin/modtool:$B/modtool.bflt:x \
   link:/sbin/insmod:/bin/modtool link:/sbin/rmmod:/bin/modtool link:/sbin/lsmod:/bin/modtool \
+  file:/bin/dvbtool:$B/dvbtool.bflt:x link:/bin/scan:/bin/dvbtool link:/bin/zap:/bin/dvbtool \
+  link:/bin/tv:/bin/dvbtool link:/bin/femon:/bin/dvbtool \
   "${mods[@]}" \
   file:/etc/inittab:rootfs/etc/inittab file:/etc/rc:rootfs/etc/rc:x \
   file:/etc/profile:rootfs/etc/profile \

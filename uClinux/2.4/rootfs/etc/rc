@@ -13,6 +13,8 @@ mount -t jffs2 /dev/mtdblock2 /etc/config || echo "rc: no JFFS2 on /etc/config"
 # networking: loopback (SLIP: nettest slip, README.md "Networking")
 ifconfig lo 127.0.0.1 up
 hostname dsr9500
+# DVB-S receiver (modules/dvb.c): /dev/dvb/adapter0/{frontend0,demux0,dvr0,video0,audio0}
+[ -f /lib/modules/dvb.mod ] && insmod /lib/modules/dvb.mod
 echo "L2.4" >/dev/panel
 echo
 echo "Welcome to uClinux 2.4 on the ST20 (Samsung DSR9500, STi5512)"

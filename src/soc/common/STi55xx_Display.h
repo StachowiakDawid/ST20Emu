@@ -2,14 +2,26 @@
 #define STI55XX_DISPLAY_H
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
 
 /*
  * Display timing and OSD output shared by the STi5512 and STi5518, whose OSD block headers,
  * palettes and OSD_CFG/background registers match (STi5512 datasheet 7145560 B section 21.5,
- * STi5518 datasheet 7170179 D section 18.4). Fields are 50 Hz PAL (720x576). The MPEG video
- * and still-picture planes are not decoded, so the OSD is mixed over the background colour.
+ * STi5518 datasheet 7170179 D section 18.4). Fields are 50 Hz PAL (720x576). The OSD is mixed
+ * over the video plane, which is the background colour mixed with the decoded picture (when the
+ * SoC model supplies one) by VID_MWV; still-picture planes are not drawn.
  */
+
+/* a decoded picture in planar YCbCr (4:2:0, 4:2:2 or 4:4:4 by the chroma plane size) */
+struct VideoPicture {
+  int width = 0;
+  int height = 0;
+  int chromaWidth = 0;
+  int chromaHeight = 0;
+  std::vector<uint8_t> y, u, v;
+};
 
 /* the SoC's video registers (VideoBaseAddress 0) and its differences between the chips */
 struct DisplayConfig {
@@ -21,6 +33,8 @@ struct DisplayConfig {
   bool linkedListGranularity;
   /* the background V component is at 0x99 and U at 0x9a (STi5518) instead of U then V */
   bool backgroundVFirst;
+  /* the picture on the video plane (scaled to 720x576), or null for black (Y=16) */
+  std::shared_ptr<const VideoPicture> (*videoPicture)() = nullptr;
 };
 
 enum class Vsync { None, Top, Bottom };

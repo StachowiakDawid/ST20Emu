@@ -175,12 +175,29 @@ Vsync tickDisplayTiming(DisplayTiming &timing) {
 std::string writeOsdScreen(const DisplayConfig &config, const std::string &path, int *regions) {
   uint8_t u = config.videoRegister(config.backgroundVFirst ? 0x9a : 0x99);
   uint8_t v = config.videoRegister(config.backgroundVFirst ? 0x99 : 0x9a);
-  /* VID_MWV (0x9b) mixes the background colour with the video plane, which is black here as
-   * nothing is decoded: 0xff shows the background, 0 the video */
+  /* VID_MWV (0x9b) mixes the background colour with the video plane: 0xff shows the
+   * background, 0 the video (black, Y=16, when nothing is decoded or VID_DCF.EVD is clear) */
   Rgb colour = toRgb(config.videoRegister(0x98), u, v);
   double weight = config.videoRegister(0x9b) / 255.0;
-  Rgb background{colour.r * weight, colour.g * weight, colour.b * weight};
-  std::vector<Rgb> frame(static_cast<std::size_t>(screenWidth * screenHeight), background);
+  std::shared_ptr<const VideoPicture> picture = config.videoPicture ? config.videoPicture() : nullptr;
+  std::vector<Rgb> frame(static_cast<std::size_t>(screenWidth * screenHeight));
+  for (int row = 0; row < screenHeight; ++row) {
+    for (int x = 0; x < screenWidth; ++x) {
+      Rgb video = toRgb(16, 128, 128);
+      if (picture && picture->width > 0 && picture->height > 0) {
+        int sx = x * picture->width / screenWidth;
+        int sy = row * picture->height / screenHeight;
+        int cx = sx * picture->chromaWidth / picture->width;
+        int cy = sy * picture->chromaHeight / picture->height;
+        video = toRgb(picture->y[static_cast<std::size_t>(sy * picture->width + sx)],
+                      picture->u[static_cast<std::size_t>(cy * picture->chromaWidth + cx)],
+                      picture->v[static_cast<std::size_t>(cy * picture->chromaWidth + cx)]);
+      }
+      frame[static_cast<std::size_t>(row * screenWidth + x)] = {
+          colour.r * weight + video.r * (1 - weight), colour.g * weight + video.g * (1 - weight),
+          colour.b * weight + video.b * (1 - weight)};
+    }
+  }
   uint8_t osdConfig = config.videoRegister(0x91);
   int drawn = 0;
   if (osdConfig & 0x04) { // OSD_CFG.ENA

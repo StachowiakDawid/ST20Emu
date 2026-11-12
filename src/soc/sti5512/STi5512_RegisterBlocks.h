@@ -12,6 +12,8 @@ std::vector<MemoryDevice> sti5512RegisterBlockDevices();
 void resetSti5512RegisterBlocks(uint8_t videoRevision);
 /* stored value of a video/configuration register (VideoBaseAddress 0) */
 uint8_t sti5512VideoRegister(uint32_t offset);
+/* stored value of an audio register (offset from AudioBaseAddress 0x800) */
+uint8_t sti5512AudioRegister(uint32_t offset);
 /* OSD_TOP (field 0) or OSD_BOT (field 1), in units of 256 bytes of SDRAM */
 uint32_t sti5512OsdPointer(int field);
 /* sets VID_ITS events: bits 23:16 = 0x3d, 15:8 = 0x62, 7:0 = 0x63 */

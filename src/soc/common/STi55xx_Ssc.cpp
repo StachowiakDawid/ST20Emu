@@ -195,12 +195,17 @@ void i2cSlaveWrite(I2cRegisterDevice &slave, uint8_t byte) {
     slave.pointer = byte;
     slave.pointerWritten = true;
   } else {
-    slave.registers[slave.pointer++] = byte;
+    uint8_t reg = slave.pointer++;
+    slave.registers[reg] = byte;
+    if (slave.writeHook) slave.writeHook(slave.context, reg, byte);
   }
 }
 
 uint8_t i2cSlaveRead(I2cRegisterDevice &slave) {
-  if (slave.memory.empty()) return slave.registers[slave.pointer++];
+  if (slave.memory.empty()) {
+    uint8_t reg = slave.pointer++;
+    return slave.readHook ? slave.readHook(slave.context, reg, slave.registers[reg]) : slave.registers[reg];
+  }
   uint8_t data = slave.memory[slave.offset];
   slave.offset = (slave.offset + 1) % static_cast<uint32_t>(slave.memory.size());
   return data;

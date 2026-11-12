@@ -100,6 +100,10 @@ struct ExternalInterruptFrame {
   uint32_t trapDepth;
   CPUSTATE caller;
   CPUSTATE previousShadow;
+  /* bit 0 of the handler's workspace descriptor: a low-priority handler (OS20's
+   * interrupt_flags_low_priority); it runs here at high priority, but reads the low-priority
+   * clock with ldtimer as it would on the chip */
+  bool lowPriority = false;
 };
 std::vector<ExternalInterruptFrame> externalInterruptFrames;
 bool executingInstruction = false;
@@ -256,7 +260,7 @@ RuntimeSnapshot captureRuntime() {
   for (std::size_t index = 0; index < externalInterruptFrames.size(); ++index) {
     const auto &frame = externalInterruptFrames[index];
     std::size_t offset = RuntimeExternalInterruptData + 1 + index * 32;
-    snapshot[offset] = frame.level;
+    snapshot[offset] = frame.level | (frame.lowPriority ? 0x80000000U : 0U);
     snapshot[offset + 1] = frame.replacedShadow;
     snapshot[offset + 2] = frame.previousShadowValid;
     snapshot[offset + 3] = frame.trapDepth;
@@ -346,10 +350,11 @@ bool validRuntime(const RuntimeSnapshot &snapshot) {
   uint32_t lastLevel = 0;
   for (std::size_t index = 0; index < depth; ++index) {
     std::size_t offset = RuntimeExternalInterruptData + 1 + index * 32;
-    if (snapshot[offset] >= 8 || (index != 0 && snapshot[offset] <= lastLevel) ||
+    uint32_t level = snapshot[offset] & 0x7fffffffU;
+    if (level >= 8 || (index != 0 && level <= lastLevel) ||
         snapshot[offset + 1] > 1 || snapshot[offset + 2] > 1 || snapshot[offset + 3] > snapshot[RuntimeTrapDepth] ||
         !validCpuWords(snapshot.data() + offset + 4) || !validCpuWords(snapshot.data() + offset + 18)) return false;
-    lastLevel = snapshot[offset];
+    lastLevel = level;
   }
   return true;
 }
@@ -385,8 +390,9 @@ void restoreRuntime(const RuntimeSnapshot &snapshot) {
   externalInterruptFrames.clear();
   for (std::size_t index = 0; index < snapshot[RuntimeExternalInterruptData]; ++index) {
     std::size_t offset = RuntimeExternalInterruptData + 1 + index * 32;
-    externalInterruptFrames.push_back({snapshot[offset], snapshot[offset + 1] != 0, snapshot[offset + 2] != 0,
-        snapshot[offset + 3], decodeCpu(snapshot.data() + offset + 4), decodeCpu(snapshot.data() + offset + 18)});
+    externalInterruptFrames.push_back({snapshot[offset] & 0x7fffffffU, snapshot[offset + 1] != 0, snapshot[offset + 2] != 0,
+        snapshot[offset + 3], decodeCpu(snapshot.data() + offset + 4), decodeCpu(snapshot.data() + offset + 18),
+        (snapshot[offset] & 0x80000000U) != 0});
   }
   queueEmptyReported[0] = (snapshot[RuntimeQueueEmptyReported] & 1U) != 0;
   queueEmptyReported[1] = (snapshot[RuntimeQueueEmptyReported] & 2U) != 0;
@@ -884,7 +890,13 @@ int activeExternalInterruptLevel() {
   return externalInterruptFrames.empty() ? -1 : static_cast<int>(externalInterruptFrames.back().level);
 }
 
-static int enterExternalInterrupt(uint32_t level, uint32_t workspace, uint32_t iptr, uint32_t status) {
+bool lowPriorityInterruptHandlerRunning() {
+  return !externalInterruptFrames.empty() && externalInterruptFrames.back().lowPriority &&
+         cpuState.priority == HIGH_PRIORITY && trapFrames.size() <= externalInterruptFrames.back().trapDepth;
+}
+
+static int enterExternalInterrupt(uint32_t level, uint32_t workspace, uint32_t iptr, uint32_t status,
+                                  bool lowPriority) {
   CPUSTATE caller = cpuState;
   bool valid = caller.running && caller.priority == HIGH_PRIORITY;
   std::array<uint32_t, 6> words{valid ? caller.status | STATUS_VALID : 0U, caller.wptr,
@@ -895,7 +907,7 @@ static int enterExternalInterrupt(uint32_t level, uint32_t workspace, uint32_t i
   }
   bool replace = caller.running && caller.priority == LOW_PRIORITY;
   externalInterruptFrames.push_back({level, replace, lowPriorityShadowValid,
-      static_cast<uint32_t>(trapFrames.size()), caller, lowPriorityShadow});
+      static_cast<uint32_t>(trapFrames.size()), caller, lowPriorityShadow, lowPriority});
   if (replace) {
     lowPriorityShadow = caller;
     lowPriorityShadowValid = true;
@@ -931,7 +943,7 @@ int serviceNativeInterrupt(uint32_t level, uint32_t handlerDescriptor, bool *acc
   if (result) return result;
   if (status & STATUS_INTERRUPTED_OPERATION_MASK) return INTERRUPTED_OPERATION_UNSUPPORTED;
   uint32_t workspace = top - 32U;
-  result = enterExternalInterrupt(level, workspace, iptr, status);
+  result = enterExternalInterrupt(level, workspace, iptr, status, (handlerDescriptor & 1U) != 0);
   if (!result) *accepted = true;
   return result;
 }

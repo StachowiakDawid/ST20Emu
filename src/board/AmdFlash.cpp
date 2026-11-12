@@ -5,9 +5,13 @@
 /*
  * Command set of the Am29LV160D data sheet in word (x16) mode: unlock cycles 0xaa at word
  * 0x555 and 0x55 at word 0x2aa, then 0x90 autoselect, 0xa0 program one word, 0x80 erase
- * (two more unlock cycles, then 0x30 at a sector or 0x10 at 0x555 for the whole chip); 0xf0
- * anywhere returns to reading the array. Programming and erasing complete at once, so the
- * DQ7/DQ6 status polls see the final data. Only 11 address bits are decoded for unlock
+ * (two more unlock cycles, then 0x30 at a sector or 0x10 at 0x555 for the whole chip), 0x20
+ * unlock bypass (then 0xa0 + data programs a word without unlock cycles, 0x90 0x00 leaves it);
+ * 0xf0 anywhere returns to reading the array. Programming completes at once, so DQ7/DQ6 polls
+ * see the final data; erasing does too unless the chip sets eraseStatusReads, in which case
+ * that many reads return erase status first (the DSR9500's erase routine wants DQ7 = 0 right
+ * after the command and DQ3 = 1 before it waits for DQ7); meanwhile 0x30 written to another
+ * sector adds it to the erase, as in the chip's sector erase time-out. Only 11 address bits are decoded for unlock
  * cycles, so 0x5555/0x2aaa (8-bit-style software) also match. Other writes are ignored, as
  * on the chip, and never change the array. Autoselect reads return the manufacturer code at
  * word 0, the device code at word 1 and 0 (unprotected) at word 2 of each sector.
@@ -19,6 +23,10 @@ bool autoselect = false;
 int cycle = 0;       // unlock cycles seen
 bool erasePrefix = false;
 bool programNext = false;
+bool bypass = false;
+bool bypassExit = false;
+int statusReads = 0; // erase status reads left
+int statusCount = 0;
 
 bool unlockAddress(uint32_t offset, uint32_t word) {
   return ((offset >> 1) & 0x7ffU) == (word & 0x7ffU);
@@ -59,6 +67,29 @@ int readAutoselect(void *, uint32_t address, int width, uint32_t *value) {
   return 0;
 }
 
+int readEraseStatus(void *, uint32_t, int width, uint32_t *value);
+
+void setStatusDevice(bool enable) {
+  if (enable) registerMemoryDevice({flash.base, flash.base + flash.size - 1U, nullptr, readEraseStatus, nullptr});
+  else unregisterMemoryDevice(flash.base);
+}
+
+int readEraseStatus(void *, uint32_t, int width, uint32_t *value) {
+  ++statusCount;
+  uint32_t status = (statusCount & 1 ? 0x40U : 0) | (statusCount > 2 ? 0x08U : 0);
+  *value = status;
+  if (width > 2) *value |= status << 16;
+  if (--statusReads <= 0) setStatusDevice(false);
+  return 0;
+}
+
+void startEraseStatus() {
+  if (flash.eraseStatusReads <= 0 || statusReads > 0 || autoselect) return;
+  statusReads = flash.eraseStatusReads;
+  statusCount = 0;
+  setStatusDevice(true);
+}
+
 void setAutoselect(bool enable) {
   if (enable == autoselect) return;
   autoselect = enable;
@@ -76,10 +107,32 @@ bool flashWrite(uint32_t address, int width, uint32_t value) {
     storeBytes(address, width, old & value);
     return true;
   }
-  if (data == 0xf0U) {
+  if (data == 0xf0U && !bypass) {
     cycle = 0;
     erasePrefix = false;
     setAutoselect(false);
+    return true;
+  }
+  if (statusReads > 0 && data == 0x30U && cycle == 0) {
+    /* further sectors written with 0x30 while the erase is pending join it */
+    uint32_t start = 0, length = 0;
+    sectorRange(offset, &start, &length);
+    setStatusDevice(false); // the status reads would also take the erase's stores
+    erase(start, length);
+    setStatusDevice(true);
+    statusReads = flash.eraseStatusReads; // the time-out window restarts
+    statusCount = 0;
+    return true;
+  }
+  if (bypass) {
+    if (bypassExit) {
+      bypassExit = false;
+      if (data == 0) bypass = false;
+    } else if (data == 0xa0U) {
+      programNext = true;
+    } else if (data == 0x90U) {
+      bypassExit = true;
+    }
     return true;
   }
   if (cycle == 0 && data == 0xaaU && unlockAddress(offset, 0x555)) cycle = 1;
@@ -93,10 +146,12 @@ bool flashWrite(uint32_t address, int width, uint32_t value) {
         uint32_t start = 0, length = 0;
         sectorRange(offset, &start, &length);
         erase(start, length);
+        startEraseStatus();
       }
     } else if (data == 0x90U && unlockAddress(offset, 0x555)) setAutoselect(true);
     else if (data == 0xa0U && unlockAddress(offset, 0x555)) programNext = true;
     else if (data == 0x80U && unlockAddress(offset, 0x555)) erasePrefix = true;
+    else if (data == 0x20U && unlockAddress(offset, 0x555)) bypass = true;
   } else cycle = 0;
   return true;
 }
@@ -106,7 +161,8 @@ int initAmdFlash(const AmdFlashChip &chip) {
   shutdownAmdFlash();
   flash = chip;
   cycle = 0;
-  erasePrefix = programNext = autoselect = false;
+  erasePrefix = programNext = autoselect = bypass = bypassExit = false;
+  statusReads = 0;
   setWriteInterceptor(chip.base, chip.base + chip.size - 1U, flashWrite);
   active = true;
   return 0;
@@ -115,6 +171,8 @@ int initAmdFlash(const AmdFlashChip &chip) {
 void shutdownAmdFlash() {
   if (!active) return;
   setAutoselect(false);
+  if (statusReads > 0) setStatusDevice(false);
+  statusReads = 0;
   setWriteInterceptor(1, 0, nullptr);
   active = false;
 }

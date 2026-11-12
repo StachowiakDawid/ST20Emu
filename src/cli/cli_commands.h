@@ -40,6 +40,9 @@ CliError cmd_front_panel(CliEngine &engine, std::span<const std::string_view> ar
 CliError cmd_led(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_asc(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_screen(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_audio(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_tuner(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_video(CliEngine &engine, std::span<const std::string_view> args);
 
 // registers
 CliError cmd_set_areg(CliEngine &engine, std::span<const std::string_view> args);

@@ -138,6 +138,9 @@ int rebootProcessor();
 uint64_t elapsedCpuCycles();
 int serviceNativeInterrupt(uint32_t level, uint32_t handlerDescriptor, bool *accepted);
 bool interruptHandlerActive();
+/* a handler installed for low priority (workspace descriptor bit 0) is running; ldtimer then reads
+ * the low-priority clock, as the handler would run at low priority on the chip */
+bool lowPriorityInterruptHandlerRunning();
 int activeExternalInterruptLevel();
 int registerExternalChannel(uint32_t address, uint32_t capacity = 4096);
 int unregisterExternalChannel(uint32_t address);

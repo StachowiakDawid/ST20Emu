@@ -2,7 +2,8 @@
 # Regenerates patches/ from the working tree in src/ (run on the host, from uClinux/2.4/).
 # src/ is not in git; patches/ is, so run this before committing port changes.
 #   patches/linux-2.4.x-st20.diff   uClinux-dist linux-2.4.x (incl. new arch/st20,
-#                                   include/asm-st20, MTD map, frame buffer driver)
+#                                   include/asm-st20, MTD map, frame buffer driver,
+#                                   include/linux/dvb DVB API v3 headers)
 #   patches/linux-2.4.x.config      kernel .config
 #   patches/uClibc-0.9.26-st20.diff uClibc 0.9.26 (src/uClibc-0.9.26 vs dl/ tarball; new
 #                                   libc/sysdeps/linux/st20, extra/Configs/Config.st20)
@@ -16,7 +17,8 @@ cd "$(dirname "$0")/.."
 mkdir -p patches
 k=src/uclinux-dist
 git -C $k add -N linux-2.4.x/arch/st20 linux-2.4.x/include/asm-st20 \
-    linux-2.4.x/drivers/mtd/maps/dsr9500-flash.c linux-2.4.x/drivers/video/st20fb.c
+    linux-2.4.x/drivers/mtd/maps/dsr9500-flash.c linux-2.4.x/drivers/video/st20fb.c \
+    linux-2.4.x/include/linux/dvb
 git -C $k diff -- linux-2.4.x \
     ':(exclude)*.o' ':(exclude)*.a' ':(exclude)*/.depend' ':(exclude)*.flags' \
     ':(exclude)*netfilter*' \

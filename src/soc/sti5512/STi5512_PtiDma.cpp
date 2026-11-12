@@ -1,4 +1,5 @@
 #include "STi5512_PtiDma.h"
+#include "STi5512_AudioDecoder.h"
 #include "STi5512_VideoDecoder.h"
 #include "../common/STi55xx_Asc.h"
 #include "../../core/cpu/st20.h"
@@ -9,10 +10,12 @@
 
 /*
  * STi5512 Register Manual (7145562 B), section 20.1. An enabled channel 1-3 moves its read
- * pointer towards the write pointer (wrapping from top to base). Channel 1 delivers the bytes
- * to the video decoder's bit buffer and stops while it is full; the audio and sub-picture
- * decoders are not modelled, so channels 2 and 3 discard their data. Channel 0 is written by
- * the transport controller, which is not modelled.
+ * pointer towards the write pointer, wrapping to base after the last byte of the 16-byte
+ * block that top addresses (the drivers write top = base + size - 16, the manual top | 0xf;
+ * both mean the same byte). Channel 1 delivers the bytes to the video decoder and channel 2
+ * to the audio decoder, each stopping while its input is full; channel 3 (sub-picture)
+ * discards its data. The transport controller model (STi5512_Pti.cpp) writes the circular
+ * buffers and advances the write pointers of channels 1-3, as channel 0 does in hardware.
  */
 namespace {
 constexpr uint32_t dmaBase = 0x20031000U;
@@ -63,12 +66,22 @@ void tickSti5512PtiDma() {
     uint32_t &read = dma[readRegister + channel];
     uint32_t write = dma[writeRegister + channel];
     for (uint32_t count = 0; count < bytesPerTick && read != write; ++count) {
-      if (channel == 1) {
+      if (channel == 1 || channel == 2) {
         uint32_t byte = 0;
         readBytes(read, 1, &byte);
-        if (!sti5512VideoInput(static_cast<uint8_t>(byte))) break;
+        bool accepted = channel == 1 ? sti5512VideoInput(static_cast<uint8_t>(byte))
+                                     : sti5512AudioInput(static_cast<uint8_t>(byte));
+        if (!accepted) break;
       }
-      read = read == dma[topRegister + channel] ? dma[baseRegister + channel] : read + 1;
+      read = read == (dma[topRegister + channel] | 0xfU) ? dma[baseRegister + channel] : read + 1;
     }
   }
+}
+
+uint32_t sti5512PtiDmaRegister(uint32_t offset) {
+  return offset < dmaEnd + 1 - dmaBase ? dma[offset / 4] : 0;
+}
+
+void sti5512PtiDmaSetWrite(uint32_t channel, uint32_t address) {
+  if (channel < 4) dma[writeRegister + channel] = address;
 }

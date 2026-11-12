@@ -19,6 +19,12 @@ struct I2cRegisterDevice {
   std::vector<uint8_t> memory{};
   uint32_t offset = 0;
   int offsetBytesSeen = 0;
+  /* optional chip behaviour behind the register file (register mode only): writeHook runs
+   * after a byte is stored in register REG; readHook returns the byte a read of REG delivers
+   * (STORED is the register file's value). resetI2cDevice keeps them. */
+  void *context = nullptr;
+  void (*writeHook)(void *context, uint8_t reg, uint8_t value) = nullptr;
+  uint8_t (*readHook)(void *context, uint8_t reg, uint8_t stored) = nullptr;
 };
 
 /* SSC (synchronous serial controller) in I2C master mode. Registers are 16 bits wide at

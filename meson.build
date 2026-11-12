@@ -30,7 +30,10 @@ core_sources = files(
   'src/soc/common/STi55xx_RegisterBlocks.cpp',
   'src/soc/common/STi55xx_Ssc.cpp',
   'src/soc/sti5512/STi5512_Devices.cpp',
+  'src/soc/sti5512/STi5512_AudioDecoder.cpp',
   'src/soc/sti5512/STi5512_Display.cpp',
+  'src/soc/sti5512/STi5512_Mpeg.cpp',
+  'src/soc/sti5512/STi5512_Pti.cpp',
   'src/soc/sti5512/STi5512_PtiDma.cpp',
   'src/soc/sti5512/STi5512_RegisterBlocks.cpp',
   'src/soc/sti5512/STi5512_VideoDecoder.cpp',
@@ -40,6 +43,7 @@ core_sources = files(
   'src/soc/sti5518/STi5518_RegisterBlocks.cpp',
   'src/board/Board.cpp',
   'src/board/DSR9500.cpp',
+  'src/board/Dsr9500Frontend.cpp',
   'src/board/DSR7000.cpp',
   'src/board/BitBangI2c.cpp',
   'src/board/Stb6300.cpp',
@@ -61,16 +65,39 @@ sources = core_sources + files(
 
 threads = dependency('threads')
 
-executable('st20emu',
+# FFmpeg's decoders give the MPEG video and audio models pictures and sound; without them the
+# decoders keep their control behaviour only
+libavcodec = dependency('libavcodec', required: get_option('libav'), include_type: 'system')
+libavutil = dependency('libavutil', required: get_option('libav'), include_type: 'system')
+deps = [threads]
+if libavcodec.found() and libavutil.found()
+  add_project_arguments('-DST20EMU_HAVE_LIBAV=1', language: 'cpp')
+  deps += [libavcodec, libavutil]
+endif
+
+st20emu = executable('st20emu',
   sources,
-  dependencies: threads,
+  dependencies: deps,
   install: false
 )
 
 cpu_test = executable('cpu-instructions',
   core_sources + files('tests/cpu_instructions.cpp', 'src/console/serial_tcp.cpp'),
-  dependencies: threads,
+  dependencies: deps,
   install: false
 )
 
 test('cpu-instructions', cpu_test)
+
+dvb_test = executable('dvb-frontend-pti',
+  core_sources + files('tests/dvb_frontend_pti.cpp'),
+  dependencies: deps,
+  install: false
+)
+
+test('dvb-frontend-pti', dvb_test)
+
+# end-to-end run of the original DSR9500 firmware (scan, lock, PAT/PMT, A/V); skipped unless
+# ST20EMU_FIRMWARE_TESTS=1, as it executes about 1.5 billion instructions
+test('dvb-firmware-scan', find_program('tools/dvb-firmware-test.sh'), args: [st20emu],
+  suite: 'firmware', timeout: 3600, is_parallel: false)

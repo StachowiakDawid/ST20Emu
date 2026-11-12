@@ -9,7 +9,7 @@
  * OSD starts at OSD_TOP/OSD_BOT and honours OSD_CFG.LLG.
  */
 namespace {
-constexpr DisplayConfig display{sti5512VideoRegister, sti5512OsdPointer, true, false};
+constexpr DisplayConfig display{sti5512VideoRegister, sti5512OsdPointer, true, false, sti5512DisplayedPicture};
 DisplayTiming timing;
 }
 

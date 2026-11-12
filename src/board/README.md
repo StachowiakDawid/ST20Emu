@@ -2,24 +2,61 @@
 
 ## Samsung DSR9500
 
-`--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's I2C chips as register
-files: the QPSK demodulator (`0xaa` on SSC1, identity `0x5a` in register 0), the CI controller
-(`0x80`) and the RF modulator (`0xca`) on SSC0. There is no tuner, signal, CI module or RF
-model. The board also connects:
+`--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's board devices:
 
+- the satellite front end (`Dsr9500Frontend.cpp`): the HM1221 QPSK demodulator at I2C `0xaa`
+  on SSC1 with the tuner PLL behind its 3-wire port, the LNB supply, 13/18 V and 22 kHz tone on
+  the board latch at `0x50400000`, a universal LNB (LO 9750/10600 MHz), and the transponders
+  given with `--transponder FILE.ts:FREQ_MHZ:SR_KSPS:H|V[:LO|HI][:FEC]` (repeatable; band
+  defaults to HI from 11700 MHz, FEC 1/2-7/8 defaults to 3/4). The demodulator locks when the
+  PLL frequency (within 1.5 MHz of FREQ - LO), the symbol rate (within 1 %), the enabled code
+  rates, the LNB voltage, tone and supply match a transponder, and reports carrier offset,
+  signal level, quality and an error count. While locked it hands the transponder's packets
+  (the file in a loop) to the STi5512 PTI at the channel's useful rate SR * 2 * FEC * 188/204,
+  paced by emulated time. The register behaviour, as the firmware programs it, is documented
+  at the top of `Dsr9500Frontend.cpp`. `tuner` prints LNB, PLL, symbol rate, lock and packet
+  counts; `ST20_FRONTEND_TRACE=1` logs latch and demodulator writes. DiSEqC messages are not
+  decoded.
+- the CI controller (`0x80`) and the RF modulator (`0xca`) on SSC0 as register files (no CI
+  module or RF model).
+- the 2 MB flash at `0x7fe00000` as an Am29LV160DT (`0x0001`/`0x22c4`, `AmdFlash`): the main
+  application saves its settings and channel database there (sector erase with DQ7/DQ3 status,
+  unlock-bypass programming from RAM). Without it, saving wrote the AMD command bytes into the
+  ROM image and corrupted the code. (The receiver comes up in the main menu with or without the
+  flash model; `power` puts it into standby.)
+- the configuration word at `0x20000500` reads 1 (clock mode: 60 MHz CPU), which the STAPI
+  drivers need for their clock rates.
 - the front panel: a 16-bit shift register on PIO4 (data bit 3, clock bit 4) latched by PIO1
   bit 7. Its four LED digits are printed as `LED> text` when they change; `led` shows them.
   `fp KEY` holds a key of the matrix (`up`, `down` or a column bit 1, 2, 4, 8, 0x80) for 150 ms.
 - the IR receiver on PIO3 bit 3 and PWM CaptureIn0: `ir KEY...` sends NEC frames with the
   customer code 0xfe01. Keys are `0`-`9`, `ok`, `menu`, `exit`, `up`, `down`, `left`, `right`,
-  `pgup`, `pgdn`, `power` or a command number. The receiver starts in standby, where only
-  `power` (remote or front panel) is accepted.
+  `pgup`, `pgdn`, `power` or a command number.
 
-Stop a free run (`g`) to type these commands, then continue with `g`. With the DSR9500
-firmware the main menu appears after about 90 million instructions (`screen menu.bmp`). The DSR9500 main firmware boots with:
+Stop a free run (`g`) to type these commands, then continue with `g`. The main menu appears
+after about 150 million instructions (`screen menu.bmp`):
 
 ```bash
 ./builddir-release/st20emu --soc sti5512 --board dsr9500 --firmware firmware/dsr9500mcmain.bin --batch
+```
+
+### Receiving a test transponder
+
+`tools/mkts.sh OUT.ts [SECONDS] [SR] [FEC]` makes a DVB-like transport stream with two TV
+services ("Emu Test 1" and "Emu Test 2": MPEG-2 720x576 25 fps and MPEG-1 layer II 48 kHz
+stereo each, PAT/PMT/SDT/NIT) padded to the channel rate. `tools/dvb-firmware-test.sh` puts one on
+air at 10788 MHz V 22000 kSym/s 5/6 (the first preset of the firmware's manual scan) and drives
+the original firmware: PIN `0000` opens Installation, `5` Manual Scanning, `ok` scans (it finds
+2 TV programs) and `ok` saves; after `exit` x3 and a standby/wake cycle (`power` twice) the
+channel plays: the firmware's channel task sees the lock, reads PAT, SDT and PMT and starts the
+video, audio and PCR slots, the live picture is on screen (`screen FILE`) and the firmware
+unmutes the audio once it is in sync (`audio FILE.wav` captures it). (Without the
+standby cycle the firmware waits for a lock event the scan already consumed.)
+
+```bash
+tools/mkts.sh /tmp/tp.ts 3 22000 5/6
+./builddir-release/st20emu --soc sti5512 --board dsr9500 --firmware firmware/dsr9500mcmain.bin \
+    --transponder /tmp/tp.ts:10788:22000:V:5/6 --script scan.txt
 ```
 
 ## Samsung DSR7000 (`firmware/dump Samsung DSR7000 (v1.14).bin`)

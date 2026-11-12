@@ -9,6 +9,9 @@ ST20Emu is an emulator for the ST20, a 32-bit transputer-based processor archite
 - clang 18.1.3
 - meson and ninja
 - just (optional, wraps the commands below)
+- FFmpeg 6 or later (optional: `libavcodec`/`libavutil` give the STi5512 video and audio
+  decoder models pictures and sound; meson finds them by pkg-config, `-Dlibav=disabled` builds
+  without, `-Dlibav=enabled` requires them; the `ffmpeg` tool is used by `tools/mkts.sh`)
 
 ### Building
 
@@ -29,11 +32,15 @@ meson compile -C builddir-release
 
 Use the release build for long firmware runs; the sanitized debug build is many times slower.
 
-Run the CPU instruction tests:
+Run the tests (CPU instructions; DSR9500 front end, PTI and decoder input):
 
 ```bash
 meson test -C builddir --print-errorlogs
 ```
+
+`tools/dvb-firmware-test.sh [EMULATOR]` is a longer end-to-end check with the original DSR9500
+firmware (scan, lock, PAT/PMT/SDT, A/V slots, audio capture); under `meson test` it is skipped
+unless `ST20EMU_FIRMWARE_TESTS=1`.
 
 With `just` installed, `just build`, `just release` and `just test` run the same steps.
 `just pgo` builds a profile-guided release version as `builddir-pgo/st20emu`: an instrumented
@@ -89,6 +96,16 @@ described in [src/soc/sti5512/README.md](src/soc/sti5512/README.md) and
 
 `--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's board devices and the
 `fp`, `ir` and `led` commands. See [src/board/README.md](src/board/README.md).
+
+### Satellite reception (DSR9500)
+
+`--transponder FILE.ts:FREQ_MHZ:SR_KSPS:H|V[:LO|HI][:FEC]` (repeatable, `--board dsr9500`)
+puts a transport stream on air: the modelled HM1221 demodulator locks when the firmware tunes
+its frequency, symbol rate, code rate, polarisation and band, and feeds the packets to the PTI
+at the channel rate. `tools/mkts.sh OUT.ts [SECONDS] [SR] [FEC]` makes a test stream with two
+TV services. `tuner`, `video` and `audio FILE.wav` / `audio stop` show and capture what is
+received; see [src/board/README.md](src/board/README.md) and
+[src/soc/sti5512/README.md](src/soc/sti5512/README.md).
 
 ### Typing into a UART from the CLI or a script
 
@@ -148,7 +165,10 @@ Values, addresses and indexes are hexadecimal; `register` is `a`, `b`, `c` or `i
 | `load` | `load name` | Loads a state saved with `save`. |
 | `omr` | `omr` | Shows the other machine registers: enables, clocks, timer and ready queues, error flags. |
 | `ver` | `ver` | Lists the set bits of the Enables register. |
-| `screen` | `screen [file]` | Writes the STi5512 OSD as a BMP (default `screen.bmp`). |
+| `screen` | `screen [file]` | Writes the screen (video plane and OSD) as a BMP (default `screen.bmp`). |
+| `audio` | `audio [file.wav [nomute] \| stop]` | Starts or stops capturing the STi5512 audio decoder's output; without arguments shows its state. |
+| `video` | `video` | Shows the STi5512 video decoder's state. |
+| `tuner` | `tuner` | Shows the DSR9500 front end: LNB, PLL, symbol rate, lock, packets. |
 | `q` | `q` | Quits. |
 
 After each step the emulator prints the registers, the workspace and the next instruction:

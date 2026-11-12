@@ -1,5 +1,7 @@
 #include "DSR9500.h"
+#include "AmdFlash.h"
 #include "Board.h"
+#include "Dsr9500Frontend.h"
 
 #include "../common/compat.h"
 #include "../core/cpu/omr.h"
@@ -22,13 +24,20 @@
  * SSC1 and opens the QPSK demodulator at bus address 0xaa (open parameters at ROM
  * 0x7ff2acd8). qpsk_reset (0x7fe81f3f) accepts the chip when register 0 reads 0x5a.
  * The bus "front" on SSC0 carries the CI controller (0x80, ROM 0x7ff2ace4) and the RF
- * modulator (0xca, ROM 0x7ff2acf0). All three chips are plain register files that acknowledge
- * their address: there is no tuner, signal, lock, CI module or RF output model.
+ * modulator (0xca, ROM 0x7ff2acf0). The demodulator, its tuner PLL and the LNB switching are
+ * modelled in Dsr9500Frontend.cpp; the CI controller and RF modulator are plain register files
+ * that acknowledge their address (no CI module or RF output model).
  *
  * Front panel (front-panel module 0x7fe8f738): a 16-bit shift register clocked from PIO4
  * (data bit 3, clock bit 4) and latched by PIO1 bit 7. Bits 12-15 select one of the four
  * LED digits, bits 0-7 are its active-low segments. The same outputs drive the key matrix
  * columns; a pressed key connects its column to the return line PIO4 bit 2 (pulled high).
+ *
+ * Flash: the main application keeps its settings and channel database in the 2 MB flash at
+ * 0x7fe00000 (sectors 0x7ffa0000 and 0x7ffc0000) and programs it with the AMD command set
+ * (x16, unlock at 0x7fe00aaa/0x7fe00554) from RAM routines at 0xc0790090/0xc0790180. It is
+ * modelled as an Am29LV160DT (0x0001/0x22c4) so that saving does not overwrite the code.
+ * The loader's probe at 0x7fc00000 still finds no flash ("No supported flash memory").
  *
  * Remote control: the IR receiver output (active low) drives PIO3 bit 3 and PWM CaptureIn0.
  * The firmware decodes NEC frames by the time between falling edges and accepts the
@@ -39,8 +48,6 @@
 namespace {
 constexpr int frontBus = 0;
 constexpr int tunerBus = 1;
-constexpr uint8_t qpskIdentity = 0x5a;
-I2cRegisterDevice qpskDemodulator{0xaa};
 I2cRegisterDevice ciController{0x80};
 I2cRegisterDevice rfModulator{0xca};
 
@@ -134,6 +141,7 @@ uint8_t inputLevels(int port, uint8_t out) {
 }
 
 void pollBoard() {
+  pollDsr9500Frontend();
   uint64_t now = elapsedCpuCycles();
   if (heldColumn && now >= keyRelease) heldColumn = 0;
   while (!irEdges.empty() && now >= irEdges.front().first) {
@@ -184,11 +192,15 @@ int initSamsungPanel(const SamsungPanelConfig &panel) {
 }
 
 int initDsr9500Board() {
-  for (I2cRegisterDevice *chip : {&qpskDemodulator, &ciController, &rfModulator}) resetI2cDevice(*chip);
-  qpskDemodulator.registers[0] = qpskIdentity;
+  for (I2cRegisterDevice *chip : {&ciController, &rfModulator}) resetI2cDevice(*chip);
+  /* clock mode 1 (60 MHz): without it the STAPI drivers read clock rates of 0 */
+  setSti5512ConfigWord(1);
+  int result = initDsr9500Frontend();
+  if (!result) result = initAmdFlash({0x7fe00000U, 0x200000U, 0x0001, 0x22c4, 8});
+  if (result) return result;
   initSamsungPanel(dsr9500Panel);
   setActiveBoard(Board::Dsr9500);
-  int result = sti5512Peripherals().attachI2cDevice(tunerBus, &qpskDemodulator);
+  result = sti5512Peripherals().attachI2cDevice(tunerBus, &dsr9500QpskDevice());
   if (!result) result = sti5512Peripherals().attachI2cDevice(frontBus, &ciController);
   if (!result) result = sti5512Peripherals().attachI2cDevice(frontBus, &rfModulator);
   return result;

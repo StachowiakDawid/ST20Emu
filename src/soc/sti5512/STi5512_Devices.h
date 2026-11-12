@@ -10,6 +10,8 @@ inline constexpr int sti5512PioPorts = sti55xxPioPorts;
 int initSti5512Devices(uint8_t revision = 0);
 void shutdownSti5512Devices();
 int pollSti5512Devices();
+/* value of the configuration word at 0x20000500 (board clock mode; default 0) */
+void setSti5512ConfigWord(uint32_t value);
 /* the shared peripherals, through which board parts connect to the SoC */
 Sti55xxPeripherals &sti5512Peripherals();
 

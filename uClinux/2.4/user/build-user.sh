@@ -102,9 +102,11 @@ build_busybox
 
 # test programs: user/test (uClibc tests), tools/test (kernel fb/input tests, mounted at
 # /work/port-tools by dbuild.sh), sigtest/stattest from ../2.0/user (signals, struct stat),
-# user/net (nettest: loopback/SLIP tests; modtool: insmod/rmmod/lsmod for .mod modules)
+# user/net (nettest: loopback/SLIP tests; modtool: insmod/rmmod/lsmod for .mod modules),
+# user/dvb (dvbtool: scan, zap, tv, femon)
 for t in /work/user/test/uctest.c /work/user/test/retest.c /work/port-tools/test/fbtest.c /work/port-tools/test/evtest.c \
-         /work/2.0/user/sigtest.c /work/2.0/user/stattest.c /work/user/net/nettest.c /work/user/net/modtool.c; do
+         /work/2.0/user/sigtest.c /work/2.0/user/stattest.c /work/user/net/nettest.c /work/user/net/modtool.c \
+         /work/user/dvb/dvbtool.c; do
   n=$(basename $t .c)
   $CC $UCFLAGS -c $t -o $n.o
   link $n 16384 $n.o

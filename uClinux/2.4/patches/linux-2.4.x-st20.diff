@@ -1362,10 +1362,10 @@ index 000000000..8117753ca
 +}
 diff --git a/linux-2.4.x/arch/st20/kernel/ksyms.c b/linux-2.4.x/arch/st20/kernel/ksyms.c
 new file mode 100644
-index 000000000..eb4d05f20
+index 000000000..aeb43e63d
 --- /dev/null
 +++ b/linux-2.4.x/arch/st20/kernel/ksyms.c
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,124 @@
 +/*
 + * arch/st20/kernel/ksyms.c - kernel functions kept for loadable modules
 + *
@@ -1427,6 +1427,9 @@ index 000000000..eb4d05f20
 +extern char kmem_cache_destroy;
 +extern char kmem_cache_alloc;
 +extern char kmem_cache_free;
++extern char request_irq;
++extern char free_irq;
++extern char interruptible_sleep_on_timeout;
 +extern char jiffies, xtime;
 +
 +void *const st20_module_ksyms[] = {
@@ -1480,6 +1483,9 @@ index 000000000..eb4d05f20
 +	&kmem_cache_destroy,
 +	&kmem_cache_alloc,
 +	&kmem_cache_free,
++	&request_irq,
++	&free_irq,
++	&interruptible_sleep_on_timeout,
 +	&jiffies,
 +	&xtime,
 +	0
@@ -3199,10 +3205,10 @@ index 000000000..ae40e02da
 +}
 diff --git a/linux-2.4.x/arch/st20/kernel/setup.c b/linux-2.4.x/arch/st20/kernel/setup.c
 new file mode 100644
-index 000000000..fced99549
+index 000000000..8e4f5d9f4
 --- /dev/null
 +++ b/linux-2.4.x/arch/st20/kernel/setup.c
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,153 @@
 +/*
 + * arch/st20/kernel/setup.c - uClinux/ST20 machine setup (board: asm/board.h)
 + */
@@ -3224,6 +3230,8 @@ index 000000000..fced99549
 +#include <asm/irq.h>
 +#include <asm/pgtable.h>
 +#include <asm/board.h>
++
++static void st20_avmem_alloc(const char *cmd);
 +
 +extern char _stext, _etext, _edata, _end, __init_begin, __init_end;
 +extern long st20_syscall();
@@ -3278,7 +3286,38 @@ index 000000000..fced99549
 +#ifdef CONFIG_FB_ST20OSD
 +	{ extern void st20fb_alloc(void); st20fb_alloc(); }	/* /dev/fb0 (drivers/video/st20fb.c) */
 +#endif
++	st20_avmem_alloc(command_line);
 +	paging_init();
++}
++
++/*
++ * Optional boot reservation of the MPEG decoders' memory for the DVB module
++ * (modules/dvb/av.c): "avmem=KB" on the command line (2048 for bit buffers + three
++ * 720x576 frames).  The decoders address SDRAM with 14-bit pointers in 256-byte units,
++ * so it must lie in the low 4 MB, which the boot allocator can promise.  Default 0: the
++ * module takes a 2 MB page block at its first VIDEO_PLAY instead, so RAM is only spent
++ * when the decoders are used.
++ */
++#define ST20_AVMEM_KB	0
++unsigned long st20_avmem_start, st20_avmem_size;
++
++static void __init st20_avmem_alloc(const char *cmd)
++{
++	unsigned long kb = ST20_AVMEM_KB;
++	const char *p;
++
++	for (p = cmd; *p; p++)
++		if (!strncmp(p, "avmem=", 6) && (p == cmd || p[-1] == ' ')) {
++			kb = simple_strtoul(p + 6, 0, 0);
++			break;
++		}
++	st20_avmem_size = PAGE_ALIGN(kb * 1024);
++	if (st20_avmem_size)
++		st20_avmem_start = (unsigned long) alloc_bootmem_pages(st20_avmem_size);
++	if (st20_avmem_size)
++		printk("avmem: %lu KB at %08lx%s\n", st20_avmem_size >> 10, st20_avmem_start,
++		       st20_avmem_start + st20_avmem_size > ST20_RAM_START + 0x400000 ?
++		       " (beyond the decoders' 4 MB!)" : "");
 +}
 +
 +extern unsigned long st20_ovf_traps, st20_fpe_traps;
@@ -6101,10 +6140,10 @@ index b5773e23d..d65136a9c 100644
      }
 diff --git a/linux-2.4.x/drivers/video/st20fb.c b/linux-2.4.x/drivers/video/st20fb.c
 new file mode 100644
-index 000000000..0bf6cb7b0
+index 000000000..7a6cbd9b7
 --- /dev/null
 +++ b/linux-2.4.x/drivers/video/st20fb.c
-@@ -0,0 +1,388 @@
+@@ -0,0 +1,392 @@
 +/*
 + * drivers/video/st20fb.c - /dev/fb0 on the STi5512 OSD (uClinux/ST20, Samsung DSR9500)
 + *
@@ -6295,6 +6334,10 @@ index 000000000..0bf6cb7b0
 +	cmap_green[regno] = green;
 +	cmap_blue[regno] = blue;
 +	hw_pal[regno] = rgb_to_osd(red, green, blue);
++	/* transparent colour (FBIOPUTCMAP transp >= 0x8000): palette T bit, blended with the
++	   video behind with the region mix weight 0 = video only (datasheet 21.5.10) */
++	if (transp >= 0x8000)
++		hw_pal[regno] |= 0x100;
 +	if (fb_mem) {
 +		int f;
 +
@@ -12099,6 +12142,376 @@ index 000000000..0d21608d0
 +#define page_to_phys(page)	virt_to_phys((void *)__page_address(page))
 +
 +#endif
++#endif
+diff --git a/linux-2.4.x/include/linux/dvb/audio.h b/linux-2.4.x/include/linux/dvb/audio.h
+new file mode 100644
+index 000000000..aed1d3a98
+--- /dev/null
++++ b/linux-2.4.x/include/linux/dvb/audio.h
+@@ -0,0 +1,55 @@
++/*
++ * audio.h - Linux DVB API version 3 audio decoder interface (subset, as linux-2.6
++ * include/linux/dvb/audio.h)
++ */
++#ifndef _DVBAUDIO_H_
++#define _DVBAUDIO_H_
++
++#include <asm/types.h>
++
++typedef enum { AUDIO_SOURCE_DEMUX, AUDIO_SOURCE_MEMORY } audio_stream_source_t;
++typedef enum { AUDIO_STOPPED, AUDIO_PLAYING, AUDIO_PAUSED } audio_play_state_t;
++typedef enum { AUDIO_STEREO, AUDIO_MONO_LEFT, AUDIO_MONO_RIGHT } audio_channel_select_t;
++
++typedef struct audio_mixer {
++	unsigned int volume_left;	/* 0 (silent) - 255 */
++	unsigned int volume_right;
++} audio_mixer_t;
++
++typedef struct audio_status {
++	int AV_sync_state;
++	int mute_state;
++	audio_play_state_t play_state;
++	audio_stream_source_t stream_source;
++	audio_channel_select_t channel_select;
++	int bypass_mode;
++	audio_mixer_t mixer_state;
++} audio_status_t;
++
++#define AUDIO_CAP_DTS	1
++#define AUDIO_CAP_LPCM	2
++#define AUDIO_CAP_MP1	4
++#define AUDIO_CAP_MP2	8
++#define AUDIO_CAP_MP3	0x10
++#define AUDIO_CAP_AAC	0x20
++#define AUDIO_CAP_OGG	0x40
++#define AUDIO_CAP_SDDS	0x80
++#define AUDIO_CAP_AC3	0x100
++
++#define AUDIO_STOP		_IO('o', 1)
++#define AUDIO_PLAY		_IO('o', 2)
++#define AUDIO_PAUSE		_IO('o', 3)
++#define AUDIO_CONTINUE		_IO('o', 4)
++#define AUDIO_SELECT_SOURCE	_IO('o', 5)
++#define AUDIO_SET_MUTE		_IO('o', 6)
++#define AUDIO_SET_AV_SYNC	_IO('o', 7)
++#define AUDIO_SET_BYPASS_MODE	_IO('o', 8)
++#define AUDIO_CHANNEL_SELECT	_IO('o', 9)
++#define AUDIO_GET_STATUS	_IOR('o', 10, audio_status_t)
++#define AUDIO_GET_CAPABILITIES	_IOR('o', 11, unsigned int)
++#define AUDIO_CLEAR_BUFFER	_IO('o', 12)
++#define AUDIO_SET_ID		_IO('o', 13)
++#define AUDIO_SET_MIXER		_IOW('o', 14, audio_mixer_t)
++#define AUDIO_SET_STREAMTYPE	_IO('o', 15)
++
++#endif
+diff --git a/linux-2.4.x/include/linux/dvb/dmx.h b/linux-2.4.x/include/linux/dvb/dmx.h
+new file mode 100644
+index 000000000..fd8b849a4
+--- /dev/null
++++ b/linux-2.4.x/include/linux/dvb/dmx.h
+@@ -0,0 +1,79 @@
++/*
++ * dmx.h - Linux DVB API version 3 demux interface (as linux-2.6 include/linux/dvb/dmx.h)
++ */
++#ifndef _DVBDMX_H_
++#define _DVBDMX_H_
++
++#include <asm/types.h>
++
++#define DMX_FILTER_SIZE 16
++
++typedef enum { DMX_OUT_DECODER, DMX_OUT_TAP, DMX_OUT_TS_TAP } dmx_output_t;
++typedef enum { DMX_IN_FRONTEND, DMX_IN_DVR } dmx_input_t;
++
++typedef enum {
++	DMX_PES_AUDIO0, DMX_PES_VIDEO0, DMX_PES_TELETEXT0, DMX_PES_SUBTITLE0, DMX_PES_PCR0,
++	DMX_PES_AUDIO1, DMX_PES_VIDEO1, DMX_PES_TELETEXT1, DMX_PES_SUBTITLE1, DMX_PES_PCR1,
++	DMX_PES_AUDIO2, DMX_PES_VIDEO2, DMX_PES_TELETEXT2, DMX_PES_SUBTITLE2, DMX_PES_PCR2,
++	DMX_PES_AUDIO3, DMX_PES_VIDEO3, DMX_PES_TELETEXT3, DMX_PES_SUBTITLE3, DMX_PES_PCR3,
++	DMX_PES_OTHER
++} dmx_pes_type_t;
++
++#define DMX_PES_AUDIO		DMX_PES_AUDIO0
++#define DMX_PES_VIDEO		DMX_PES_VIDEO0
++#define DMX_PES_TELETEXT	DMX_PES_TELETEXT0
++#define DMX_PES_SUBTITLE	DMX_PES_SUBTITLE0
++#define DMX_PES_PCR		DMX_PES_PCR0
++
++typedef struct dmx_filter {
++	__u8 filter[DMX_FILTER_SIZE];
++	__u8 mask[DMX_FILTER_SIZE];
++	__u8 mode[DMX_FILTER_SIZE];
++} dmx_filter_t;
++
++struct dmx_sct_filter_params {
++	__u16 pid;
++	dmx_filter_t filter;
++	__u32 timeout;			/* ms, 0 = none */
++	__u32 flags;
++#define DMX_CHECK_CRC		1
++#define DMX_ONESHOT		2
++#define DMX_IMMEDIATE_START	4
++#define DMX_KERNEL_CLIENT	0x8000
++};
++
++struct dmx_pes_filter_params {
++	__u16 pid;
++	dmx_input_t input;
++	dmx_output_t output;
++	dmx_pes_type_t pes_type;
++	__u32 flags;
++};
++
++typedef struct dmx_caps {
++	__u32 caps;
++	int num_decoders;
++} dmx_caps_t;
++
++typedef enum {
++	DMX_SOURCE_FRONT0 = 0, DMX_SOURCE_FRONT1, DMX_SOURCE_FRONT2, DMX_SOURCE_FRONT3,
++	DMX_SOURCE_DVR0 = 16, DMX_SOURCE_DVR1, DMX_SOURCE_DVR2, DMX_SOURCE_DVR3
++} dmx_source_t;
++
++struct dmx_stc {
++	unsigned int num;		/* input: which STC, 0 = first */
++	unsigned int base;		/* output: divisor for stc to get 90 kHz clock */
++	__u64 stc;			/* output: stc in 'base' * 90 kHz units */
++};
++
++#define DMX_START		_IO('o', 41)
++#define DMX_STOP		_IO('o', 42)
++#define DMX_SET_FILTER		_IOW('o', 43, struct dmx_sct_filter_params)
++#define DMX_SET_PES_FILTER	_IOW('o', 44, struct dmx_pes_filter_params)
++#define DMX_SET_BUFFER_SIZE	_IO('o', 45)
++#define DMX_GET_PES_PIDS	_IOR('o', 47, __u16[5])
++#define DMX_GET_CAPS		_IOR('o', 48, dmx_caps_t)
++#define DMX_SET_SOURCE		_IOW('o', 49, dmx_source_t)
++#define DMX_GET_STC		_IOWR('o', 50, struct dmx_stc)
++
++#endif
+diff --git a/linux-2.4.x/include/linux/dvb/frontend.h b/linux-2.4.x/include/linux/dvb/frontend.h
+new file mode 100644
+index 000000000..18634e45a
+--- /dev/null
++++ b/linux-2.4.x/include/linux/dvb/frontend.h
+@@ -0,0 +1,136 @@
++/*
++ * frontend.h - Linux DVB API version 3 frontend interface (subset used by uClinux/ST20;
++ * names, values and ioctl numbers as in linux-2.6 include/linux/dvb/frontend.h)
++ */
++#ifndef _DVBFRONTEND_H_
++#define _DVBFRONTEND_H_
++
++#include <asm/types.h>
++
++typedef enum fe_type { FE_QPSK, FE_QAM, FE_OFDM, FE_ATSC } fe_type_t;
++
++typedef enum fe_caps {
++	FE_IS_STUPID = 0, FE_CAN_INVERSION_AUTO = 0x1,
++	FE_CAN_FEC_1_2 = 0x2, FE_CAN_FEC_2_3 = 0x4, FE_CAN_FEC_3_4 = 0x8,
++	FE_CAN_FEC_4_5 = 0x10, FE_CAN_FEC_5_6 = 0x20, FE_CAN_FEC_6_7 = 0x40,
++	FE_CAN_FEC_7_8 = 0x80, FE_CAN_FEC_8_9 = 0x100, FE_CAN_FEC_AUTO = 0x200,
++	FE_CAN_QPSK = 0x400, FE_CAN_QAM_16 = 0x800, FE_CAN_QAM_32 = 0x1000,
++	FE_CAN_QAM_64 = 0x2000, FE_CAN_QAM_128 = 0x4000, FE_CAN_QAM_256 = 0x8000,
++	FE_CAN_QAM_AUTO = 0x10000, FE_CAN_TRANSMISSION_MODE_AUTO = 0x20000,
++	FE_CAN_BANDWIDTH_AUTO = 0x40000, FE_CAN_GUARD_INTERVAL_AUTO = 0x80000,
++	FE_CAN_HIERARCHY_AUTO = 0x100000, FE_CAN_8VSB = 0x200000, FE_CAN_16VSB = 0x400000,
++	FE_NEEDS_BENDING = 0x20000000, FE_CAN_RECOVER = 0x40000000, FE_CAN_MUTE_TS = 0x80000000
++} fe_caps_t;
++
++struct dvb_frontend_info {
++	char name[128];
++	fe_type_t type;
++	__u32 frequency_min;		/* kHz (QPSK: IF) */
++	__u32 frequency_max;
++	__u32 frequency_stepsize;
++	__u32 frequency_tolerance;
++	__u32 symbol_rate_min;
++	__u32 symbol_rate_max;
++	__u32 symbol_rate_tolerance;	/* ppm */
++	__u32 notifier_delay;		/* deprecated */
++	fe_caps_t caps;
++};
++
++struct dvb_diseqc_master_cmd {
++	__u8 msg[6];			/* { framing, address, command, data[3] } */
++	__u8 msg_len;			/* 3-6 */
++};
++
++struct dvb_diseqc_slave_reply {
++	__u8 msg[4];
++	__u8 msg_len;
++	int timeout;
++};
++
++typedef enum fe_sec_voltage { SEC_VOLTAGE_13, SEC_VOLTAGE_18, SEC_VOLTAGE_OFF } fe_sec_voltage_t;
++typedef enum fe_sec_tone_mode { SEC_TONE_ON, SEC_TONE_OFF } fe_sec_tone_mode_t;
++typedef enum fe_sec_mini_cmd { SEC_MINI_A, SEC_MINI_B } fe_sec_mini_cmd_t;
++
++typedef enum fe_status {
++	FE_HAS_SIGNAL = 0x01, FE_HAS_CARRIER = 0x02, FE_HAS_VITERBI = 0x04,
++	FE_HAS_SYNC = 0x08, FE_HAS_LOCK = 0x10, FE_TIMEDOUT = 0x20, FE_REINIT = 0x40
++} fe_status_t;
++
++typedef enum fe_spectral_inversion { INVERSION_OFF, INVERSION_ON, INVERSION_AUTO } fe_spectral_inversion_t;
++
++typedef enum fe_code_rate {
++	FEC_NONE = 0, FEC_1_2, FEC_2_3, FEC_3_4, FEC_4_5, FEC_5_6, FEC_6_7, FEC_7_8,
++	FEC_8_9, FEC_AUTO
++} fe_code_rate_t;
++
++typedef enum fe_modulation {
++	QPSK, QAM_16, QAM_32, QAM_64, QAM_128, QAM_256, QAM_AUTO, VSB_8, VSB_16
++} fe_modulation_t;
++
++typedef enum fe_transmit_mode { TRANSMISSION_MODE_2K, TRANSMISSION_MODE_8K, TRANSMISSION_MODE_AUTO } fe_transmit_mode_t;
++typedef enum fe_bandwidth { BANDWIDTH_8_MHZ, BANDWIDTH_7_MHZ, BANDWIDTH_6_MHZ, BANDWIDTH_AUTO } fe_bandwidth_t;
++typedef enum fe_guard_interval {
++	GUARD_INTERVAL_1_32, GUARD_INTERVAL_1_16, GUARD_INTERVAL_1_8, GUARD_INTERVAL_1_4,
++	GUARD_INTERVAL_AUTO
++} fe_guard_interval_t;
++typedef enum fe_hierarchy { HIERARCHY_NONE, HIERARCHY_1, HIERARCHY_2, HIERARCHY_4, HIERARCHY_AUTO } fe_hierarchy_t;
++
++struct dvb_qpsk_parameters {
++	__u32 symbol_rate;		/* symbols per second */
++	fe_code_rate_t fec_inner;
++};
++
++struct dvb_qam_parameters {
++	__u32 symbol_rate;
++	fe_code_rate_t fec_inner;
++	fe_modulation_t modulation;
++};
++
++struct dvb_vsb_parameters {
++	fe_modulation_t modulation;
++};
++
++struct dvb_ofdm_parameters {
++	fe_bandwidth_t bandwidth;
++	fe_code_rate_t code_rate_HP;
++	fe_code_rate_t code_rate_LP;
++	fe_modulation_t constellation;
++	fe_transmit_mode_t transmission_mode;
++	fe_guard_interval_t guard_interval;
++	fe_hierarchy_t hierarchy_information;
++};
++
++struct dvb_frontend_parameters {
++	__u32 frequency;		/* QPSK: intermediate frequency in kHz */
++	fe_spectral_inversion_t inversion;
++	union {
++		struct dvb_qpsk_parameters qpsk;
++		struct dvb_qam_parameters qam;
++		struct dvb_ofdm_parameters ofdm;
++		struct dvb_vsb_parameters vsb;
++	} u;
++};
++
++struct dvb_frontend_event {
++	fe_status_t status;
++	struct dvb_frontend_parameters parameters;
++};
++
++#define FE_GET_INFO			_IOR('o', 61, struct dvb_frontend_info)
++#define FE_DISEQC_RESET_OVERLOAD	_IO('o', 62)
++#define FE_DISEQC_SEND_MASTER_CMD	_IOW('o', 63, struct dvb_diseqc_master_cmd)
++#define FE_DISEQC_RECV_SLAVE_REPLY	_IOR('o', 64, struct dvb_diseqc_slave_reply)
++#define FE_DISEQC_SEND_BURST		_IO('o', 65)	/* fe_sec_mini_cmd_t */
++#define FE_SET_TONE			_IO('o', 66)	/* fe_sec_tone_mode_t */
++#define FE_SET_VOLTAGE			_IO('o', 67)	/* fe_sec_voltage_t */
++#define FE_ENABLE_HIGH_LNB_VOLTAGE	_IO('o', 68)	/* int */
++#define FE_READ_STATUS			_IOR('o', 69, fe_status_t)
++#define FE_READ_BER			_IOR('o', 70, __u32)
++#define FE_READ_SIGNAL_STRENGTH		_IOR('o', 71, __u16)
++#define FE_READ_SNR			_IOR('o', 72, __u16)
++#define FE_READ_UNCORRECTED_BLOCKS	_IOR('o', 73, __u32)
++#define FE_SET_FRONTEND			_IOW('o', 76, struct dvb_frontend_parameters)
++#define FE_GET_FRONTEND			_IOR('o', 77, struct dvb_frontend_parameters)
++#define FE_GET_EVENT			_IOR('o', 78, struct dvb_frontend_event)
++
++#endif
+diff --git a/linux-2.4.x/include/linux/dvb/video.h b/linux-2.4.x/include/linux/dvb/video.h
+new file mode 100644
+index 000000000..4a2373f8b
+--- /dev/null
++++ b/linux-2.4.x/include/linux/dvb/video.h
+@@ -0,0 +1,76 @@
++/*
++ * video.h - Linux DVB API version 3 video decoder interface (subset, as linux-2.6
++ * include/linux/dvb/video.h)
++ */
++#ifndef _DVBVIDEO_H_
++#define _DVBVIDEO_H_
++
++#include <asm/types.h>
++
++typedef enum { VIDEO_FORMAT_4_3, VIDEO_FORMAT_16_9, VIDEO_FORMAT_221_1 } video_format_t;
++typedef enum {
++	VIDEO_SYSTEM_PAL, VIDEO_SYSTEM_NTSC, VIDEO_SYSTEM_PALN, VIDEO_SYSTEM_PALNc,
++	VIDEO_SYSTEM_PALM, VIDEO_SYSTEM_NTSC60, VIDEO_SYSTEM_PAL60, VIDEO_SYSTEM_PALM60
++} video_system_t;
++typedef enum { VIDEO_PAN_SCAN, VIDEO_LETTER_BOX, VIDEO_CENTER_CUT_OUT } video_displayformat_t;
++
++typedef struct {
++	int w;
++	int h;
++	video_format_t aspect_ratio;
++} video_size_t;
++
++typedef enum { VIDEO_SOURCE_DEMUX, VIDEO_SOURCE_MEMORY } video_stream_source_t;
++typedef enum { VIDEO_STOPPED, VIDEO_PLAYING, VIDEO_FREEZED } video_play_state_t;
++
++struct video_event {
++	__s32 type;
++#define VIDEO_EVENT_SIZE_CHANGED	1
++#define VIDEO_EVENT_FRAME_RATE_CHANGED	2
++	long timestamp;
++	union {
++		video_size_t size;
++		unsigned int frame_rate;
++	} u;
++};
++
++struct video_status {
++	int video_blank;
++	video_play_state_t play_state;
++	video_stream_source_t stream_source;
++	video_format_t video_format;
++	video_displayformat_t display_format;
++};
++
++struct video_still_picture {
++	char *iFrame;
++	__s32 size;
++};
++
++#define VIDEO_CAP_MPEG1		1
++#define VIDEO_CAP_MPEG2		2
++
++#define VIDEO_STOP		_IO('o', 21)
++#define VIDEO_PLAY		_IO('o', 22)
++#define VIDEO_FREEZE		_IO('o', 23)
++#define VIDEO_CONTINUE		_IO('o', 24)
++#define VIDEO_SELECT_SOURCE	_IO('o', 25)
++#define VIDEO_SET_BLANK		_IO('o', 26)
++#define VIDEO_GET_STATUS	_IOR('o', 27, struct video_status)
++#define VIDEO_GET_EVENT		_IOR('o', 28, struct video_event)
++#define VIDEO_SET_DISPLAY_FORMAT _IO('o', 29)
++#define VIDEO_STILLPICTURE	_IOW('o', 30, struct video_still_picture)
++#define VIDEO_FAST_FORWARD	_IO('o', 31)
++#define VIDEO_SLOWMOTION	_IO('o', 32)
++#define VIDEO_GET_CAPABILITIES	_IOR('o', 33, unsigned int)
++#define VIDEO_CLEAR_BUFFER	_IO('o', 34)
++#define VIDEO_SET_ID		_IO('o', 35)
++#define VIDEO_SET_STREAMTYPE	_IO('o', 36)
++#define VIDEO_SET_FORMAT	_IO('o', 37)
++#define VIDEO_SET_SYSTEM	_IO('o', 38)
++#define VIDEO_GET_SIZE		_IOR('o', 55, video_size_t)
++#define VIDEO_GET_FRAME_RATE	_IOR('o', 56, unsigned int)
++#define VIDEO_GET_PTS		_IOR('o', 57, __u64)
++#define VIDEO_GET_FRAME_COUNT	_IOR('o', 58, __u64)
++
 +#endif
 diff --git a/linux-2.4.x/include/linux/init.h b/linux-2.4.x/include/linux/init.h
 index e1dbcecd0..5ac3eb38a 100644

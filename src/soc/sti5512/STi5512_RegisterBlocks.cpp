@@ -1,4 +1,5 @@
 #include "STi5512_RegisterBlocks.h"
+#include "STi5512_AudioDecoder.h"
 #include "STi5512_VideoDecoder.h"
 #include "../common/STi55xx_RegisterBlocks.h"
 
@@ -91,8 +92,9 @@ void resetAudio(RegisterBlock &block) {
 }
 
 uint8_t readByte(RegisterBlock &block, uint32_t offset) {
-  if (&block != &blocks[videoBlock]) return block.values[offset];
   uint8_t value = 0;
+  if (&block == &blocks[audioBlock] && sti5512AudioDecoderRead(offset, &value)) return value;
+  if (&block != &blocks[videoBlock]) return block.values[offset];
   if (sti5512VideoDecoderRead(offset, &value) || video.read(offset, &value)) return value;
   return block.values[offset];
 }
@@ -104,6 +106,7 @@ void writeByte(RegisterBlock &block, uint32_t offset, uint8_t data) {
     resetRegisterBlock(block, dencUserRegisters);
   storeRegisterByte(block, offset, data);
   if (&block == &blocks[videoBlock]) sti5512VideoDecoderWrite(offset, data);
+  if (&block == &blocks[audioBlock]) sti5512AudioDecoderWrite(offset, data);
 }
 
 int readBlock(void *context, uint32_t address, int width, uint32_t *value) {
@@ -134,6 +137,10 @@ void resetSti5512RegisterBlocks(uint8_t videoRevision) {
 
 uint8_t sti5512VideoRegister(uint32_t offset) {
   return offset < blocks[videoBlock].size ? blocks[videoBlock].values[offset] : 0;
+}
+
+uint8_t sti5512AudioRegister(uint32_t offset) {
+  return offset < blocks[audioBlock].size ? blocks[audioBlock].values[offset] : 0;
 }
 
 uint32_t sti5512OsdPointer(int field) {

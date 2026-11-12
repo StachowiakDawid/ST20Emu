@@ -1,0 +1,29 @@
+run 450000000
+asc 3 lsmod; cat /proc/dvb; ls /dev/dvb/adapter0
+run 200000000
+asc 3 scan -D 10788:v:22000; cat /etc/config/channels.conf
+run 1200000000
+asc 3 femon; zap -D -n 3 2; cat /proc/dvb
+run 1500000000
+tuner
+asc 3 zap -D -r -n 2 1 > /dev/null & sleep 1; dd if=/dev/dvb/adapter0/dvr0 of=/tmp/rec.ts bs=18800 count=8; ls -l /tmp/rec.ts; hexdump -x /tmp/rec.ts | head -n 2; cat /proc/dvb | grep -e pid -e dvr
+run 1500000000
+asc 3 tv -D 1
+audio logs/dvb-audio.wav
+run 1200000000
+screen logs/dvb-tv1.bmp
+ir 0x1e
+run 300000000
+ir 0x1b
+run 1200000000
+screen logs/dvb-tv2.bmp
+ir 0x1c
+run 400000000
+screen logs/dvb-tv3.bmp
+ir 0x0a
+run 300000000
+audio stop
+asc 3 ::
+run 50000000
+asc 3 cat /proc/dvb; lsmod; rmmod dvb; insmod /lib/modules/dvb.mod; lsmod
+run 300000000

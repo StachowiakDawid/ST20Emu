@@ -9,6 +9,7 @@
 #include "core/memory/memory.h"
 #include "board/DSR7000.h"
 #include "board/DSR9500.h"
+#include "board/Dsr9500Frontend.h"
 #include "board/Stb6300.h"
 #include "soc/sti5512/STi5512_Devices.h"
 #include "soc/sti5518/STi5518_Devices.h"
@@ -376,10 +377,11 @@ int main(int argc, char **argv) {
   uint32_t socRevision = 0;
   bool revisionSpecified = false;
   std::string_view board;
+  std::vector<std::string> transponders;
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|dsr7000|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--script FILE] [--console PORT] [--serial-tcp PORT:TCP] [--no-fast-path]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|dsr7000|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--script FILE] [--console PORT] [--serial-tcp PORT:TCP] [--transponder SPEC]... [--no-fast-path]\n"
               "  --soc NAME       Emulated SoC (default: sti5518)\n"
               "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
               "  --board NAME     Board parts outside the SoC: dsr9500, dsr7000 (STi5512 only), 6300 (STi5518 only)\n"
@@ -392,6 +394,8 @@ int main(int argc, char **argv) {
               "                   with --run COUNT, stop after COUNT instructions\n"
               "  --serial-tcp PORT:TCP  Serve ASC PORT's serial line on 127.0.0.1:TCP (raw bytes both ways\n"
               "                   while a client is connected, e.g. SLIP)\n"
+              "  --transponder FILE.ts:FREQ_MHZ:SR_KSPS:H|V[:LO|HI][:FEC]  A DVB-S transponder broadcasting FILE\n"
+              "                   (looped) for the DSR9500 front end; repeatable\n"
                       "  --no-fast-path   Take the full timer/scheduler path for every instruction (reference)",
                       argv[0]);
       return 0;
@@ -422,6 +426,8 @@ int main(int argc, char **argv) {
       }
       if (!serialtcp::listen(tcpPort)) return 1;
       compat::println("ASC{} serial line on 127.0.0.1:{}", tcpSerialPort, serialtcp::boundPort());
+    } else if (option == "--transponder" && index + 1 < argc) {
+      transponders.emplace_back(argv[++index]);
     } else if (option == "--script" && index + 1 < argc) {
       script = argv[++index];
     } else if (option == "--soc" && index + 1 < argc) {
@@ -469,6 +475,10 @@ int main(int argc, char **argv) {
   }
   if (board == "dsr7000" && soc != "sti5512") {
     compat::println(stderr, "--board dsr7000 requires --soc sti5512");
+    return 2;
+  }
+  if (!transponders.empty() && board != "dsr9500") {
+    compat::println(stderr, "--transponder requires --board dsr9500");
     return 2;
   }
   if (board == "6300" && soc != "sti5518") {
@@ -545,6 +555,14 @@ int main(int argc, char **argv) {
     if (board == "dsr9500" ? initDsr9500Board() : board == "dsr7000" ? initDsr7000Board() : initStb6300Board()) {
       compat::println(stderr, "Cannot initialize board {}", board);
       return 1;
+    }
+    for (const std::string &spec : transponders) {
+      std::string error = dsr9500AddTransponder(spec);
+      if (!error.empty()) {
+        compat::println(stderr, "{}", error);
+        return 2;
+      }
+      compat::println("Transponder: {}", spec);
     }
   }
 

@@ -43,6 +43,13 @@ the `as` long-string splitters (kernel `-B arch/st20/tools/`, `user/bin/as`),
 again.  uClibc `vfork` now returns -1 and sets errno; the kernel copies a nested vfork
 child's stack too.  Kernel 721,776 bytes, romfs 648,192 bytes.
 
+DVB-S (2026-11-12, section "DVB-S receiver"): the HM1221 front end (tuning, LNB supply,
+22 kHz tone, DiSEqC), the PTI demultiplexer and the MPEG video/audio decoders as one loadable
+module `dvb.mod` with Linux DVB API v3 devices (`/dev/dvb/adapter0/frontend0`, `demux0`,
+`dvr0`, `video0`, `audio0`), and `scan`, `zap`, `femon` and a `tv` application (channel list
+on the OSD over live video, IR remote).  Tested in st20emu with a generated transport stream
+(`tools/dvb.script`).
+
 ## Layout in git
 
 Only the port's own files are tracked; `src/` (third-party trees), `dl/` (tarballs),
@@ -71,6 +78,10 @@ Only the port's own files are tracked; `src/` (third-party trees), `dl/` (tarbal
 | `tools/smoke.script` | st20emu test script (boot, shell, signals, panel, IR, MTD/JFFS2, fb, input; screenshots to `logs/`) |
 | `tools/test/` | kernel test programs `fbtest.c`, `evtest.c` (built with uClibc by `user/build-user.sh`; `build.sh` builds them against 2.0's uC-libc) |
 | `tools/addr2sym.py` | address -> nearest symbol in `linux.map` (debugging) |
+| `modules/dvb.c`, `modules/dvb/` | DVB module: `fe.c` (I2C, HM1221, LNB, DiSEqC, tuning thread), `pti.c` (PTI), `dmx.c` (demux0/dvr0, software section filters), `av.c` (video0/audio0, MPEG decoders), `hw.h` |
+| `user/dvb/dvbtool.c` | `scan`, `zap`, `tv`, `femon` (one bFLT, links in `/bin`) |
+| `tools/mkptitc.py` | PTI microcode header `build/mod/pti_tc.h` from `Decompilation/DSR9500` (run by `mkimage.sh`) |
+| `tools/dvb.script` | st20emu DVB test (with `--transponder`, section "DVB-S receiver") |
 | `rootfs/etc/` | `rc`, `inittab`, `profile`, `passwd`, `group`, `hosts`, `services`, `protocols`, `inetd.conf` of the root romfs |
 | `dbuild.sh CMD...` | runs CMD in the `st20-build` container (`/work` = here, `/work/tools` = `../2.0/tools`, `/work/2.0` = `../2.0`, `/work/port-tools` = this `tools/`) |
 | `kbuild.sh [targets]` | kernel make in the container |
@@ -924,3 +935,156 @@ SLIP (`tools/slip.script` with `--serial-tcp 3:5555`, `tools/slip_host.py`,
 - Modules: no use counts, parameters or inter-module symbols; relink per kernel build.
 - Tested only in st20emu (SLIP over `--serial-tcp`, a user-space host stack; no real
   slattach/PPP peer).
+
+## DVB-S receiver (2026-11-12)
+
+The DSR9500's satellite front end, transport demultiplexer and MPEG decoders, driven the way
+the original firmware drives them (register sequences from `Decompilation/DSR9500`), behind
+the Linux DVB API version 3 so that the usual tools and ideas apply.  2.4 has no DVB core;
+`modules/dvb.c` is a compact one of its own (no dvb-core backport: one adapter, one
+frontend, a software demux).
+
+### Size and flash: a loadable module
+
+| | bytes | |
+| --- | --- | --- |
+| `dvb.mod` (`/lib/modules`, insmod'ed by `/etc/rc`) | 27,556 loaded (23.7 KB text, 0.6 KB data, 3.3 KB bss) | frontend, PTI, demux, decoders |
+| `dvbtool` (`/bin`, links `scan zap tv femon`) | 37,760 | includes the 4 KB 8x16 font |
+| kernel additions | +484 | `ksyms.c` (`request_irq`, `free_irq`, `interruptible_sleep_on_timeout`), `avmem`, fb transparency |
+| romfs | 712,704 of 720,896 | **8 KB free** |
+| RAM for the decoders, taken at the first VIDEO/AUDIO_PLAY and kept | 2,048 KB | one 2 MB page block in the low 4 MB, see below |
+
+The flash layout is unchanged (kernel 768 KB with 63 KB free, romfs 704 KB, JFFS2 512 KB):
+as a module the DVB code costs the kernel partition nothing and the romfs still has room.
+If the romfs runs out, the next step is a smaller JFFS2 (6 blocks = 384 KB holds only about
+one block of data: JFFS2 keeps 5 free) or dropping test programs (`uctest`, `retest`: 128 KB)
+from the image; `mkrom-dsr9500.py` refuses an oversized romfs.  Memory: 6.8 MB are free after boot;
+the decoders take 2 MB of it only once something plays.  A boot-time reservation
+(`avmem=2048` on the command line, `arch/st20/kernel/setup.c`) was the first design but cost
+the 2 MB permanently: `userspace.script` and `net.script` then ran out of memory (busybox
+needs a 512 KB block per exec on nommu), so it is off by default.
+
+### Devices (char major 212, minors as linux-2.6: type << 4)
+
+| device | minor | |
+| --- | --- | --- |
+| `/dev/dvb/adapter0/video0` | 0 | `VIDEO_PLAY/STOP/FREEZE/CONTINUE`, `SET_BLANK`, `CLEAR_BUFFER`, `GET_STATUS`, `GET_CAPABILITIES`, `SELECT_SOURCE` (demux only) |
+| `/dev/dvb/adapter0/audio0` | 1 | `AUDIO_PLAY/STOP/PAUSE/CONTINUE`, `SET_MUTE`, `SET_MIXER` (attenuation), `CHANNEL_SELECT`, `GET_STATUS`, `CLEAR_BUFFER` |
+| `/dev/dvb/adapter0/frontend0` | 3 | `FE_GET_INFO`, `FE_SET/GET_FRONTEND` (IF kHz, SR, FEC auto or fixed, inversion auto), `FE_READ_STATUS/SIGNAL_STRENGTH/SNR/BER/UNCORRECTED_BLOCKS`, `FE_GET_EVENT` + poll, `FE_SET_VOLTAGE` (13/18/off), `FE_SET_TONE`, `FE_DISEQC_SEND_MASTER_CMD` (3-6 bytes), `FE_DISEQC_SEND_BURST` |
+| `/dev/dvb/adapter0/demux0` | 4 | `DMX_SET_FILTER` (16-byte filter/mask/mode, `CHECK_CRC`, `ONESHOT`, `IMMEDIATE_START`, timeout), `DMX_SET_PES_FILTER` (output DECODER for video/audio/PCR, TAP, TS_TAP), `START/STOP`, `SET_BUFFER_SIZE`, `GET_PES_PIDS`, `GET_STC` (last PCR), read + poll |
+| `/dev/dvb/adapter0/dvr0` | 5 | read + poll: the packets of all `DMX_OUT_TS_TAP` filters (no DVR input/playback) |
+
+Headers: `include/linux/dvb/{frontend,dmx,video,audio}.h` in the kernel tree (API v3 names,
+values and ioctl numbers; seen by uClibc through its `include/linux` link).
+`/proc/dvb` shows the state of all parts.
+
+### Design
+
+- **Front end** (`dvb/fe.c`).  I2C: the hardware master SSC1 (0x2000a000, PIO3 bits 0/2 in
+  alternate open-drain mode), polled, with the STI2C driver's register protocol (main app
+  a_7fea52dc.c; the boot loader bit-bangs the same pins instead).  HM1221 at 0xaa: probe
+  (reset pulse on the latch, id 0x5a), the main application's init list, PLL programming
+  (`f_7fe81837` with the double arithmetic in 0.1 kHz integers), symbol rate / FEC / loop
+  words (`f_7fe821b0`), AGC tracking, carrier offset, signal level, quality and the error
+  counter (`f_7fe84b94`).  A kernel thread `kdvb-fe` is TUNER_taskProcess: after
+  FE_SET_FRONTEND it waits for lock with timeouts growing x4 from 5500000/SR ticks, steps
+  the PLL 0, +1, -1, +2, -2 (+3, -3 below 9000 kS/s) MHz, reports FE_TIMEDOUT past
+  330000000/SR ticks, and when locked measures every 100 ms and falls back to searching after
+  three missed locks.  Status changes are FE_GET_EVENT events.  LNB: EMI latch 0x50400000
+  (shadowed): bit 7 supply, bit 5 18 V, bit 3 22 kHz (active low), bit 2 demodulator reset.
+  DiSEqC through the demodulator (`f_7fe82770`): 0x77 = 0xb0, bytes from 0x79,
+  0x76 = 0x40 | (len - 3); burst: 0x77 = 0xb4, 0x76 = 0x40 / 0x48.
+- **PTI** (`dvb/pti.c`): programmed exactly like ST's PTI 3.4.1 driver of the boot loader
+  (the transport controller's data structures are defined by its microcode): TC init and the
+  729-word microcode (`tools/mkptitc.py` takes it from `Decompilation/DSR9500/src/l_m_81ac.c`
+  into `build/mod/pti_tc.h`; it is not in this tree; without it the module still loads),
+  PID table, slot descriptors, DMA descriptors, interrupt 14, all with device accesses
+  (`devlw`/`devsw`, `dvb/hw.h`).  Slot 0 = video, slot 1 = audio: PES into 8 KB SDRAM rings
+  that PTI DMA channels 1/2 feed to the decoders (as the DSR9500 main application);
+  slot 47 = PCR; slots 3-46 = raw streams (188-byte packets of one PID each into a 9 KB ring,
+  drained every tick and on the PTI interrupt).  The hardware section filters (8 bytes) are
+  not used.
+- **Demux** (`dvb/dmx.c`): every PID a filter needs is one raw slot (shared by the filters
+  on it); sections are reassembled in software (pointer field, continuity, stuffing) and
+  matched like linux-2.6's dvb_demux (bytes 0 and 3-17 of the section, positive and negative
+  mode bits), CRC-32 checked on request; PES filters pass the TS payload (TAP) or whole
+  packets to dvr0 (TS_TAP).  `DMX_OUT_DECODER` filters of type video/audio/PCR program the PTI
+  decoder slots instead.  A PID can be on one PTI slot only (the lowest matching slot wins), so
+  a PID that goes to a decoder cannot be tapped at the same time (`zap -r` records instead
+  of decoding, as szap does).
+- **Decoders** (`dvb/av.c`), after the datasheet's chapter 19 (the STVID driver of the
+  firmware is the model for the header parsing): memory for the video bit buffer (208 KB)
+  and three 720x576 4:2:0 frames and the 16 KB audio bit buffer are one 2 MB page block,
+  both in the low 4 MB that the decoders' 14-bit 256-byte pointers reach (`low_pages`
+  retries and frees blocks above it; or `avmem=KB` reserved at boot).
+  Interrupt 21 (start code hit, VSYNC top/bottom).  Each start code hit reads the header
+  FIFO (sequence header -> picture size, default quantiser matrices; sequence and picture
+  coding extensions; picture header) and restarts the search with stop-on-first-slice; the
+  first slice marks the picture ready.  At the first VSYNC after a sequence header the
+  first task skips to it; then on every top-field VSYNC with the pipeline idle the next
+  picture is launched (PFH/PFV/PPR1/PPR2, reconstruction/forward/backward frame pointers
+  with I/P reference rotation and B into the third frame, OVW when it is the one displayed),
+  and the display pointer follows in display order (I/P: the previous reference, B: itself).
+  Audio: reset, bit buffer, PES sync, `AUD_PLY`, mute and attenuation.
+- **OSD over video**: `/dev/fb0` colours whose `transp` (FBIOPUTCMAP) is >= 0x8000 get the
+  14-bit palette's T bit; with the region mix weight 0 they show the video
+  (`drivers/video/st20fb.c`).  `tv` clears with such a colour.
+
+### User tools (`user/dvb/dvbtool.c`)
+
+```
+scan [-o FILE] [-l LOF] [-D] FREQ_MHZ:POL:SR_KSPS[:SAT]... | -f FILE
+     PAT, PMT (first video/audio stream, PCR), SDT names; FILE in dvb-apps format
+     ("S 11836000 H 27500000 3/4"); writes /etc/config/channels.conf (JFFS2), szap format:
+     name:freq_MHz:pol:sat:sr_ksps:vpid[+pcr]:apid:sid
+zap [-c FILE] [-l LOF] [-D] [-n COUNT] [-r] NAME|NUMBER
+     tune, A/V/PCR to the decoders, status once a second (-r: A/V PIDs to dvr0 instead)
+tv [-c FILE] [-l LOF] [-D] [NUMBER]
+     channel list + banner on /dev/fb0 over the live picture; remote: up/down select, OK zaps
+     (or shows the list), digits zap by number (after 2 s or when no longer number is
+     possible), P+/P- next/previous, Menu toggles the list, Exit hides it, Power quits
+femon                       one line of frontend status
+```
+
+LNB handling is in user space: universal by default (LOF 9750/10600 MHz, 22 kHz above
+11700 MHz), `-l 10750` single LOF, `-l L1,L2,SWITCH`; V/R = 13 V, H/L = 18 V.  DiSEqC 1.0
+committed switch (port = SAT) and tone burst as szap sends them, `-D` for none.
+
+### Tests (st20emu, `tools/dvb.script`)
+
+```sh
+../../tools/mkts.sh build/dvb-test.ts 4 22000 5/6     # 2 services: MPEG-2 720x576 + MP2
+../../builddir-release/st20emu --soc sti5512 --board dsr9500 --firmware dsr9500-uclinux24.bin \
+    --transponder build/dvb-test.ts:10788:22000:V:5/6 --script tools/dvb.script > logs/test-dvb.log
+```
+
+Result 2026-11-12 (`logs/test-dvb.log`, screenshots `logs/dvb-tv{1,2,3}.bmp`, audio
+`logs/dvb-audio.wav`): `insmod` at boot ("PTI TC loaded", HM1221 found); `scan` locks
+10788 V 22000 and writes `Emu Test 1:10788:v:0:22000:256:257:1` and
+`Emu Test 2:...:258:259:2`; `femon`/`zap 2` report status 1f (lock), signal 8f5b, snr aaaa;
+the decoder decodes 720x576 MPEG-2 (69 pictures in 3 s, 1461 over the tv run, 0 errors); `zap -r` + `dd` record 98 KB of A/V
+packets from dvr0 (sync bytes 0x47); `tv 1` shows service 1's test pattern under the channel list,
+remote Down + OK zaps to service 2 (`tv: 2 "Emu Test 2"`, SMPTE bars), Menu hides the list,
+Power quits; the audio capture is the services' sine tones (48 kHz stereo).  `rmmod dvb` and
+a second `insmod` work.  `tools/smoke.script`, `userspace.script` and `net.script` give the
+same results as before.
+
+### Not done / real-hardware unknowns
+
+- Tested only in st20emu, whose models follow the same firmware (the PTI is a high-level
+  model of the microcode's tables, the decoders decode with libavcodec into the frame
+  buffers named by the pointers).  On hardware: the SSC I2C clock (BRG 300 assumes a
+  ~60 MHz comms clock), the DiSEqC length bits for 5-6 byte messages (the firmware only
+  sends 3-4), the order/timing of the video task, B-picture overwrite (OVW) and the
+  display window/resampling (left as the boot loader set them), and the audio PCM output
+  set-up (clock divider, format: left as after reset) are unverified.
+- No clock recovery: the PCR is captured (`DMX_GET_STC`) but the 27 MHz VCXO is not steered
+  (the loader's clock-recovery/PWM driver m_a424.c would be the model) and there is no
+  PTS-based A/V sync; video decodes one picture per frame, audio free-runs.
+- Quantiser matrices carried in a sequence header are not loaded (the defaults are);
+  pictures larger than 720x576 are refused; no still pictures, VBI/teletext, CA/CI or
+  descrambling; no DVR playback (dvr0 write) and no section filtering in the PTI hardware.
+- One adapter, one frontend; FE_DISEQC_RECV_SLAVE_REPLY is not supported.
+- gcc-t800 bug found here (not fixed in the compiler): `logs/gcc-2.7.2-t800-short-vararg.c`
+  (16-bit locals/members in a shared workspace word loaded whole; dvbtool avoids 16-bit
+  locals and takes input_event fields from the bytes).

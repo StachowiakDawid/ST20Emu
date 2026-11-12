@@ -2,11 +2,14 @@
 
 #include "../../board/Board.h"
 #include "../../board/DSR9500.h"
+#include "../../board/Dsr9500Frontend.h"
 #include "../../board/Stb6300.h"
 #include "../../common/compat.h"
+#include "../../soc/sti5512/STi5512_AudioDecoder.h"
 #include "../../soc/sti5512/STi5512_Devices.h"
 #include "../../soc/sti5512/STi5512_Display.h"
 #include "../../soc/sti5512/STi5512_RegisterBlocks.h"
+#include "../../soc/sti5512/STi5512_VideoDecoder.h"
 #include "../../soc/sti5518/STi5518_Devices.h"
 #include "../../soc/sti5518/STi5518_Display.h"
 #include "../../soc/sti5518/STi5518_RegisterBlocks.h"
@@ -94,6 +97,51 @@ CliError cmd_screen(CliEngine & /*engine*/, std::span<const std::string_view> ar
   }
   compat::println("Wrote {} ({} OSD regions; OSD_CFG=0x{:02x} OSD_TOP=0x{:04x} OSD_BOT=0x{:04x})", path,
                   regions, sti5512VideoRegister(0x91), sti5512OsdPointer(0), sti5512OsdPointer(1));
+  return CliError::Success;
+}
+
+/* audio FILE.wav [nomute]: start capturing the STi5512 audio decoder's output (nomute: also
+ * while AUD_MUT is set); audio stop: finish the file; audio: status */
+CliError cmd_audio(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  if (activeBoard() != Board::Dsr9500 && activeBoard() != Board::Dsr7000) {
+    compat::println("audio needs an STi5512 board (--board dsr9500 or dsr7000)");
+    return CliError::BadParameter;
+  }
+  if (args.size() > 2 || (args.size() == 2 && args[1] != "nomute")) return CliError::BadParameter;
+  if (args.empty()) {
+    compat::println("{}", sti5512AudioStatus());
+    return CliError::Success;
+  }
+  if (args[0] == "stop") {
+    compat::println("{}", sti5512AudioCaptureStop());
+    return CliError::Success;
+  }
+  std::string message = sti5512AudioCaptureStart(std::string(args[0]), args.size() == 2);
+  if (message.starts_with("cannot")) {
+    compat::println("{}", message);
+    return CliError::BadParameter;
+  }
+  compat::println("Capturing audio to {}{}", args[0], message.empty() ? "" : " (" + message + ")");
+  return CliError::Success;
+}
+
+/* video: the STi5512 video decoder's state */
+CliError cmd_video(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
+  if (activeBoard() != Board::Dsr9500 && activeBoard() != Board::Dsr7000) {
+    compat::println("video needs an STi5512 board (--board dsr9500 or dsr7000)");
+    return CliError::BadParameter;
+  }
+  compat::println("{}", sti5512VideoStatus());
+  return CliError::Success;
+}
+
+/* tuner: the DSR9500 front end's LNB, PLL, symbol rate and lock state */
+CliError cmd_tuner(CliEngine & /*engine*/, std::span<const std::string_view> /*args*/) {
+  if (activeBoard() != Board::Dsr9500) {
+    compat::println("tuner needs --board dsr9500");
+    return CliError::BadParameter;
+  }
+  compat::println("{}", dsr9500FrontendStatus());
   return CliError::Success;
 }
 
