@@ -1,0 +1,38 @@
+#!/bin/bash
+# Preprocessor for user space (t450-gcc -B/work/user/bin/): the container's GNU cpp 4.3 in
+# place of gcc-2.7.2-t800's cccp, which has 32-bit #if arithmetic and rejects LL constants
+# in #if ("two `l's in integer constant"), both used throughout uClibc's stdio/stdlib and
+# stdint.h, and has no __VA_ARGS__.  The 2.7.2 driver calls
+#   cpp -lang-c [-v] -undef -D__GNUC__=2 -D__GNUC_MINOR__=7 -Dtransputer ... in.c [out.i]
+# -undef drops the host's target macros (__i386__, __linux__, __GNUC__ 4); the driver's -D
+# options give the 2.7.2-t800 set.  Line markers lose cpp 4.3's flag 4 (cc1 2.7.2 warns).
+# Assembler preprocessing (-lang-asm etc.) goes to the real cpp.
+G=/work/tools/lib/gcc-lib/t450/2.7.2-t800.12
+args=(); nostd=0; out=; next=
+for a in "$@"; do
+  if [ "$next" = o ]; then out=$a; next=; continue; fi
+  case $a in
+    -lang-c) ;;
+    -lang-*) exec $G/cpp "$@" ;;
+    -v) ;;
+    -o) next=o ;;
+    -nostdinc) nostd=1; args+=("$a") ;;
+    *) args+=("$a") ;;
+  esac
+done
+# the driver's output file: -o FILE, or a second file argument (in.c out.i)
+if [ -z "$out" ] && [ ${#args[@]} -ge 2 ]; then
+  last=${args[${#args[@]}-1]}; prev=${args[${#args[@]}-2]}
+  if [ "${last#-}" = "$last" ] && [ "${prev#-}" = "$prev" ]; then
+    out=$last; unset 'args[${#args[@]}-1]'
+  fi
+fi
+inc=(-nostdinc)
+[ $nostd = 0 ] && inc+=(-idirafter $G/include -idirafter /work/tools/t450/include)
+fix='s/^\(# [0-9]* "[^"]*"\)\(\( [123]\)*\) 4$/\1\2/'
+if [ -n "$out" ] && [ "$out" != - ]; then
+  /usr/bin/cpp-4.3 -undef "${inc[@]}" -D__CHAR_BIT__=8 "${args[@]}" | sed -e "$fix" > "$out"
+else
+  /usr/bin/cpp-4.3 -undef "${inc[@]}" -D__CHAR_BIT__=8 "${args[@]}" | sed -e "$fix"
+fi
+exit ${PIPESTATUS[0]}

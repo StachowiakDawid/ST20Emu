@@ -2,6 +2,9 @@
 
 Selected with `--soc sti5512`.
 
+The configuration word at `0x20000500` reads 0: the DSR9500 loader picks its ASC baud reload
+from its low six bits (1 = faster-clocked board).
+
 `VID_REV` at `0x00000078` is a read-only byte. `--soc-revision HEX` selects its value (00
 to ff) and is accepted only with STi5512. The default `0x00` is a synthetic emulator value,
 not a documented silicon reset value; the example `0xaa` is a firmware comparison value, not

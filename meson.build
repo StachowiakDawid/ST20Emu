@@ -48,6 +48,8 @@ core_sources = files(
 
 sources = core_sources + files(
   'src/main.cpp',
+  'src/console/serial_console.cpp',
+  'src/console/serial_tcp.cpp',
   'src/cli/cli_commands.cpp',
   'src/cli/cli_engine.cpp',
   'src/cli/line_reader.cpp',
@@ -66,7 +68,7 @@ executable('st20emu',
 )
 
 cpu_test = executable('cpu-instructions',
-  core_sources + files('tests/cpu_instructions.cpp'),
+  core_sources + files('tests/cpu_instructions.cpp', 'src/console/serial_tcp.cpp'),
   dependencies: threads,
   install: false
 )

@@ -1,0 +1,10 @@
+long syscall3(long nr, long a, long b, long c);
+int write(int fd, const void *buf, int n);
+int read(int fd, void *buf, int n);
+int getpid(void);
+int pause(void);
+long time(long *t);
+void _exit(int code);
+int strlen(const char *s);
+void puts_(const char *s);
+void putnum(long v);

@@ -1,0 +1,41 @@
+run 450000000
+asc 3 busybox 2>&1 | head -n 1; uctest | tail -n 1; stattest | tail -n 1; uctest vforkfail | tail -n 1
+run 400000000
+asc 3 cd /tmp; echo one > a; echo two >> a; cp a b; mv b c; ln -s c d; ls -l; cat d | wc -l; rm c d; ls; cd /
+run 300000000
+asc 3 printf '%s=%d %.3f %5.1e\n' x 42 3.14159 0.000123; echo "3 4" | awk '{ printf "%d %.4f\n", $1*$2, sqrt($1*$1+$2*$2) }'
+run 300000000
+asc 3 seq 1 10 | sort -r | head -n 3 | tr '\n' ' '; echo; echo b a c b | tr ' ' '\n' | sort | uniq -c
+run 300000000
+asc 3 echo "key=val other=x" | sed -e 's/\([a-z]*\)=\([a-z]*\)/\2:\1/g'; grep -c root /etc/passwd; echo AbC | grep -i abc
+run 300000000
+asc 3 echo /etc/*; if [ -r /etc/rc ] && [ ! -d /etc/rc ]; then echo test ok; fi
+run 300000000
+asc 3 n=`expr 2 + 3`; echo n=$n $(echo sub) `echo backq`; for i in a b; do echo i=$i; done; test -z "" && echo and || echo or
+run 400000000
+asc 3 cat /proc/self/status | head -n 4; cat /proc/uptime; cat /proc/loadavg; dmesg | tail -n 2
+run 300000000
+asc 3 mkfs.minix /dev/ram1 256 > /dev/null; mkdir /tmp/m; mount -t minix /dev/ram1 /tmp/m; echo x > /tmp/m/f; df /tmp/m; umount /tmp/m
+run 400000000
+asc 3 tar cf /tmp/e.tar /etc 2>/dev/null; gzip /tmp/e.tar; gunzip -c /tmp/e.tar.gz | tar tf - | wc -l; find /tmp -name '*.gz'
+run 600000000
+asc 3 echo hello | od -c | head -n 1; echo hi | hexdump -c | head -n 1; date -u +%Y; cal 1 2000 | head -n 2
+run 300000000
+asc 3 sleep 100 &
+run 100000000
+asc 3 sleep 30
+run 100000000
+asc 3 
+run 100000000
+asc 3 jobs; killall sleep; sleep 1; jobs
+run 300000000
+asc 3 time sleep 1; watch -n 1 date > /dev/null & sleep 2; killall watch; jobs
+run 600000000
+asc 3 vi /tmp/v.txt
+run 200000000
+asc 3 ihello from vi
+run 100000000
+asc 3 :wq
+run 200000000
+asc 3 cat /tmp/v.txt; echo done
+run 200000000

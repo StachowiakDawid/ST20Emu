@@ -2,6 +2,8 @@
 
 #include "cli/cli_engine.h"
 #include "cli/line_reader.h"
+#include "console/serial_console.h"
+#include "console/serial_tcp.h"
 #include "core/cpu/omr.h"
 #include "core/cpu/st20.h"
 #include "core/memory/memory.h"
@@ -31,15 +33,39 @@
 constexpr uint64_t maxInstr = MAX_UNPROMPTED_INSTR;
 constexpr uint64_t warnInstr = WARN_UNPROMPTED_INSTR;
 
-/* serial (ASC) output of the emulated SoC, printed one line at a time as "ASCn> text" */
+/* serial (ASC) output of the emulated SoC, printed one line at a time as "ASCn> text", except
+ * the --console port's, which goes to stdout unchanged */
 static bool serialSti5512 = false;
+static int consolePort = -1;
+static int tcpSerialPort = -1; // --serial-tcp PORT:TCP
 static std::array<std::string, 4> serialLines;
 
+/* --serial-tcp: the client's bytes go to the port's receive queue; polled every 16th output
+ * check (16,000 instructions) */
+static void pollSerialTcp() {
+  static unsigned calls = 0;
+  if (tcpSerialPort < 0 || ++calls % 16 != 0) return;
+  std::vector<uint8_t> received;
+  serialtcp::poll(received);
+  if (received.empty()) return;
+  if (serialSti5512) sti5512Peripherals().feedAscReceive(tcpSerialPort, received);
+  else sti5518Peripherals().feedAscReceive(tcpSerialPort, received);
+}
+
 static void printSerialOutput(bool flush) {
+  pollSerialTcp();
   for (int port = 0; port < 4; ++port) {
     std::vector<uint8_t> bytes;
     if (serialSti5512) bytes = sti5512Peripherals().takeAscTransmit(port);
     else bytes = sti5518Peripherals().takeAscTransmit(port);
+    if (port == tcpSerialPort && !bytes.empty() && serialtcp::send(bytes)) continue;
+    if (port == consolePort) {
+      if (!bytes.empty()) {
+        std::fwrite(bytes.data(), 1, bytes.size(), stdout);
+        std::fflush(stdout);
+      }
+      continue;
+    }
     std::string &line = serialLines[static_cast<std::size_t>(port)];
     for (uint8_t byte : bytes) {
       if (byte == '\n') {
@@ -210,6 +236,16 @@ static int runBatch() {
 extern CPUSTATE cpuState;
 extern OMRSTATE omrState;
 
+static void printRunSummary(uint64_t executed, std::chrono::steady_clock::time_point start) {
+  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  compat::println("Executed {} instructions in {:.2f} s ({:.2f} MIPS)", executed, seconds,
+                  static_cast<double>(executed) / seconds / 1e6);
+  compat::println("A={:08x} B={:08x} C={:08x} Iptr={:08x} Wptr={:08x} Priority={} ClockHP={:08x} "
+                  "ClockLP={:08x} Cycles={}",
+                  cpuState.areg, cpuState.breg, cpuState.creg, cpuState.iptr, cpuState.wptr, cpuState.priority,
+                  omrState.ClockRegHP, omrState.ClockRegLP, elapsedCpuCycles());
+}
+
 /* free-runs count instructions without the prompt (benchmarks, the profile-guided build's
  * training run), then reports the speed */
 static int runFree(uint64_t count) {
@@ -236,13 +272,58 @@ static int runFree(uint64_t count) {
     printSerialOutput(false);
   }
   printSerialOutput(true);
-  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-  compat::println("Executed {} instructions in {:.2f} s ({:.2f} MIPS)", executed, seconds,
-                  static_cast<double>(executed) / seconds / 1e6);
-  compat::println("A={:08x} B={:08x} C={:08x} Iptr={:08x} Wptr={:08x} Priority={} ClockHP={:08x} "
-                  "ClockLP={:08x} Cycles={}",
-                  cpuState.areg, cpuState.breg, cpuState.creg, cpuState.iptr, cpuState.wptr, cpuState.priority,
-                  omrState.ClockRegHP, omrState.ClockRegLP, elapsedCpuCycles());
+  printRunSummary(executed, start);
+  return result ? 1 : 0;
+}
+
+/* --console PORT: free-runs (up to limit instructions when nonzero) with the host terminal as
+ * the port's serial terminal: typed bytes go to its receive queue, its output to stdout raw.
+ * Ctrl-] ends the session. */
+static int runConsole(int port, uint64_t limit) {
+  constexpr uint64_t CHUNK = 1000;           // instructions between serial output checks
+  constexpr uint64_t INPUT_POLL_CHUNKS = 100; // chunks between stdin polls
+  compat::notesEnabled = false;
+  consolePort = port;
+  int result = decodeNextInstr();
+  if (result) {
+    compat::println("Cannot fetch instruction: {}", cpuErrorText(result));
+    return 1;
+  }
+  compat::println("Console on ASC{}: press Ctrl-] to quit", port);
+  std::fflush(stdout);
+  console::beginSession();
+  auto start = std::chrono::steady_clock::now();
+  uint64_t executed = 0;
+  uint64_t chunks = 0;
+  std::vector<uint8_t> input;
+  bool quit = false;
+  while (!quit && (limit == 0 || executed < limit)) {
+    RunResult run = runInstructions(limit ? std::min(limit - executed, CHUNK) : CHUNK);
+    executed += run.completed;
+    if (run.stopped) {
+      ++executed;
+      result = run.execResult ? run.execResult : decodeNextInstr();
+      printSerialOutput(true);
+      if (run.execResult) compat::println("\nExecution stopped: {}", cpuErrorText(result));
+      else if (result) compat::println("\nCannot fetch instruction: {}", cpuErrorText(result));
+      else compat::println("\nWatch condition encountered");
+      break;
+    }
+    printSerialOutput(false);
+    if (++chunks % INPUT_POLL_CHUNKS == 0) {
+      console::Input polled = console::pollInput(input);
+      quit = polled == console::Input::Escape;
+      if (!input.empty()) {
+        if (serialSti5512) sti5512Peripherals().feedAscReceive(port, input);
+        else sti5518Peripherals().feedAscReceive(port, input);
+        input.clear();
+      }
+    }
+  }
+  printSerialOutput(true);
+  console::endSession();
+  compat::println("");
+  printRunSummary(executed, start);
   return result ? 1 : 0;
 }
 
@@ -290,6 +371,7 @@ int main(int argc, char **argv) {
   bool batch = false;
   uint64_t runCount = 0;
   std::string script;
+  int consoleOption = -1;
   std::string_view soc = "sti5518";
   uint32_t socRevision = 0;
   bool revisionSpecified = false;
@@ -297,7 +379,7 @@ int main(int argc, char **argv) {
   for (int index = 1; index < argc; ++index) {
     std::string_view option = argv[index];
     if (option == "--help" || option == "-h") {
-      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|dsr7000|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--script FILE] [--no-fast-path]\n"
+      compat::println("Usage: {} [--soc sti5518|sti5512] [--soc-revision HEX] [--board dsr9500|dsr7000|6300] [--firmware FILE] [--address HEX] [--batch] [--run COUNT] [--script FILE] [--console PORT] [--serial-tcp PORT:TCP] [--no-fast-path]\n"
               "  --soc NAME       Emulated SoC (default: sti5518)\n"
               "  --soc-revision HEX  STi5512 VID_REV byte (default: synthetic 00)\n"
               "  --board NAME     Board parts outside the SoC: dsr9500, dsr7000 (STi5512 only), 6300 (STi5518 only)\n"
@@ -306,6 +388,10 @@ int main(int argc, char **argv) {
                       "  --batch          Run until an error, logging to st20emu-log-{{timestamp}}.txt\n"
                       "  --run COUNT      Run COUNT instructions without the prompt, then report the speed\n"
               "  --script FILE    Run FILE: lines `run N` and CLI commands (screen FILE, ir KEY, ...)\n"
+              "  --console PORT   Run freely with the terminal as ASC PORT (0-3)'s serial console (Ctrl-] quits);\n"
+              "                   with --run COUNT, stop after COUNT instructions\n"
+              "  --serial-tcp PORT:TCP  Serve ASC PORT's serial line on 127.0.0.1:TCP (raw bytes both ways\n"
+              "                   while a client is connected, e.g. SLIP)\n"
                       "  --no-fast-path   Take the full timer/scheduler path for every instruction (reference)",
                       argv[0]);
       return 0;
@@ -321,6 +407,21 @@ int main(int argc, char **argv) {
         compat::println(stderr, "Invalid instruction count: {}", value);
         return 2;
       }
+    } else if (option == "--console" && index + 1 < argc) {
+      std::string_view value = argv[++index];
+      if (value.size() != 1 || value[0] < '0' || value[0] > '3') {
+        compat::println(stderr, "Invalid console port: {} (expected 0-3)", value);
+        return 2;
+      }
+      consoleOption = value[0] - '0';
+    } else if (option == "--serial-tcp" && index + 1 < argc) {
+      uint16_t tcpPort = 0;
+      if (!serialtcp::parseSpec(argv[++index], tcpSerialPort, tcpPort)) {
+        compat::println(stderr, "Invalid --serial-tcp: {} (expected PORT:TCP, e.g. 3:5555)", argv[index]);
+        return 2;
+      }
+      if (!serialtcp::listen(tcpPort)) return 1;
+      compat::println("ASC{} serial line on 127.0.0.1:{}", tcpSerialPort, serialtcp::boundPort());
     } else if (option == "--script" && index + 1 < argc) {
       script = argv[++index];
     } else if (option == "--soc" && index + 1 < argc) {
@@ -378,12 +479,20 @@ int main(int argc, char **argv) {
     compat::println(stderr, "--soc-revision requires --soc sti5512");
     return 2;
   }
-  if ((batch || runCount || addressSpecified || !script.empty()) && firmware.empty()) {
-    compat::println(stderr, "--batch, --run and --address require --firmware FILE");
+  if ((batch || runCount || addressSpecified || !script.empty() || consoleOption >= 0) && firmware.empty()) {
+    compat::println(stderr, "--batch, --run, --script, --console and --address require --firmware FILE");
     return 2;
   }
   if (batch && runCount) {
     compat::println(stderr, "--batch and --run can't be combined");
+    return 2;
+  }
+  if (tcpSerialPort >= 0 && tcpSerialPort == consoleOption) {
+    compat::println(stderr, "--serial-tcp and --console can't use the same port");
+    return 2;
+  }
+  if (consoleOption >= 0 && (batch || !script.empty())) {
+    compat::println(stderr, "--console can't be combined with --batch or --script");
     return 2;
   }
 
@@ -451,6 +560,7 @@ int main(int argc, char **argv) {
   }
   if (batch) return runBatch();
   if (!script.empty()) return runScript(script, cli);
+  if (consoleOption >= 0) return runConsole(consoleOption, runCount);
   if (runCount) return runFree(runCount);
 
   compat::println("");

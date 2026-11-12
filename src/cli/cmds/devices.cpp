@@ -4,8 +4,10 @@
 #include "../../board/DSR9500.h"
 #include "../../board/Stb6300.h"
 #include "../../common/compat.h"
+#include "../../soc/sti5512/STi5512_Devices.h"
 #include "../../soc/sti5512/STi5512_Display.h"
 #include "../../soc/sti5512/STi5512_RegisterBlocks.h"
+#include "../../soc/sti5518/STi5518_Devices.h"
 #include "../../soc/sti5518/STi5518_Display.h"
 #include "../../soc/sti5518/STi5518_RegisterBlocks.h"
 
@@ -44,6 +46,25 @@ CliError cmd_front_panel(CliEngine & /*engine*/, std::span<const std::string_vie
     compat::println("{}", error);
     return CliError::BadParameter;
   }
+  return CliError::Success;
+}
+
+/* asc PORT TEXT...: queue TEXT (words joined by spaces) and a newline on the receiver of
+ * ASC PORT (0-3), e.g. typing into a Linux console on ASC3 */
+CliError cmd_asc(CliEngine & /*engine*/, std::span<const std::string_view> args) {
+  if (args.size() < 2 || args[0].size() != 1 || args[0][0] < '0' || args[0][0] > '3')
+    return CliError::BadParameter;
+  int port = args[0][0] - '0';
+  std::vector<uint8_t> bytes;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    if (i > 1) bytes.push_back(' ');
+    bytes.insert(bytes.end(), args[i].begin(), args[i].end());
+  }
+  bytes.push_back('\n');
+  Board board = activeBoard();
+  Sti55xxPeripherals &peripherals =
+      board == Board::Dsr9500 || board == Board::Dsr7000 ? sti5512Peripherals() : sti5518Peripherals();
+  peripherals.feedAscReceive(port, bytes);
   return CliError::Success;
 }
 

@@ -1,0 +1,4 @@
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+HOME=/tmp
+PS1='st20# '
+export PATH HOME PS1

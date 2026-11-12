@@ -1,0 +1,27 @@
+# downloads and third-party trees (recreate with tools/setup-src.sh; our changes are in patches/)
+/dl/
+/src/
+
+# toolchain built by build-toolchain.sh in Docker; keep only our scripts in tools/
+/tools/*
+!/tools/bin/
+/tools/bin/*
+!/tools/bin/st20-ldr
+!/tools/mkpatches.sh
+!/tools/setup-src.sh
+!/tools/mkrom-dsr9500.py
+!/tools/mkflat.py
+!/tools/mkromfs.py
+!/tools/mkimage.sh
+!/tools/mkirkeys.py
+!/tools/rebuild-gcc.sh
+
+# logs and build outputs
+/logs/
+*.log
+/test/*.o
+/test/*.lit
+/test/*.bin
+/dsr9500-uclinux.bin
+/user/build/
+/x-softfloat/

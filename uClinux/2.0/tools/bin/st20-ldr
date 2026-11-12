@@ -1,0 +1,60 @@
+#!/bin/bash
+# ld wrapper for ttools (lit has no relocatable output):
+#   ld -r -o X.o inputs...   X.o becomes an ar archive of all input objects
+#   ld ... inputs -o out     runs lit; archive inputs (possibly nested: ar members that are
+#                            themselves archives) are flattened first, members renamed to
+#                            short unique names, since lit reads only plain archives.
+args=(); out=a.out; rel=0; ins=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -r) rel=1 ;;
+    -g|-x|-X|-s) ;;
+    -o) out="$2"; shift ;;
+    *.o|*.a) ins+=("$1") ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+
+tmp=$(mktemp -d); n=0
+trap 'rm -rf "$tmp"' EXIT
+
+is_ar() { [ "$(head -c 7 "$1")" = '!<arch>' ]; }
+
+# flatten FILE into directory DIR as m%05d.o members (recursive for nested archives)
+flatten() {
+  local f=$1 dir=$2 d m a
+  if is_ar "$f"; then
+    d=$(mktemp -d "$tmp/x.XXXXXX"); a=$(readlink -f "$f")
+    (cd "$d" && ar x "$a")
+    for m in $(ar t "$f"); do flatten "$d/$m" "$dir"; done
+  else
+    n=$((n+1)); cp "$f" "$dir/$(printf m%05d.o $n)"
+  fi
+}
+
+if [ $rel = 1 ]; then
+  o=$(readlink -f "$(dirname "$out")")/$(basename "$out")
+  mkdir "$tmp/out"
+  for f in "${ins[@]}"; do flatten "$f" "$tmp/out"; done
+  rm -f "$out"
+  if [ $n -gt 0 ]; then (cd "$tmp/out" && ar rcS "$o" m*.o) || exit 1
+  else ar rcS "$o"; fi
+  exit 0
+fi
+
+# final link: objects stay objects, each archive input becomes one flat archive
+lins=(); k=0
+for f in "${ins[@]}"; do
+  if is_ar "$f"; then
+    k=$((k+1)); dir="$tmp/a$k"; mkdir "$dir"
+    flatten "$f" "$dir"
+    if ls "$dir"/m*.o >/dev/null 2>&1; then
+      (cd "$dir" && ar rcS "$tmp/a$k.a" m*.o) || exit 1
+      lins+=("$tmp/a$k.a")
+    fi
+  else
+    lins+=("$f")
+  fi
+done
+lit "${args[@]}" -o "$out" "${lins[@]}"

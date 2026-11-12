@@ -1,0 +1,6 @@
+# Internet protocols (subset of /etc/protocols)
+ip	0	IP
+icmp	1	ICMP
+tcp	6	TCP
+udp	17	UDP
+raw	255	RAW

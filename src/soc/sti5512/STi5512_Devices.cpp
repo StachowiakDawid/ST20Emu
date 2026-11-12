@@ -43,6 +43,18 @@ int writeLevel(void *, uint32_t address, int width, uint32_t value) {
   return 0;
 }
 
+/* 0x20000500: configuration word the DSR9500 loader reads in asc_init (Decompilation/DSR9500
+ * src/m_ab80.c): low six bits 1 select the ASC baud reload of the faster-clocked board.
+ * Read-only, modelled as 0 (standard board). */
+constexpr uint32_t configWordAddress = 0x20000500U;
+/* any width: the DSR9500 main application reads this area with devlb */
+int readConfigWord(void *, uint32_t, int, uint32_t *value) {
+  *value = 0;
+  return 0;
+}
+int writeConfigWord(void *, uint32_t, int, uint32_t) {
+  return 0; /* read-only: writes are ignored */
+}
 void acknowledgeInterrupt() {
   acknowledgeInc(peripherals.controller);
 }
@@ -51,6 +63,7 @@ int registerDevices() {
   std::vector<MemoryDevice> devices = sti5512RegisterBlockDevices();
   devices.push_back(sti5512PtiDmaDevice());
   devices.push_back({levelBase, levelBase + 0x7f, nullptr, readLevel, writeLevel});
+  devices.push_back({configWordAddress, configWordAddress + 3, nullptr, readConfigWord, writeConfigWord});
   return peripherals.registerDevices(std::move(devices));
 }
 

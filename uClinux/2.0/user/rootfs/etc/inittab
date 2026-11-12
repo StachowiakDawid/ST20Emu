@@ -1,0 +1,5 @@
+# busybox init: <tty>:<runlevels (ignored)>:<action>:<command>
+ttyS0::sysinit:/bin/sh /etc/rc
+ttyS0::respawn:-/bin/sh
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r

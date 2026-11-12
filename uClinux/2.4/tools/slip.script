@@ -1,0 +1,3 @@
+run 450000000
+asc 3 nettest slip /dev/ttyS0 10.0.0.2 10.0.0.1 7
+run 8000000000

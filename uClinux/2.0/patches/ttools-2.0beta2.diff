@@ -1,0 +1,225 @@
+diff -ru -x *.o ttools-2.0beta2/Makefile ttools-2.0beta2/Makefile
+--- ttools-2.0beta2/Makefile	1997-03-29 22:55:24
++++ ttools-2.0beta2/Makefile	2026-11-11 13:34:49
+@@ -85,13 +85,13 @@
+ # 'production' flags
+ CFLAGS_DEB='-fomit-frame-pointer'
+ CFLAGS_ANY='-pipe'
+-CFLAGS_OPT='-O2 -m486'
++CFLAGS_OPT='-O2 -march=i486'
+ CFLAGS_WRN='-Wall'
+ 
+ # 'development' flags: used for `make devel'
+ DEVEL_CFLAGS_DEB='-g -DEXPR_DEBUG'
+ DEVEL_CFLAGS_ANY='-pipe'
+-DEVEL_CFLAGS_OPT='-m486'
++DEVEL_CFLAGS_OPT='-march=i486'
+ DEVEL_CFLAGS_WRN='-Wall'
+ 
+ ### End of tunable parameters
+diff -ru -x *.o ttools-2.0beta2/ast/Makefile ttools-2.0beta2/ast/Makefile
+--- ttools-2.0beta2/ast/Makefile	1995-12-22 13:24:38
++++ ttools-2.0beta2/ast/Makefile	2026-11-11 13:34:49
+@@ -19,7 +19,7 @@
+ CFLAGS_DEF=-DAST
+ CFLAGS_INC=-I../shared
+ CFLAGS_ANY=-pipe
+-CFLAGS_OPT=-m486
++CFLAGS_OPT=-march=i486
+ CFLAGS_WRN=-Wall
+ 
+ CFLAGS=$(CFLAGS_INC) $(CFLAGS_OPT) $(CFLAGS_DEB) $(CFLAGS_WRN) \
+diff -ru -x *.o ttools-2.0beta2/ast/scan.c ttools-2.0beta2/ast/scan.c
+--- ttools-2.0beta2/ast/scan.c	1996-01-16 17:07:53
++++ ttools-2.0beta2/ast/scan.c	2026-11-12 01:29:05
+@@ -4407,8 +4407,13 @@
+ static void
+ mk_string_space (int leng_requested)
+ {
++    /* grow until the request fits: a single token (a run of plain
++       characters) can be longer than the doubled buffer */
+     if (stringlenmax - stringlen < leng_requested) {
+-	stringlenmax = stringlenmax? stringlenmax*2: 80;
++	if (stringlenmax == 0)
++	    stringlenmax = 80;
++	while (stringlenmax - stringlen < leng_requested)
++	    stringlenmax *= 2;
+ 	string = (char *) xrealloc (string, stringlenmax);
+     }
+ }
+diff -ru -x *.o ttools-2.0beta2/ast/scan.l ttools-2.0beta2/ast/scan.l
+--- ttools-2.0beta2/ast/scan.l	1996-01-16 17:05:45
++++ ttools-2.0beta2/ast/scan.l	2026-11-12 01:29:05
+@@ -589,8 +589,13 @@
+ static void
+ mk_string_space (int leng_requested)
+ {
++    /* grow until the request fits: a single token (a run of plain
++       characters) can be longer than the doubled buffer */
+     if (stringlenmax - stringlen < leng_requested) {
+-	stringlenmax = stringlenmax? stringlenmax*2: 80;
++	if (stringlenmax == 0)
++	    stringlenmax = 80;
++	while (stringlenmax - stringlen < leng_requested)
++	    stringlenmax *= 2;
+ 	string = (char *) xrealloc (string, stringlenmax);
+     }
+ }
+diff -ru -x *.o ttools-2.0beta2/dast/Makefile ttools-2.0beta2/dast/Makefile
+--- ttools-2.0beta2/dast/Makefile	1995-12-22 13:24:39
++++ ttools-2.0beta2/dast/Makefile	2026-11-11 13:34:49
+@@ -15,7 +15,7 @@
+ CFLAGS_DEF=
+ CFLAGS_INC=-I../shared
+ CFLAGS_ANY=-pipe
+-CFLAGS_OPT=-m486
++CFLAGS_OPT=-march=i486
+ CFLAGS_WRN=-Wall
+ 
+ CFLAGS=$(CFLAGS_INC) $(CFLAGS_OPT) $(CFLAGS_DEB) $(CFLAGS_WRN) \
+diff -ru -x *.o ttools-2.0beta2/lit/Makefile ttools-2.0beta2/lit/Makefile
+--- ttools-2.0beta2/lit/Makefile	1995-12-22 13:24:39
++++ ttools-2.0beta2/lit/Makefile	2026-11-11 13:34:49
+@@ -16,7 +16,7 @@
+ CFLAGS_DEF=-DLIT $(LIBDIR) $(LLIBDIR)
+ CFLAGS_INC=-I../shared -I../dast
+ CFLAGS_ANY=-pipe
+-CFLAGS_OPT=-m486
++CFLAGS_OPT=-march=i486
+ CFLAGS_WRN=-Wall
+ 
+ CFLAGS=$(CFLAGS_INC) $(CFLAGS_OPT) $(CFLAGS_DEB) $(CFLAGS_WRN) \
+diff -ru -x *.o ttools-2.0beta2/lit/lit.c ttools-2.0beta2/lit/lit.c
+--- ttools-2.0beta2/lit/lit.c	1997-03-29 22:54:13
++++ ttools-2.0beta2/lit/lit.c	2026-11-11 13:35:53
+@@ -10,7 +10,7 @@
+ 
+ static void output_stabs ();
+ static void ifile_add (char *fname);
+-static void ifile_add_member (struct ifile *master, fpos_t lo, fpos_t hi, char *);
++static void ifile_add_member (struct ifile *master, long lo, long hi, char *);
+ static FILE *ifile_fopen (char *fname, char *mode);
+ static int ifile_isarchive (struct ifile *);
+ static void ifile_open_archive (struct ifile *);
+@@ -49,9 +49,9 @@
+     FILE *stream_proper;	/* open file, or NULL, if closed temporarily */
+     FILE **stream;		/* pointer to stream_proper in this or the
+ 				   archive master ifile */
+-    fpos_t lo;			/* start offset; non-0 for archive members */
+-    fpos_t hi;			/* end offset; ==lo+file_length */
+-    fpos_t pos;			/* position saved after a pass */
++    long lo;			/* start offset; non-0 for archive members */
++    long hi;			/* end offset; ==lo+file_length */
++    long pos;			/* position saved after a pass */
+     name *names;		/* index-to-name mapping table */
+     int nnames;			/* number of entries in `names' */
+     expr *elements;		/* index-to-element mapping table */
+@@ -702,7 +702,7 @@
+    ifile `master' */
+ 
+ static void
+-ifile_add_member (struct ifile *master, fpos_t lo, fpos_t hi, char *membname)
++ifile_add_member (struct ifile *master, long lo, long hi, char *membname)
+ {
+     struct ifile *ifi;
+ 
+@@ -800,7 +800,7 @@
+ 	fatal ("cannot fseek in `%s': %s\n", ifi->fname, strerror (errno));
+ 
+     while (fread (&header, sizeof (header), 1, *ifi->stream) == 1) {
+-	fpos_t startpos = ftell (*ifi->stream);
++	long startpos = ftell (*ifi->stream);
+ 	long sz;
+ 	char *p;
+ 
+diff -ru -x *.o ttools-2.0beta2/lit/options.h ttools-2.0beta2/lit/options.h
+--- ttools-2.0beta2/lit/options.h	1996-02-25 16:48:07
++++ ttools-2.0beta2/lit/options.h	2026-11-11 13:35:28
+@@ -31,7 +31,7 @@
+ /* end of common options; lit-specific options follow */
+ 
+ DEFINE_OPTION ("segment-align", required_argument, NULL, 'a', "\
+--a N, --segment-align N	assume segments will be loaded at the multiple-of-N
++-a N, --segment-align N	assume segments will be loaded at the multiple-of-N\n\
+                         boundary; default 4\n")
+ 
+ DEFINE_OPTION ("hook", required_argument, NULL, 'h', "\
+diff -ru -x *.o ttools-2.0beta2/litdump/Makefile ttools-2.0beta2/litdump/Makefile
+--- ttools-2.0beta2/litdump/Makefile	1995-12-22 13:25:10
++++ ttools-2.0beta2/litdump/Makefile	2026-11-11 13:34:49
+@@ -17,7 +17,7 @@
+ CFLAGS_DEF=
+ CFLAGS_INC=-I../shared -I../dast
+ CFLAGS_ANY=-pipe
+-CFLAGS_OPT=-m486
++CFLAGS_OPT=-march=i486
+ CFLAGS_WRN=-Wall
+ 
+ CFLAGS=$(CFLAGS_INC) $(CFLAGS_OPT) $(CFLAGS_DEB) $(CFLAGS_WRN) \
+diff -ru -x *.o ttools-2.0beta2/oserver/Makefile ttools-2.0beta2/oserver/Makefile
+--- ttools-2.0beta2/oserver/Makefile	1995-12-22 13:25:10
++++ ttools-2.0beta2/oserver/Makefile	2026-11-11 13:34:49
+@@ -20,7 +20,7 @@
+ CFLAGS_DEF=
+ CFLAGS_INC=-I../shared -I$(LINK_H_PATH)
+ CFLAGS_ANY=-pipe
+-CFLAGS_OPT=-m486
++CFLAGS_OPT=-march=i486
+ CFLAGS_WRN=-Wall
+ 
+ CFLAGS=$(CFLAGS_INC) $(CFLAGS_OPT) $(CFLAGS_DEB) $(CFLAGS_WRN) \
+diff -ru -x *.o ttools-2.0beta2/shared/ments.c ttools-2.0beta2/shared/ments.c
+--- ttools-2.0beta2/shared/ments.c	1995-12-22 13:25:10
++++ ttools-2.0beta2/shared/ments.c	2026-11-11 14:50:53
+@@ -539,6 +539,13 @@
+ 		    || el->size->u.range.hi != maxsz) {
+ 
+ 		    /* ranges should never grow */
++		    if (minsz < el->size->u.range.lo || maxsz > el->size->u.range.hi) {
++			if (getenv ("LIT_DEBUG_GROW")) fprintf (stderr, "GROW seg %s frag %s el %d tag %d: [%ld,%ld] -> [%d,%d] arg ",
++				 seg->name->ident, frag->ident, elno, (int) el->tag,
++				 (long) el->size->u.range.lo, (long) el->size->u.range.hi, minsz, maxsz);
++			expr_print (stderr, el->tag == ELEMENT_CMD ? el->u.cmd.arg : el->u.data.count);
++			fprintf (stderr, "\n");
++		    }
+ 		    assert (minsz >= el->size->u.range.lo);
+ 		    assert (maxsz <= el->size->u.range.hi);
+ 
+@@ -847,8 +854,8 @@
+ 			sz = cmd_generate (el->u.block.ptr, opcode, arg,
+ 					   el->size->u.constval);
+ 			if (sz < 0)
+-			    error ("element %p: slot %d is too narrow\n",
+-				   el, el->size->u.constval);
++			    error ("element %p: slot %d is too narrow (frag %s, opcode %#x, arg %d)\n",
++				   el, el->size->u.constval, seg->fragments[j].name->ident, opcode, arg);
+ 		    }
+ 		    break;
+ 
+diff -ru -x *.o ttools-2.0beta2/startups/absolute/Makefile ttools-2.0beta2/startups/absolute/Makefile
+--- ttools-2.0beta2/startups/absolute/Makefile	1995-12-22 13:24:40
++++ ttools-2.0beta2/startups/absolute/Makefile	2026-11-11 13:34:49
+@@ -12,7 +12,7 @@
+ CFLAGS_DEF=
+ CFLAGS_INC=-I../shared -I../../shared
+ CFLAGS_ANY=-pipe
+-CFLAGS_OPT=-O2 -m486
++CFLAGS_OPT=-O2 -march=i486
+ CFLAGS_WRN=-Wall
+ 
+ CFLAGS=$(CFLAGS_INC) $(CFLAGS_OPT) $(CFLAGS_DEB) $(CFLAGS_WRN) \
+diff -ru -x *.o ttools-2.0beta2/startups/absolute/crossload.c ttools-2.0beta2/startups/absolute/crossload.c
+--- ttools-2.0beta2/startups/absolute/crossload.c	1995-12-22 13:24:40
++++ ttools-2.0beta2/startups/absolute/crossload.c	2026-11-11 20:46:43
+@@ -11,8 +11,9 @@
+ 
+ /* Max size of memory image this program can build.  We malloc a
+    buffer of this size; feel free to increase if you have enough
+-   virtual memory. */
+-#define MAX_IMAGE_SIZE  (512*1024)
++   virtual memory.  (uClinux/ST20: was 512 KB, which the 2.4 kernel
++   outgrew; 8 MB = the DSR9500's SDRAM.) */
++#define MAX_IMAGE_SIZE  (8*1024*1024)
+ 
+ 
+ #include <stdio.h>

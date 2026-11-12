@@ -1,0 +1,338 @@
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/coreutils/stty.c busybox-1.00/coreutils/stty.c
+--- busybox-1.00/coreutils/stty.c	2004-09-15 05:24:32
++++ busybox-1.00/coreutils/stty.c	2026-11-11 21:23:45
+@@ -428,7 +428,8 @@
+ 
+ static const char *device_name;
+ 
+-static __attribute__ ((noreturn)) void perror_on_device(const char *fmt)
++/* no attribute: gcc 2.7.2 rejects one before the return type of a definition */
++static void perror_on_device(const char *fmt)
+ {
+ 	bb_perror_msg_and_die(fmt, device_name);
+ }
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/networking/Config.in busybox-1.00/networking/Config.in
+--- busybox-1.00/networking/Config.in	2004-09-23 22:08:46
++++ busybox-1.00/networking/Config.in	2026-11-12 00:21:31
+@@ -492,7 +492,6 @@
+ config CONFIG_TELNETD
+ 	bool "telnetd"
+ 	default n
+-	select CONFIG_LOGIN
+ 	help
+ 	  A daemon for the TELNET protocol, allowing you to log onto the host
+ 	  running the daemon.  Please keep in mind that the TELNET protocol
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/networking/httpd.c busybox-1.00/networking/httpd.c
+--- busybox-1.00/networking/httpd.c	2004-10-08 10:03:29
++++ busybox-1.00/networking/httpd.c	2026-11-12 00:03:51
+@@ -1869,7 +1869,7 @@
+ #endif
+ 	    handleIncoming();
+ 	    if(!config->debugHttpd)
+-		exit(0);
++		_exit(0);
+ 	}
+ 	close(s);
+       }
+@@ -2080,10 +2080,14 @@
+ #endif
+ 
+ #ifndef CONFIG_FEATURE_HTTPD_USAGE_FROM_INETD_ONLY
++#ifndef __uClinux__
+   if (!config->debugHttpd) {
+     if (daemon(1, 0) < 0)     /* don`t change curent directory */
+ 	bb_perror_msg_and_die("daemon");
+   }
++#endif
++  /* uClinux: no daemon() (fork); start it in the background (httpd &).  fork() is vfork
++     there: the parent waits while the child serves one connection and _exits */
+   return miniHttpd(server);
+ #else
+   return miniHttpd();
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/networking/inetd.c busybox-1.00/networking/inetd.c
+--- busybox-1.00/networking/inetd.c	2004-06-22 10:40:54
++++ busybox-1.00/networking/inetd.c	2026-11-12 00:04:06
+@@ -761,9 +761,10 @@
+ #if defined(__uClinux__)
+ 	opt = bb_getopt_ulflags(argc, argv, "q:f", &sq);
+ 	if (!(opt & 2)) {
+-	    daemon(0, 0);
++	    /* (no daemon() here: it forks, which vforks and hangs on no-MMU uClibc;
++	       vfork_daemon_rexec does the setsid and the redirection) */
+ 	    /* reexec for vfork() do continue parent */
+-	    vfork_daemon_rexec(argc, argv, "-f");
++	    vfork_daemon_rexec(0, 0, argc, argv, "-f");
+ 	}
+ #else
+ 	opt = bb_getopt_ulflags(argc, argv, "q:", &sq);
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/networking/telnetd.c busybox-1.00/networking/telnetd.c
+--- busybox-1.00/networking/telnetd.c	2004-09-14 19:24:58
++++ busybox-1.00/networking/telnetd.c	2026-11-12 00:03:51
+@@ -304,7 +304,7 @@
+ 
+ 		if (open(tty_name, O_RDWR /*| O_NOCTTY*/) < 0) {
+ 			syslog(LOG_ERR, "Could not open tty");
+-			exit(1);
++			_exit(1);
+ 			}
+ 		dup(0);
+ 		dup(0);
+@@ -330,7 +330,7 @@
+ 
+ 		/* NOT REACHED */
+ 		syslog(LOG_ERR, "execv error");
+-		exit(1);
++		_exit(1);
+ 	}
+ 
+ 	ts->shell_pid = pid;
+@@ -451,8 +451,11 @@
+ 		bb_perror_msg_and_die("listen");
+ 	}
+ 
++#ifndef __uClinux__
+ 	if (daemon(0, 0) < 0)
+ 		bb_perror_msg_and_die("daemon");
++#endif
++	/* uClinux: no daemon() (fork); start it in the background: telnetd -l /bin/sh & */
+ 
+ 
+ 	maxfd = master_fd;
+Binary files busybox-1.00/scripts/mkdep and busybox-1.00/scripts/mkdep differ
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/shell/hush.c busybox-1.00/shell/hush.c
+--- busybox-1.00/shell/hush.c	2004-04-14 19:51:31
++++ busybox-1.00/shell/hush.c	2026-11-12 00:03:11
+@@ -604,14 +604,23 @@
+ 		pi->progs[i].is_stopped = 0;
+ 
+ 	if ( (i=kill(- pi->pgrp, SIGCONT)) < 0) {
+-		if (i == ESRCH) {
++		if (errno == ESRCH) {
+ 			remove_bg_job(pi);
++			return EXIT_FAILURE;
+ 		} else {
+ 			bb_perror_msg("kill (SIGCONT)");
+ 		}
+ 	}
+ 
+ 	pi->stopped_progs = 0;
++	if (*child->argv[0] == 'f') {
++		/* wait for it in the foreground, then take the terminal back */
++		int rcode = checkjobs(pi);
++		if (!pi->stopped_progs)
++			remove_bg_job(pi);
++		tcsetpgrp(shell_terminal, getpgid(0));
++		return rcode == -1 ? EXIT_SUCCESS : rcode;
++	}
+ 	return EXIT_SUCCESS;
+ }
+ 
+@@ -1174,6 +1183,20 @@
+ 	thejob->running_progs = thejob->num_progs;
+ 	thejob->stopped_progs = 0;
+ 	thejob->text = xmalloc(BUFSIZ); /* cmdedit buffer size */
++	/* own copy of the progs (pids and flags only): the parse tree's pipe, argv and
++	 * redirections are freed by free_pipe_list after this command line */
++	thejob->progs = xcalloc(pi->num_progs, sizeof(struct child_prog));
++	{
++		int i;
++		for (i = 0; i < pi->num_progs; i++) {
++			thejob->progs[i].pid = pi->progs[i].pid;
++			thejob->progs[i].is_stopped = pi->progs[i].is_stopped;
++			if (!pi->progs[i].pid)
++				thejob->running_progs--;
++			else if (pi->progs[i].is_stopped)
++				thejob->stopped_progs++;
++		}
++	}
+ 
+ 	//if (pi->progs[0] && pi->progs[0].argv && pi->progs[0].argv[0])
+ 	{
+@@ -1186,7 +1209,10 @@
+ 
+ 	/* we don't wait for background thejobs to return -- append it
+ 	   to the list of backgrounded thejobs and leave it alone */
+-	printf("[%d] %d\n", thejob->jobid, thejob->progs[0].pid);
++	if (thejob->stopped_progs)
++		printf("\n[%d] Stopped                %s\n", thejob->jobid, thejob->text);
++	else
++		printf("[%d] %d\n", thejob->jobid, thejob->progs[0].pid);
+ 	last_bg_pid = thejob->progs[0].pid;
+ 	last_jobid = thejob->jobid;
+ }
+@@ -1211,11 +1237,14 @@
+ 
+ 	pi->stopped_progs = 0;
+ 	free_pipe(pi, 0);
++	free(pi->text);
+ 	free(pi);
+ }
+ 
+ /* Checks to see if any processes have exited -- if they
+    have, figure out why and see if a job has completed */
++static int fg_rcode;
++
+ static int checkjobs(struct pipe* fg_pipe)
+ {
+ 	int attributes;
+@@ -1230,15 +1259,41 @@
+ 	}
+ 
+ 	while ((childpid = waitpid(-1, &status, attributes)) > 0) {
++		/* the foreground pipeline (a new one, or a job taken back by fg): wait for
++		 * all its programs; if one stops (^Z), it becomes a stopped job */
+ 		if (fg_pipe) {
+-			int i, rcode = 0;
++			int i, left = 0, found = -1;
+ 			for (i=0; i < fg_pipe->num_progs; i++) {
+-				if (fg_pipe->progs[i].pid == childpid) {
+-					if (i==fg_pipe->num_progs-1)
+-						rcode=WEXITSTATUS(status);
+-					(fg_pipe->num_progs)--;
+-					return(rcode);
++				if (fg_pipe->progs[i].pid == childpid)
++					found = i;
++			}
++			if (found >= 0) {
++				if (WIFSTOPPED(status)) {
++					struct pipe *j;
++					fg_pipe->progs[found].is_stopped = 1;
++					for (j = job_list; j && j != fg_pipe; j = j->next)
++						;
++					if (j) {
++						/* a job taken back by fg */
++						fg_pipe->stopped_progs++;
++						printf("\n[%d] Stopped                %s\n",
++							fg_pipe->jobid, fg_pipe->text);
++					} else
++						insert_bg_job(fg_pipe);
++					return 128 + WSTOPSIG(status);
+ 				}
++				if (found == fg_pipe->num_progs - 1)
++					fg_rcode = WIFEXITED(status) ? WEXITSTATUS(status) :
++						128 + WTERMSIG(status);
++				fg_pipe->progs[found].pid = 0;
++				if (fg_pipe->running_progs > 0)
++					fg_pipe->running_progs--;
++				for (i=0; i < fg_pipe->num_progs; i++)
++					if (fg_pipe->progs[i].pid)
++						left++;
++				if (!left)
++					return fg_rcode;
++				continue;
+ 			}
+ 		}
+ 
+@@ -1445,6 +1500,7 @@
+ 		if (!(child->pid = vfork()))
+ #endif
+ 		{
++#if !defined(__UCLIBC__) || defined(__ARCH_HAS_MMU__)
+ 			/* Set the handling for job control signals back to the default.  */
+ 			signal(SIGINT, SIG_DFL);
+ 			signal(SIGQUIT, SIG_DFL);
+@@ -1453,6 +1509,7 @@
+ 			signal(SIGTTIN, SIG_DFL);
+ 			signal(SIGTTOU, SIG_DFL);
+ 			signal(SIGCHLD, SIG_DFL);
++#endif
+ 
+ 			close_all();
+ 
+@@ -1472,6 +1529,7 @@
+ 			 * and the pipe fd is available for dup'ing. */
+ 			setup_redirects(child,NULL);
+ 
++#if !defined(__UCLIBC__) || defined(__ARCH_HAS_MMU__)
+ 			if (interactive && pi->followup!=PIPE_BG) {
+ 				/* If we (the child) win the race, put ourselves in the process
+ 				 * group whose leader is the first process in this pipe. */
+@@ -1482,6 +1540,30 @@
+ 					tcsetpgrp(2, pi->pgrp);
+ 				}
+ 			}
++#else
++			/* vfork: the parent's setpgid comes after our exec and fails (EACCES),
++			 * so the child always joins the pipe's group itself (pi is shared). */
++			if (interactive) {
++				if (pi->pgrp < 0) {
++					pi->pgrp = getpid();
++				}
++				if (setpgid(0, pi->pgrp) == 0 && pi->followup!=PIPE_BG) {
++					tcsetpgrp(2, pi->pgrp);
++				}
++			}
++#endif
++#if defined(__UCLIBC__) && !defined(__ARCH_HAS_MMU__)
++			/* vfork: reset the signals only now.  A tcsetpgrp from a background group
++			 * with SIGTTOU at SIG_DFL stops the child, and the parent, which would bring
++			 * the group to the foreground, waits for the child's exec: deadlock. */
++			signal(SIGINT, SIG_DFL);
++			signal(SIGQUIT, SIG_DFL);
++			signal(SIGTERM, SIG_DFL);
++			signal(SIGTSTP, SIG_DFL);
++			signal(SIGTTIN, SIG_DFL);
++			signal(SIGTTOU, SIG_DFL);
++			signal(SIGCHLD, SIG_DFL);
++#endif
+ 
+ 			pseudo_exec(child);
+ 		}
+@@ -2365,6 +2447,12 @@
+ static char *lookup_param(char *src)
+ {
+ 	char *p=NULL;
++	static char rc_buf[12];
++	if (src && src[0] == '?' && src[1] == '\0') {
++		/* $? is looked up when the command runs, not when it is parsed: "false; echo $?" */
++		sprintf(rc_buf, "%u", last_return_code);
++		return rc_buf;
++	}
+ 	if (src) {
+ 		p = getenv(src);
+ 		if (!p)
+@@ -2404,7 +2492,10 @@
+ 			advance = 1;
+ 			break;
+ 		case '?':
+-			b_adduint(dest,last_return_code);
++			b_addchr(dest, SPECIAL_VAR_SYMBOL);
++			ctx->child->sp++;
++			b_addchr(dest, '?');
++			b_addchr(dest, SPECIAL_VAR_SYMBOL);
+ 			advance = 1;
+ 			break;
+ 		case '#':
+@@ -2527,7 +2618,8 @@
+ 		case '\'':
+ 			dest->nonnull = 1;
+ 			while(ch=b_getch(input),ch!=EOF && ch!='\'') {
+-				b_addchr(dest,ch);
++				/* quoted for globhack/glob: '\n' kept its backslash only so */
++				b_addqchr(dest,ch,1);
+ 			}
+ 			if (ch==EOF) {
+ 				syntax();
+@@ -2716,7 +2808,9 @@
+ 	signal(SIGTSTP, SIG_IGN);
+ 	signal(SIGTTIN, SIG_IGN);
+ 	signal(SIGTTOU, SIG_IGN);
+-	signal(SIGCHLD, SIG_IGN);
++	/* not SIG_IGN: Linux 2.4 then reaps the children itself when SIGCHLD comes, and
++	 * the waitpid in checkjobs fails with ECHILD before a job has finished */
++	signal(SIGCHLD, SIG_DFL);
+ 
+ 	/* Put ourselves in our own process group.  */
+ 	setsid();
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c busybox-1.00/shell/lash.c busybox-1.00/shell/lash.c
+--- busybox-1.00/shell/lash.c	2004-08-16 10:38:34
++++ busybox-1.00/shell/lash.c	2026-11-11 23:00:29
+@@ -418,7 +418,7 @@
+ {
+ 	int res = 0, len, newlen;
+ 	char *s;
+-	char string[MAX_READ];
++	char string[128];	/* = MAX_READ, which is a variable: a VLA is broken in gcc-t800 */
+ 
+ 	if (child->argv[1]) {
+ 		/* argument (VAR) given: put "VAR=" into buffer */

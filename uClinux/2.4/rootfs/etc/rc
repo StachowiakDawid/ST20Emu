@@ -1,0 +1,21 @@
+#!/bin/sh
+# Run once by init (sysinit). Root is a read-only romfs in flash.
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+mount -t proc proc /proc
+# writable /tmp: 512 KB minix file system on the RAM disk
+mkfs.minix /dev/ram0 512 >/dev/null
+mount -t minix /dev/ram0 /tmp
+mkdir /tmp/var
+# persistent settings: JFFS2 on the flash's jffs2 partition (mtd2, 512 KB); an erased
+# partition comes up empty.  st20emu keeps it across runs only when the flash is saved
+# ("dump FILE 7fe00000 200000", then boot FILE; README.md)
+mount -t jffs2 /dev/mtdblock2 /etc/config || echo "rc: no JFFS2 on /etc/config"
+# networking: loopback (SLIP: nettest slip, README.md "Networking")
+ifconfig lo 127.0.0.1 up
+hostname dsr9500
+echo "L2.4" >/dev/panel
+echo
+echo "Welcome to uClinux 2.4 on the ST20 (Samsung DSR9500, STi5512)"
+uname -a
+echo "uClibc 0.9.26 + busybox 1.00, /tmp is a RAM disk, /etc/config is JFFS2 in flash"
+echo

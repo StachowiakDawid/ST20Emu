@@ -12,6 +12,13 @@
 #include "../src/soc/sti5512/STi5512_VideoDecoder.h"
 #include "../src/soc/sti5512/STi5512_RegisterBlocks.h"
 #include "../src/board/DSR9500.h"
+#include "../src/console/serial_console.h"
+#include "../src/console/serial_tcp.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <chrono>
 
 #include <cstdint>
 #include <bit>
@@ -3727,7 +3734,7 @@ static void testSti5512DisplayDevices() {
   storeBigEndian(block, 0x0aU << 25 | 23U << 16 | 23U);           // Tc, AA; Y 23-23
   storeBigEndian(block + 4, 118U << 16 | 121U);                    // X 118-121
   storeBigEndian(block + 8, 0);                                    // colour 0: transparent
-  storeBigEndian(block + 12, 63U << 24 | 0x40U << 16 | 0xd4U << 8 | 0x64U); // red, W 63
+  storeBigEndian(block + 12, 63U << 24 | 0x40U << 16 | 0x64U << 8 | 0xd4U); // red (Cb 15:8, Cr 7:0), W 63
   storeBigEndian(block + 16, 0);
   storeBigEndian(block + 20, 0);
   storeBytes(block + 24, 1, 0x50);                                 // pixels 1, 1, 0, 0
@@ -5669,6 +5676,60 @@ static void testTimedAlt() {
   schedulerFixture(0x20000);
 }
 
+/* --console input: bytes pass unchanged (CR stays CR for the target tty's ICRNL), Ctrl-] stops */
+static void testConsoleInputMapping() {
+  const uint8_t typed[] = {'l', 's', '\r', '\n', 0x7f, 0x03};
+  std::vector<uint8_t> out;
+  expect("console plain input", console::mapInput(typed, sizeof(typed), out), 0);
+  expect("console plain bytes", out == std::vector<uint8_t>(typed, typed + sizeof(typed)), 1);
+  const uint8_t escaped[] = {'x', console::ESCAPE_BYTE, 'y'};
+  out.clear();
+  expect("console escape", console::mapInput(escaped, sizeof(escaped), out), 1);
+  expect("console escape bytes", out == std::vector<uint8_t>{'x'}, 1);
+}
+
+/* --serial-tcp: PORT:TCP parsing and a loopback client exchanging bytes with the port */
+static void testSerialTcp() {
+  int asc = -1;
+  uint16_t tcp = 0;
+  expect("serial-tcp spec", serialtcp::parseSpec("3:5555", asc, tcp) && asc == 3 && tcp == 5555, 1);
+  expect("serial-tcp bad port", serialtcp::parseSpec("4:5555", asc, tcp), 0);
+  expect("serial-tcp bad tcp", serialtcp::parseSpec("3:70000", asc, tcp), 0);
+  expect("serial-tcp no colon", serialtcp::parseSpec("35555", asc, tcp), 0);
+  expect("serial-tcp listen", serialtcp::listen(0), 1);
+  expect("serial-tcp no client", serialtcp::send({'x'}), 0);
+  int sock = socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in address{};
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  address.sin_port = htons(serialtcp::boundPort());
+  expect("serial-tcp connect", connect(sock, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0, 1);
+  std::vector<uint8_t> received;
+  for (int tries = 0; tries < 200 && !serialtcp::connected(); ++tries) {
+    serialtcp::poll(received);
+    if (!serialtcp::connected()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  expect("serial-tcp accepted", serialtcp::connected(), 1);
+  const uint8_t frame[] = {0xc0, 0x45, 0xdb, 0xdc, 0xc0};
+  expect("serial-tcp client send", send(sock, frame, sizeof(frame), 0) == static_cast<ssize_t>(sizeof(frame)), 1);
+  for (int tries = 0; tries < 200 && received.size() < sizeof(frame); ++tries) {
+    serialtcp::poll(received);
+    if (received.size() < sizeof(frame)) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  expect("serial-tcp received", received == std::vector<uint8_t>(frame, frame + sizeof(frame)), 1);
+  expect("serial-tcp port send", serialtcp::send({'o', 'k'}), 1);
+  char reply[2] = {};
+  expect("serial-tcp client recv", recv(sock, reply, sizeof(reply), MSG_WAITALL) == 2, 1);
+  expect("serial-tcp reply", reply[0] == 'o' && reply[1] == 'k', 1);
+  close(sock);
+  for (int tries = 0; tries < 200 && serialtcp::connected(); ++tries) {
+    serialtcp::poll(received);
+    if (serialtcp::connected()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  expect("serial-tcp disconnect", serialtcp::connected(), 0);
+  serialtcp::close();
+}
+
 static void testNativeTimedExternalAlt() {
   constexpr uint32_t channel = 0x8000001c;
   const uint8_t input[] = {0x12, 0x34};
@@ -6088,6 +6149,8 @@ int main(int argc, char **argv) {
   testAltBoundaryCases();
   testResetAnalysis();
   testAsyncTrace();
+  testConsoleInputMapping();
+  testSerialTcp();
   std::printf("CPU instruction tests: %d checks, %d failures\n", checks, failures);
   return failures ? 1 : 0;
 }

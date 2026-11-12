@@ -1,0 +1,10 @@
+# upstream sources and build outputs (recreate with tools/setup-src.sh)
+/src/
+/logs/
+*.log
+/dsr9500-uclinux24.bin
+/build/
+/2.0/
+/dl/
+/work/
+/user/build/

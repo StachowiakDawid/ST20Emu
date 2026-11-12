@@ -1,0 +1,45 @@
+run 400000000
+asc 3 uname -a; cat /proc/version; ls / | wc -l; cat /proc/interrupts
+run 200000000
+asc 3 cat /proc/meminfo | head -n 3; free; df; mount
+run 200000000
+asc 3 echo hello > /tmp/x; cat /tmp/x; mkdir /tmp/d; ln /tmp/x /tmp/d/y; ls -li /tmp/d
+run 200000000
+asc 3 cat /bin/busybox | md5sum; yes | head -n 1000 | wc -l; echo abc | sed 's/b/X/'
+run 400000000
+asc 3 sleep 100 &
+run 100000000
+asc 3 ps
+run 200000000
+asc 3 killall sleep; sigtest raise; sigtest ill
+run 200000000
+asc 3 sigtest loop
+run 100000000
+asc 3 
+run 100000000
+asc 3 echo ABCD > /dev/panel; cat /dev/panel
+run 100000000
+led
+ir 0x6c 0x73 0x8d
+run 200000000
+asc 3 cat /proc/mtd; df /etc/config; echo persist > /etc/config/smoke; cat /etc/config/smoke
+run 200000000
+asc 3 fbtest 8 20 &
+run 250000000
+screen logs/smoke-fb.bmp
+asc 3 dd if=/dev/zero of=/dev/fb0 bs=1024 count=400
+run 100000000
+screen logs/smoke-fb-cleared.bmp
+asc 3 sleep 20; evtest /dev/input/event0 8 > /tmp/ev.txt & cat > /dev/null
+run 800000000
+ir ok
+run 30000000
+fp up
+run 30000000
+ir 0x41
+run 60000000
+asc 3 
+run 50000000
+asc 3 cat /tmp/ev.txt
+run 100000000
+screen logs/smoke-console.bmp

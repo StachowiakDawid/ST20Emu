@@ -1,0 +1,21 @@
+# Network services (subset of /etc/services)
+echo		7/tcp
+echo		7/udp
+discard		9/tcp		sink null
+discard		9/udp		sink null
+daytime		13/tcp
+daytime		13/udp
+chargen		19/tcp		ttytst source
+ftp		21/tcp
+ssh		22/tcp
+telnet		23/tcp
+smtp		25/tcp		mail
+time		37/tcp		timserver
+time		37/udp		timserver
+domain		53/tcp
+domain		53/udp
+tftp		69/udp
+http		80/tcp		www
+pop3		110/tcp
+ntp		123/udp
+syslog		514/udp

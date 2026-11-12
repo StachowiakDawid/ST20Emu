@@ -1,0 +1,29 @@
+run 450000000
+asc 3 ifconfig; route -n; cat /proc/net/dev | tail -n 2
+run 300000000
+asc 3 ping -c 3 127.0.0.1; ping -c 1 -s 47 localhost; echo rc=$?
+run 600000000
+asc 3 nettest lo
+run 400000000
+asc 3 nc -l -p 5000 > /tmp/nc.out & sleep 1; echo "through nc" | nc 127.0.0.1 5000; sleep 1; cat /tmp/nc.out; netstat -an | head -n 6
+run 600000000
+asc 3 false; echo rc=$?; true; echo rc=$?; nettest nosuchmode > /dev/null; echo "rc=$?"
+run 300000000
+asc 3 ls -l /lib/modules; insmod /lib/modules/hello.mod; echo rc=$?; lsmod; grep hello /proc/devices
+run 300000000
+asc 3 cat /dev/hello; echo "written by echo" > /dev/hello; cat /proc/hello
+run 300000000
+asc 3 insmod /lib/modules/hello.mod; echo rc=$?; rmmod hello; echo rc=$?; lsmod; cat /dev/hello; rmmod hello; echo rc=$?
+run 300000000
+asc 3 inetd; sleep 1; echo "inetd echo" | nc 127.0.0.1 7; nc 127.0.0.1 13; ps | grep inetd | grep -v grep
+run 600000000
+asc 3 echo '<h1>ST20 httpd</h1>' > /tmp/index.html; cd /tmp; httpd -p 8080 & sleep 1; echo "GET /index.html HTTP/1.0" | nc 127.0.0.1 8080 | tail -n 1; cd /
+run 600000000
+asc 3 telnetd -l /bin/sh -p 2323 & sleep 1; netstat -an | grep LISTEN
+run 300000000
+asc 3 telnet 127.0.0.1 2323
+run 400000000
+asc 3 echo inside-telnet; tty; exit
+run 400000000
+asc 3 echo back; ps | grep -c sh
+run 300000000

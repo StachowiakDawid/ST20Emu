@@ -1,0 +1,1107 @@
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/Rules.mak uClibc-0.9.26/Rules.mak
+--- uClibc-0.9.26/Rules.mak	2004-01-04 06:32:21
++++ uClibc-0.9.26/Rules.mak	2026-11-12 00:01:14
+@@ -171,11 +171,22 @@
+ endif
+ 
+ # use '-Os' optimization if available, else use -O2, allow Config to override
++ifeq ($(strip $(TARGET_ARCH)),st20)
++	# gcc-2.7.2-t800: no -Os (and never -O0, its code is wrong for some calls)
++	OPTIMIZATION+=-O2
++	CPU_CFLAGS-y+=-mt450
++	STRIPTOOL:=true
++else
+ OPTIMIZATION+=$(call check_gcc,-Os,-O2)
++endif
+ 
+ 
+ # Add a bunch of extra pedantic annoyingly strict checks
++ifeq ($(strip $(TARGET_ARCH)),st20)
++XWARNINGS=$(subst ",, $(strip $(WARNINGS))) -Wstrict-prototypes -Wno-trigraphs
++else
+ XWARNINGS=$(subst ",, $(strip $(WARNINGS))) -Wstrict-prototypes -Wno-trigraphs -fno-strict-aliasing
++endif
+ XARCH_CFLAGS=$(subst ",, $(strip $(ARCH_CFLAGS)))
+ CPU_CFLAGS=$(subst ",, $(strip $(CPU_CFLAGS-y)))
+ 
+@@ -183,7 +194,9 @@
+ ifeq ($(strip $(UCLIBC_HAS_SOFT_FLOAT)),y)
+ # Add -msoft-float to the CPU_FLAGS since ldso and libdl ignore CFLAGS.
+ # If -msoft-float isn't supported, we want an error anyway.
++ifneq ($(strip $(TARGET_ARCH)),st20)
+     CPU_CFLAGS += -msoft-float
++endif
+ ifeq ($(strip $(TARGET_ARCH)),arm)
+     LDADD_LIBFLOAT=-lfloat
+ endif
+@@ -204,7 +217,12 @@
+ 
+ # Sigh, some stupid versions of gcc can't seem to cope with '-iwithprefix include'
+ #CFLAGS+=-iwithprefix include
++ifeq ($(strip $(TARGET_ARCH)),st20)
++# gcc 2.7.2 has no -print-search-dirs
++CFLAGS+=-I$(dir $(shell $(CC) -print-libgcc-file-name))include
++else
+ CFLAGS+=$(shell $(CC) -print-search-dirs | sed -ne "s/install: *\(.*\)/-I\1include/gp")
++endif
+ 
+ ifneq ($(DOASSERTS),y)
+     CFLAGS += -DNDEBUG
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/extra/Configs/Config.in uClibc-0.9.26/extra/Configs/Config.in
+--- uClibc-0.9.26/extra/Configs/Config.in	2004-01-03 00:34:12
++++ uClibc-0.9.26/extra/Configs/Config.in	2026-11-11 20:47:20
+@@ -50,6 +50,9 @@
+ config TARGET_sparc
+ 	bool "sparc"
+ 
++config TARGET_st20
++	bool "st20"
++
+ config TARGET_v850
+ 	bool "v850"
+ 
+@@ -108,6 +111,10 @@
+ 
+ if TARGET_sparc
+ source "extra/Configs/Config.sparc"
++endif
++
++if TARGET_st20
++source "extra/Configs/Config.st20"
+ endif
+ 
+ if TARGET_v850
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/extra/Configs/Config.st20 uClibc-0.9.26/extra/Configs/Config.st20
+--- uClibc-0.9.26/extra/Configs/Config.st20	1970-01-01 01:00:00
++++ uClibc-0.9.26/extra/Configs/Config.st20	2026-11-11 20:49:00
+@@ -0,0 +1,31 @@
++#
++# For a description of the syntax of this configuration file,
++# see extra/config/Kconfig-language.txt
++#
++# ST20-C2 (STi5512, uClinux/ST20 on the Samsung DSR9500): gcc-2.7.2-t800, ttools
++# ast/lit, bFLT executables made by tools/mkflat.py, no shared libraries, no FPU.
++
++config HAVE_ELF
++	bool
++	default n
++
++config ARCH_ST20
++	bool
++	select ARCH_HAS_NO_MMU
++	select ARCH_HAS_C_SYMBOL_PREFIX
++	select HAVE_NO_SHARED
++	select ARCH_HAS_NO_LDSO
++	select HAVE_NO_PIC
++	default y
++
++config TARGET_ARCH
++	default "st20"
++
++config ARCH_CFLAGS
++	string
++
++config ARCH_LDFLAGS
++	string
++
++config LIBGCC_CFLAGS
++	string
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/misc/glob/glob.c uClibc-0.9.26/libc/misc/glob/glob.c
+--- uClibc-0.9.26/libc/misc/glob/glob.c	2003-10-12 06:41:11
++++ uClibc-0.9.26/libc/misc/glob/glob.c	2026-11-12 01:54:15
+@@ -392,6 +392,14 @@
+   size_t nfound = 0;
+   int meta;
+ 
++#ifdef __transputer__
++  /* gcc-2.7.2-t800: only calls expanded after a function's first alloca run on the
++     workspace below the alloca'd blocks; readdir/fnmatch in the loop below come before
++     the loop's alloca and would overwrite the earlier iterations' blocks.  An alloca
++     first puts every call of this function below the blocks.  */
++  (void) alloca (sizeof (int));
++#endif
++
+   stream = (__glob_opendir_hook ? (*__glob_opendir_hook) (directory)
+ 	   : (__ptr_t) opendir (directory));
+   if (stream == NULL)
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/endian.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/endian.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/endian.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/endian.h	2026-11-11 20:46:29
+@@ -0,0 +1,7 @@
++/* H8/300 is big-endian.  */
++
++#ifndef _ENDIAN_H
++# error "Never use <bits/endian.h> directly; include <endian.h> instead."
++#endif
++
++#define __BYTE_ORDER __LITTLE_ENDIAN
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/fcntl.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/fcntl.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/fcntl.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/fcntl.h	2026-11-11 20:46:29
+@@ -0,0 +1,180 @@
++/* O_*, F_*, FD_* bit values for Linux.
++   Copyright (C) 2000 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
++
++#ifndef	_FCNTL_H
++# error "Never use <bits/fcntl.h> directly; include <fcntl.h> instead."
++#endif
++
++
++#include <sys/types.h>
++
++/* open/fcntl - O_SYNC is only implemented on blocks devices and on files
++   located on an ext2 file system */
++#define O_ACCMODE	   0003
++#define O_RDONLY	     00
++#define O_WRONLY	     01
++#define O_RDWR		     02
++#define O_CREAT		   0100	/* not fcntl */
++#define O_EXCL		   0200	/* not fcntl */
++#define O_NOCTTY	   0400	/* not fcntl */
++#define O_TRUNC		  01000	/* not fcntl */
++#define O_APPEND	  02000
++#define O_NONBLOCK	  04000
++#define O_NDELAY	O_NONBLOCK
++#define O_SYNC		 010000
++#define O_FSYNC		 O_SYNC
++#define O_ASYNC		 020000
++
++#ifdef __USE_GNU
++# define O_DIRECTORY	 040000	/* Must be a directory.	 */
++# define O_NOFOLLOW	0100000	/* Do not follow links.	 */
++# define O_DIRECT	0200000	/* Direct disk access.	*/
++# define O_STREAMING	04000000/* streaming access */
++#endif
++
++/* For now Linux has synchronisity options for data and read operations.
++   We define the symbols here but let them do the same as O_SYNC since
++   this is a superset.	*/
++#if defined __USE_POSIX199309 || defined __USE_UNIX98
++# define O_DSYNC	O_SYNC	/* Synchronize data.  */
++# define O_RSYNC	O_SYNC	/* Synchronize read operations.	 */
++#endif
++
++#ifdef __USE_LARGEFILE64
++# define O_LARGEFILE	0400000
++#endif
++
++/* Values for the second argument to `fcntl'.  */
++#define F_DUPFD		0	/* Duplicate file descriptor.  */
++#define F_GETFD		1	/* Get file descriptor flags.  */
++#define F_SETFD		2	/* Set file descriptor flags.  */
++#define F_GETFL		3	/* Get file status flags.  */
++#define F_SETFL		4	/* Set file status flags.  */
++#ifndef __USE_FILE_OFFSET64
++# define F_GETLK	5	/* Get record locking info.  */
++# define F_SETLK	6	/* Set record locking info (non-blocking).  */
++# define F_SETLKW	7	/* Set record locking info (blocking).	*/
++#else
++# define F_GETLK	F_GETLK64  /* Get record locking info.	*/
++# define F_SETLK	F_SETLK64  /* Set record locking info (non-blocking).*/
++# define F_SETLKW	F_SETLKW64 /* Set record locking info (blocking).  */
++#endif
++#define F_GETLK64	12	/* Get record locking info.  */
++#define F_SETLK64	13	/* Set record locking info (non-blocking).  */
++#define F_SETLKW64	14	/* Set record locking info (blocking).	*/
++
++#if defined __USE_BSD || defined __USE_XOPEN2K
++# define F_SETOWN	8	/* Get owner of socket (receiver of SIGIO).  */
++# define F_GETOWN	9	/* Set owner of socket (receiver of SIGIO).  */
++#endif
++
++#ifdef __USE_GNU
++# define F_SETSIG	10	/* Set number of signal to be sent.  */
++# define F_GETSIG	11	/* Get number of signal to be sent.  */
++#endif
++
++#ifdef __USE_GNU
++# define F_SETLEASE	1024	/* Set a lease.	 */
++# define F_GETLEASE	1025	/* Enquire what lease is active.  */
++# define F_NOTIFY	1026	/* Request notfications on a directory.	 */
++#endif
++
++/* For F_[GET|SET]FL.  */
++#define FD_CLOEXEC	1	/* actually anything with low bit set goes */
++
++/* For posix fcntl() and `l_type' field of a `struct flock' for lockf().  */
++#define F_RDLCK		0	/* Read lock.  */
++#define F_WRLCK		1	/* Write lock.	*/
++#define F_UNLCK		2	/* Remove lock.	 */
++
++/* For old implementation of bsd flock().  */
++#define F_EXLCK		4	/* or 3 */
++#define F_SHLCK		8	/* or 4 */
++
++#ifdef __USE_BSD
++/* Operations for bsd flock(), also used by the kernel implementation.	*/
++# define LOCK_SH	1	/* shared lock */
++# define LOCK_EX	2	/* exclusive lock */
++# define LOCK_NB	4	/* or'd with one of the above to prevent
++				   blocking */
++# define LOCK_UN	8	/* remove lock */
++#endif
++
++#ifdef __USE_GNU
++# define LOCK_MAND	32	/* This is a mandatory flock:	*/
++# define LOCK_READ	64	/* ... which allows concurrent read operations.	 */
++# define LOCK_WRITE	128	/* ... which allows concurrent write operations.  */
++# define LOCK_RW	192	/* ... Which allows concurrent read & write operations.	 */
++#endif
++
++#ifdef __USE_GNU
++/* Types of directory notifications that may be requested with F_NOTIFY.  */
++# define DN_ACCESS	0x00000001	/* File accessed.  */
++# define DN_MODIFY	0x00000002	/* File modified.  */
++# define DN_CREATE	0x00000004	/* File created.  */
++# define DN_DELETE	0x00000008	/* File removed.  */
++# define DN_RENAME	0x00000010	/* File renamed.  */
++# define DN_ATTRIB	0x00000020	/* File changed attibutes.  */
++# define DN_MULTISHOT	0x80000000	/* Don't remove notifier.  */
++#endif
++
++struct flock
++  {
++    short int l_type;	/* Type of lock: F_RDLCK, F_WRLCK, or F_UNLCK.	*/
++    short int l_whence;	/* Where `l_start' is relative to (like `lseek').  */
++#ifndef __USE_FILE_OFFSET64
++    __off_t l_start;	/* Offset where the lock begins.  */
++    __off_t l_len;	/* Size of the locked area; zero means until EOF.  */
++#else
++    __off64_t l_start;	/* Offset where the lock begins.  */
++    __off64_t l_len;	/* Size of the locked area; zero means until EOF.  */
++#endif
++    __pid_t l_pid;	/* Process holding the lock.  */
++  };
++
++#ifdef __USE_LARGEFILE64
++struct flock64
++  {
++    short int l_type;	/* Type of lock: F_RDLCK, F_WRLCK, or F_UNLCK.	*/
++    short int l_whence;	/* Where `l_start' is relative to (like `lseek').  */
++    __off64_t l_start;	/* Offset where the lock begins.  */
++    __off64_t l_len;	/* Size of the locked area; zero means until EOF.  */
++    __pid_t l_pid;	/* Process holding the lock.  */
++  };
++#endif
++
++/* Define some more compatibility macros to be backward compatible with
++   BSD systems which did not managed to hide these kernel macros.  */
++#ifdef	__USE_BSD
++# define FAPPEND	O_APPEND
++# define FFSYNC		O_FSYNC
++# define FASYNC		O_ASYNC
++# define FNONBLOCK	O_NONBLOCK
++# define FNDELAY	O_NDELAY
++#endif /* Use BSD.  */
++
++/* Advise to `posix_fadvise'.  */
++#ifdef __USE_XOPEN2K
++# define POSIX_FADV_NORMAL	0 /* No further special treatment.  */
++# define POSIX_FADV_RANDOM	1 /* Expect random page references.  */
++# define POSIX_FADV_SEQUENTIAL	2 /* Expect sequential page references.	 */
++# define POSIX_FADV_WILLNEED	3 /* Will need these pages.  */
++# define POSIX_FADV_DONTNEED	4 /* Don't need these pages.  */
++# define POSIX_FADV_NOREUSE	5 /* Data will be accessed once.  */
++#endif
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_stat.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_stat.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_stat.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_stat.h	2026-11-11 20:46:29
+@@ -0,0 +1,58 @@
++#ifndef _BITS_STAT_STRUCT_H
++#define _BITS_STAT_STRUCT_H
++
++/* This file provides whatever this particular arch's kernel thinks 
++ * struct kernel_stat should look like...  It turns out each arch has a 
++ * different opinion on the subject... */
++
++struct kernel_stat {
++	unsigned short st_dev;
++	unsigned short __pad1;
++	unsigned long st_ino;
++	unsigned short st_mode;
++	unsigned short st_nlink;
++	unsigned short st_uid;
++	unsigned short st_gid;
++	unsigned short st_rdev;
++	unsigned short __pad2;
++	unsigned long  st_size;
++	unsigned long  st_blksize;
++	unsigned long  st_blocks;
++	unsigned long  st_atime;
++	unsigned long  __unused1;
++	unsigned long  st_mtime;
++	unsigned long  __unused2;
++	unsigned long  st_ctime;
++	unsigned long  __unused3;
++	unsigned long  __unused4;
++	unsigned long  __unused5;
++};
++
++struct kernel_stat64 {
++	unsigned char	__pad0[6];
++	unsigned short	st_dev;
++	unsigned char	__pad1[2];
++#define _HAVE_STAT64___ST_INO
++	unsigned long	__st_ino;
++	unsigned int	st_mode;
++	unsigned int	st_nlink;
++	unsigned long	st_uid;
++	unsigned long	st_gid;
++	unsigned char	__pad2[6];
++	unsigned short	st_rdev;
++	unsigned char	__pad3[2];
++	long long	st_size;
++	unsigned long	st_blksize;
++	unsigned long	__pad4;		/* future possible st_blocks high bits */
++	unsigned long	st_blocks;	/* Number 512-byte blocks allocated. */
++	unsigned long	st_atime;
++	unsigned long	__pad5;
++	unsigned long	st_mtime;
++	unsigned long	__pad6;
++	unsigned long	st_ctime;
++	unsigned long	__pad7;		/* will be high 32 bits of ctime someday */
++	unsigned long long	st_ino;
++};
++
++#endif	/*  _BITS_STAT_STRUCT_H */
++
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_types.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_types.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_types.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/kernel_types.h	2026-11-11 20:46:29
+@@ -0,0 +1,47 @@
++/* Note that we use the exact same include guard #define names
++ * as asm/posix_types.h.  This will avoid gratuitous conflicts 
++ * with the posix_types.h kernel header, and will ensure that 
++ * our private content, and not the kernel header, will win.
++ *  -Erik
++ */
++#ifndef __ARCH_ST20_POSIX_TYPES_H
++#define __ARCH_ST20_POSIX_TYPES_H
++
++typedef unsigned short	__kernel_dev_t;
++typedef unsigned long	__kernel_ino_t;
++typedef unsigned short	__kernel_mode_t;
++typedef unsigned short	__kernel_nlink_t;
++typedef long		__kernel_off_t;
++typedef int		__kernel_pid_t;
++typedef unsigned short	__kernel_ipc_pid_t;
++typedef unsigned short	__kernel_uid_t;
++typedef unsigned short	__kernel_gid_t;
++typedef unsigned int	__kernel_size_t;
++typedef int		__kernel_ssize_t;
++typedef int		__kernel_ptrdiff_t;
++typedef long		__kernel_time_t;
++typedef long		__kernel_suseconds_t;
++typedef long		__kernel_clock_t;
++typedef int		__kernel_daddr_t;
++typedef char *		__kernel_caddr_t;
++typedef unsigned short	__kernel_uid16_t;
++typedef unsigned short	__kernel_gid16_t;
++typedef unsigned int	__kernel_uid32_t;
++typedef unsigned int	__kernel_gid32_t;
++
++typedef unsigned short	__kernel_old_uid_t;
++typedef unsigned short	__kernel_old_gid_t;
++
++#ifdef __GNUC__
++typedef long long	__kernel_loff_t;
++#endif
++
++typedef struct {
++#ifdef __USE_ALL
++	int val[2];
++#else
++	int __val[2];
++#endif
++} __kernel_fsid_t;
++
++#endif /* __ARCH_ST20_POSIX_TYPES_H */
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/mman.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/mman.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/mman.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/mman.h	2026-11-11 20:46:29
+@@ -0,0 +1,75 @@
++/* Definitions for BSD-style memory management.
++   Copyright (C) 1994-1998,2000,01 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
++
++/* These are the bits used by 4.4 BSD and its derivatives.  On systems
++   (such as GNU) where these facilities are not system services but can be
++   emulated in the C library, these are the definitions we emulate.  */
++
++#ifndef _SYS_MMAN_H
++# error "Never use <bits/mman.h> directly; include <sys/mman.h> instead."
++#endif
++
++/* Protections are chosen from these bits, OR'd together.  The
++   implementation does not necessarily support PROT_EXEC or PROT_WRITE
++   without PROT_READ.  The only guarantees are that no writing will be
++   allowed without PROT_WRITE and no access will be allowed for PROT_NONE. */
++
++#define	PROT_NONE	 0x00	/* No access.  */
++#define	PROT_READ	 0x01	/* Pages can be read.  */
++#define	PROT_WRITE	 0x02	/* Pages can be written.  */
++#define	PROT_EXEC	 0x04	/* Pages can be executed.  */
++
++/* Sharing types (must choose one and only one of these).  */
++#define MAP_SHARED	0x01		/* Share changes.  */
++#define MAP_PRIVATE	0x02		/* Changes are private.  */
++#ifdef __USE_MISC
++# define MAP_TYPE	0x0f		/* Mask for type of mapping.  */
++#endif
++
++/* Other flags.  */
++#define MAP_FIXED	0x10		/* Interpret addr exactly.  */
++#ifdef __USE_MISC
++# define MAP_FILE	0
++# define MAP_ANONYMOUS	0x20		/* Don't use a file.  */
++# define MAP_ANON	MAP_ANONYMOUS
++#endif
++
++/* These are Linux-specific.  */
++#ifdef __USE_MISC
++# define MAP_GROWSDOWN	0x0100		/* Stack-like segment.  */
++# define MAP_DENYWRITE	0x0800		/* ETXTBSY */
++# define MAP_EXECUTABLE	0x1000		/* Mark it as an executable.  */
++# define MAP_LOCKED	0x2000		/* Lock the mapping.  */
++# define MAP_NORESERVE	0x4000		/* Don't check for reservations.  */
++#endif
++
++/* Flags to `msync'.  */
++#define MS_ASYNC	1		/* Sync memory asynchronously.  */
++#define MS_SYNC		4		/* Synchronous memory sync.  */
++#define MS_INVALIDATE	2		/* Invalidate the caches.  */
++
++/* Flags for `mlockall'.  */
++#define MCL_CURRENT	1		/* Lock all currently mapped pages.  */
++#define MCL_FUTURE	2		/* Lock all additions to address
++					   space.  */
++
++/* Flags for `mremap'.  */
++#ifdef __USE_GNU
++# define MREMAP_MAYMOVE	1
++#endif
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/resource.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/resource.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/resource.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/resource.h	2026-11-11 20:46:29
+@@ -0,0 +1,204 @@
++/* Bit values & structures for resource limits.  Linux version.
++   Copyright (C) 1994, 1996, 1997, 1998, 1999 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Library General Public License as
++   published by the Free Software Foundation; either version 2 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Library General Public License for more details.
++
++   You should have received a copy of the GNU Library General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If not,
++   write to the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++   Boston, MA 02111-1307, USA.  */
++
++#ifndef _SYS_RESOURCE_H
++# error "Never use <bits/resource.h> directly; include <sys/resource.h> instead."
++#endif
++
++#include <bits/types.h>
++
++/* Transmute defines to enumerations.  The macro re-definitions are
++   necessary because some programs want to test for operating system
++   features with #ifdef RUSAGE_SELF.  In ISO C the reflexive
++   definition is a no-op.  */
++
++/* Kinds of resource limit.  */
++enum __rlimit_resource
++{
++  /* Per-process CPU limit, in seconds.  */
++  RLIMIT_CPU = 0,
++#define RLIMIT_CPU RLIMIT_CPU
++
++  /* Largest file that can be created, in bytes.  */
++  RLIMIT_FSIZE = 1,
++#define	RLIMIT_FSIZE RLIMIT_FSIZE
++
++  /* Maximum size of data segment, in bytes.  */
++  RLIMIT_DATA = 2,
++#define	RLIMIT_DATA RLIMIT_DATA
++
++  /* Maximum size of stack segment, in bytes.  */
++  RLIMIT_STACK = 3,
++#define	RLIMIT_STACK RLIMIT_STACK
++
++  /* Largest core file that can be created, in bytes.  */
++  RLIMIT_CORE = 4,
++#define	RLIMIT_CORE RLIMIT_CORE
++
++  /* Largest resident set size, in bytes.
++     This affects swapping; processes that are exceeding their
++     resident set size will be more likely to have physical memory
++     taken from them.  */
++  RLIMIT_RSS = 5,
++#define	RLIMIT_RSS RLIMIT_RSS
++
++  /* Number of open files.  */
++  RLIMIT_NOFILE = 7,
++  RLIMIT_OFILE = RLIMIT_NOFILE, /* BSD name for same.  */
++#define RLIMIT_NOFILE RLIMIT_NOFILE
++#define RLIMIT_OFILE RLIMIT_OFILE
++
++  /* Address space limit (?) */
++  RLIMIT_AS = 9,
++#define RLIMIT_AS RLIMIT_AS
++
++  /* Number of processes.  */
++  RLIMIT_NPROC = 6,
++#define RLIMIT_NPROC RLIMIT_NPROC
++
++  /* Locked-in-memory address space.  */
++  RLIMIT_MEMLOCK = 8,
++#define RLIMIT_MEMLOCK RLIMIT_MEMLOCK
++
++  RLIM_NLIMITS = 10
++#define RLIMIT_NLIMITS RLIMIT_NLIMITS
++#define RLIM_NLIMITS RLIM_NLIMITS
++};
++
++/* Value to indicate that there is no limit.  */
++#ifndef __USE_FILE_OFFSET64
++# define RLIM_INFINITY ((long int)(~0UL >> 1))
++#else
++# define RLIM_INFINITY 0x7fffffffffffffffLL
++#endif
++
++#ifdef __USE_LARGEFILE64
++# define RLIM64_INFINITY 0x7fffffffffffffffLL
++#endif
++
++/* We can represent all limits.  */
++#define RLIM_SAVED_MAX	RLIM_INFINITY
++#define RLIM_SAVED_CUR	RLIM_INFINITY
++
++
++/* Type for resource quantity measurement.  */
++#ifndef __USE_FILE_OFFSET64
++typedef __rlim_t rlim_t;
++#else
++typedef __rlim64_t rlim_t;
++#endif
++#ifdef __USE_LARGEFILE64
++typedef __rlim64_t rlim64_t;
++#endif
++
++struct rlimit
++  {
++    /* The current (soft) limit.  */
++    rlim_t rlim_cur;
++    /* The hard limit.  */
++    rlim_t rlim_max;
++  };
++
++#ifdef __USE_LARGEFILE64
++struct rlimit64
++  {
++    /* The current (soft) limit.  */
++    rlim64_t rlim_cur;
++    /* The hard limit.  */
++    rlim64_t rlim_max;
++ };
++#endif
++
++/* Whose usage statistics do you want?  */
++enum __rusage_who
++{
++  /* The calling process.  */
++  RUSAGE_SELF = 0,
++#define RUSAGE_SELF RUSAGE_SELF
++
++  /* All of its terminated child processes.  */
++  RUSAGE_CHILDREN = -1,
++#define RUSAGE_CHILDREN RUSAGE_CHILDREN
++
++  /* Both.  */
++  RUSAGE_BOTH = -2
++#define RUSAGE_BOTH RUSAGE_BOTH
++};
++
++#define __need_timeval
++#include <bits/time.h>		/* For `struct timeval'.  */
++
++/* Structure which says how much of each resource has been used.  */
++struct rusage
++  {
++    /* Total amount of user time used.  */
++    struct timeval ru_utime;
++    /* Total amount of system time used.  */
++    struct timeval ru_stime;
++    /* Maximum resident set size (in kilobytes).  */
++    long int ru_maxrss;
++    /* Amount of sharing of text segment memory
++       with other processes (kilobyte-seconds).  */
++    long int ru_ixrss;
++    /* Amount of data segment memory used (kilobyte-seconds).  */
++    long int ru_idrss;
++    /* Amount of stack memory used (kilobyte-seconds).  */
++    long int ru_isrss;
++    /* Number of soft page faults (i.e. those serviced by reclaiming
++       a page from the list of pages awaiting reallocation.  */
++    long int ru_minflt;
++    /* Number of hard page faults (i.e. those that required I/O).  */
++    long int ru_majflt;
++    /* Number of times a process was swapped out of physical memory.  */
++    long int ru_nswap;
++    /* Number of input operations via the file system.  Note: This
++       and `ru_oublock' do not include operations with the cache.  */
++    long int ru_inblock;
++    /* Number of output operations via the file system.  */
++    long int ru_oublock;
++    /* Number of IPC messages sent.  */
++    long int ru_msgsnd;
++    /* Number of IPC messages received.  */
++    long int ru_msgrcv;
++    /* Number of signals delivered.  */
++    long int ru_nsignals;
++    /* Number of voluntary context switches, i.e. because the process
++       gave up the process before it had to (usually to wait for some
++       resource to be available).  */
++    long int ru_nvcsw;
++    /* Number of involuntary context switches, i.e. a higher priority process
++       became runnable or the current process used up its time slice.  */
++    long int ru_nivcsw;
++  };
++
++/* Priority limits.  */
++#define PRIO_MIN	-20	/* Minimum priority a process can have.  */
++#define PRIO_MAX	20	/* Maximum priority a process can have.  */
++
++/* The type of the WHICH argument to `getpriority' and `setpriority',
++   indicating what flavor of entity the WHO argument specifies.  */
++enum __priority_which
++{
++  PRIO_PROCESS = 0,		/* WHO is a process ID.  */
++#define PRIO_PROCESS PRIO_PROCESS
++  PRIO_PGRP = 1,		/* WHO is a process group ID.  */
++#define PRIO_PGRP PRIO_PGRP
++  PRIO_USER = 2			/* WHO is a user ID.  */
++#define PRIO_USER PRIO_USER
++};
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/setjmp.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/setjmp.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/setjmp.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/setjmp.h	2026-11-11 20:46:49
+@@ -0,0 +1,19 @@
++/* Define the machine-dependent type `jmp_buf'.  ST20 (gcc-t800) version.
++   setjmp.ast saves the Wptr of the setjmp caller (after the return) and the return Iptr;
++   no registers survive a call on the ST20, so that is the whole context.  */
++#ifndef _SETJMP_H
++# error "Never include <bits/setjmp.h> directly; use <setjmp.h> instead."
++#endif
++
++#ifndef _ASM
++typedef struct
++  {
++    int *__wptr;	/* Wptr of the caller after setjmp returns */
++    void *__iptr;	/* return address */
++  } __jmp_buf[1];
++#endif
++
++/* Test if longjmp to JMPBUF would unwind the frame
++   containing a local variable at ADDRESS.  */
++#define _JMPBUF_UNWINDS(jmpbuf, address) \
++  ((void *) (address) < (void *) (jmpbuf)->__wptr)
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/syscalls.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/syscalls.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/syscalls.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/syscalls.h	2026-11-11 20:46:29
+@@ -0,0 +1,19 @@
++#ifndef _BITS_SYSCALLS_H
++#define _BITS_SYSCALLS_H
++#ifndef _SYSCALL_H
++# error "Never use <bits/syscalls.h> directly; include <sys/syscall.h> instead."
++#endif
++
++#include <features.h>
++
++/* Do something very evil for now.  Until we create our own syscall
++ * macros, short circuit bits/sysnum.h  and use asm/unistd.h instead */
++#include <asm/unistd.h>
++
++/* This includes the `__NR_<name>' syscall numbers taken from the Linux kernel
++ * header files.  It also defines the traditional `SYS_<name>' macros for older
++ * programs.  */
++#include <bits/sysnum.h>
++
++#endif /* _BITS_SYSCALLS_H */
++
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/bits/wordsize.h uClibc-0.9.26/libc/sysdeps/linux/st20/bits/wordsize.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/bits/wordsize.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/bits/wordsize.h	2026-11-11 20:46:29
+@@ -0,0 +1,19 @@
++/* Copyright (C) 1999 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
++
++#define __WORDSIZE	32
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/crt0.ast uClibc-0.9.26/libc/sysdeps/linux/st20/crt0.ast
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/crt0.ast	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/crt0.ast	2026-11-11 20:46:49
+@@ -0,0 +1,42 @@
++// libc/sysdeps/linux/st20/crt0.ast - start of a uClinux/ST20 flat (bFLT) program, uClibc
++//
++// Linked at 0 = the first byte after the 64-byte bFLT header; text, data, bss back to back
++// (created in that order).  The kernel enters @@hook with Wptr = sp:
++// sp[0] = argc, sp[1..argc] = argv[], 0, envp[], 0 (fs/binfmt_flat.c, ST20 has no
++// argv/envp pointers on the stack).  gcc-t800: arguments 1..3 in Areg, Breg, Creg.
++.text
++.data
++.bss
++.text
++.globl text@@start;
++.globl text@@size;
++.globl data@@start;
++.globl data@@size;
++.globl bss@@start;
++.globl bss@@size;
++data@@start = text@@start + text@@size
++bss@@start = data@@start + data@@size
++
++// segment ends, read from the link map by tools/mkflat.py
++.globl __etext;
++__etext = text@@start + text@@size
++.globl __edata;
++__edata = data@@start + data@@size
++.globl __end;
++__end = bss@@start + bss@@size
++
++.globl ___uClibc_main;
++.globl @@hook;
++@@hook:
++	.need __etext
++	.need __edata
++	.need __end
++	ldl 0		// envp = &argv[argc + 1]
++	adc 2
++	ldlp 0
++	wsub
++	ldlp 1		// argv
++	ldl 0		// argc
++	call ___uClibc_main	// __uClibc_main(argc, argv, envp), does not return
++LC1:
++	j LC1
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/setjmp.ast uClibc-0.9.26/libc/sysdeps/linux/st20/setjmp.ast
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/setjmp.ast	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/setjmp.ast	2026-11-11 20:46:49
+@@ -0,0 +1,69 @@
++// libc/sysdeps/linux/st20/setjmp.ast - setjmp/longjmp for uClibc on uClinux/ST20
++// (gcc-t800 generic model).  After `call`: W[0] = return Iptr, W[1..3] = arguments.
++// __jmpbuf[0] = the caller's Wptr after the return (W + 4 words), [1] = return Iptr.
++// No registers survive a call, so that is the whole machine context; the signal mask
++// part is done by __sigjmp_save (C), called with our own W as its caller's frame.
++// lit: one global label per fragment, aliases are assignments.
++.text
++.globl ___sigjmp_save;
++
++// int __sigsetjmp(jmp_buf env, int savemask)
++.globl ___sigsetjmp;
++___sigsetjmp:
++	ldl 0
++	ldl 1
++	stnl 1
++	ldlp 4
++	ldl 1
++	stnl 0
++	ldl 2		// savemask
++	ldl 1		// env
++	call ___sigjmp_save	// returns 0
++	ret
++
++// int setjmp(jmp_buf env) = __sigsetjmp(env, 1)
++.globl _setjmp;
++_setjmp:
++	ldl 0
++	ldl 1
++	stnl 1
++	ldlp 4
++	ldl 1
++	stnl 0
++	ldc 1
++	ldl 1
++	call ___sigjmp_save
++	ret
++
++// int _setjmp(jmp_buf env) = __sigsetjmp(env, 0)
++.globl __setjmp;
++__setjmp:
++	ldl 0
++	ldl 1
++	stnl 1
++	ldlp 4
++	ldl 1
++	stnl 0
++	ldc 0
++	ldl 1
++	call ___sigjmp_save
++	ret
++
++// void __longjmp(__jmp_buf env, int val): continue at env[1] with Wptr = env[0] and
++// Areg = val (common/longjmp.c already made it nonzero), by building a call frame below
++// env[0] whose word 0 is the Iptr and returning through it.
++.globl ___longjmp;
++___longjmp:
++	ldl 1
++	ldnl 1
++	ldl 1
++	ldnl 0
++	adc -16
++	stnl 0
++	ldl 2
++	ldl 1
++	ldnl 0
++	adc -16
++	gajw
++	rev
++	ret
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/sys/ucontext.h uClibc-0.9.26/libc/sysdeps/linux/st20/sys/ucontext.h
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/sys/ucontext.h	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/sys/ucontext.h	2026-11-11 20:51:54
+@@ -0,0 +1,49 @@
++/* sys/ucontext.h for uClinux/ST20: the user state at a signal is Wptr, Iptr, Areg, Breg,
++   Creg (arch/st20/kernel/signal.c); getcontext and friends are not implemented. */
++#ifndef _SYS_UCONTEXT_H
++#define _SYS_UCONTEXT_H	1
++
++#include <features.h>
++#include <signal.h>
++
++typedef int greg_t;
++
++/* Number of general registers.  */
++#define NGREG	5
++
++/* Container for all general registers.  */
++typedef greg_t gregset_t[NGREG];
++
++#ifdef __USE_GNU
++enum
++{
++  REG_WPTR = 0,
++#define REG_WPTR	REG_WPTR
++  REG_IPTR = 1,
++#define REG_IPTR	REG_IPTR
++  REG_AREG = 2,
++#define REG_AREG	REG_AREG
++  REG_BREG = 3,
++#define REG_BREG	REG_BREG
++  REG_CREG = 4
++#define REG_CREG	REG_CREG
++};
++#endif
++
++/* Context to describe whole processor state.  */
++typedef struct
++  {
++    gregset_t gregs;
++  } mcontext_t;
++
++/* Userlevel context.  */
++typedef struct ucontext
++  {
++    unsigned long int uc_flags;
++    struct ucontext *uc_link;
++    stack_t uc_stack;
++    mcontext_t uc_mcontext;
++    __sigset_t uc_sigmask;
++  } ucontext_t;
++
++#endif /* sys/ucontext.h */
+diff -urN -x *.o -x *.a -x .config* -x .depend -x *.cmd -x include -x lib -x conf -x mconf -x *.so -x lex.zconf.c -x zconf.tab.* -x lkc_defs.h -x busybox -x busybox.links -x Makefile -x .hdepend -x interp.c uClibc-0.9.26/libc/sysdeps/linux/st20/vfork.ast uClibc-0.9.26/libc/sysdeps/linux/st20/vfork.ast
+--- uClibc-0.9.26/libc/sysdeps/linux/st20/vfork.ast	1970-01-01 01:00:00
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/vfork.ast	2026-11-12 02:05:25
+@@ -0,0 +1,47 @@
++// libc/sysdeps/linux/st20/vfork.ast - vfork() (and fork(): no MMU, fork = vfork)
++//
++// Called like any function: W[0] = return Iptr, W[1..3] are this function's (argument
++// slots).  It makes a 4-word frame below W for the system call (W'[0] = Lret, W'[1] =
++// __NR_vfork) and jumps (gcall) into the kernel entry stored at 0xc0000000, which takes
++// W' as the caller's frame and continues as `ret` from it would: at Lret with Wptr = W
++// and Areg = the result.  The vfork child continues the same way on its copy of the stack
++// (arch/st20/kernel/process.c copy_vfork_stack).  Signal frames go below Wptr, i.e. over
++// W', which is dead by then; W[1] (ours) holds the result.  A result in -4095..-1 is an
++// error: errno = -result, return -1.
++.globl __errno;
++.text
++.globl _vfork;
++_vfork:
++	ajw -4
++	ldc 190		// __NR_vfork
++	stl 1
++	ldc Lret-Lh
++	ldpi
++Lh:
++	stl 0		// W'[0] = Lret: the kernel returns there
++	ldc -1073741824	// 0xc0000000: the kernel entry pointer
++	ldnl 0
++	gcall
++Lret:
++	stl 1		// Wptr = W again (kernel `ret` from W'): W[1] = result
++	ldl 1
++	ldc -4096
++	gtu		// result >u -4096: an error code
++	cj Lok
++	ldc 0
++	ldl 1
++	diff		// -result
++	ldc __errno-Le
++	ldpi
++Le:
++	stnl 0		// errno (uClibc's _errno)
++	ldc -1
++	ret
++Lok:
++	ldl 1
++	ret
++
++.globl _fork;
++_fork = _vfork
++.globl ___libc_fork;
++___libc_fork = _vfork
+--- uClibc-0.9.26/include/features.h
++++ uClibc-0.9.26/include/features.h
+@@ -373,7 +373,17 @@
+ 
+ /* Some nice features only work properly with ELF */
+ #if defined _LIBC 
+-#if defined __HAVE_ELF__
++#if defined __transputer__
++/* ST20 (gcc-t800, ttools ast/lit): no weak symbols and no alias attribute; an alias is
++   an assembler assignment (one global label per lit fragment, so not a second label).
++   The pointer makes gcc emit NAME when it is a static inline function (syscalls.c). */
++#  define strong_alias(name, aliasname) _strong_alias (name, aliasname)
++#  define weak_alias(name, aliasname) _strong_alias (name, aliasname)
++#  define _strong_alias(name, aliasname) \
++	__asm__(".globl _" #aliasname ";\n_" #aliasname " = _" #name); \
++	static void *__st20_alias_##aliasname __attribute__ ((unused)) = (void *) &name;
++#  define link_warning(symbol, msg)
++#elif defined __HAVE_ELF__
+ /* Define ALIASNAME as a weak alias for NAME. */
+ #  define weak_alias(name, aliasname) _weak_alias (name, aliasname)
+ #  define _weak_alias(name, aliasname) \
+--- uClibc-0.9.26/libc/unistd/Makefile
++++ uClibc-0.9.26/libc/unistd/Makefile
+@@ -29,6 +29,8 @@
+ 
+ ifeq ($(strip $(UCLIBC_HAS_MMU)),y)
+ 	CSRC += daemon.c
++else
++	# exec*() without an MMU allocate argv with mmap (exec.c)
+ 	MOBJ1 += __exec_alloc.o
+ endif
+ 
+--- /dev/null
++++ uClibc-0.9.26/libc/sysdeps/linux/st20/Makefile
+@@ -0,0 +1,59 @@
++# Makefile for uClibc, ST20 (uClinux/ST20, gcc-2.7.2-t800 + ttools ast)
++#
++# Copyright (C) 2000-2003 Erik Andersen <andersen@uclibc.org>
++#
++# This program is free software; you can redistribute it and/or modify it under
++# the terms of the GNU Library General Public License as published by the Free
++# Software Foundation; either version 2 of the License, or (at your option) any
++# later version.
++
++TOPDIR=../../../../
++include $(TOPDIR)Rules.mak
++
++# hand-written assembly is *.ast, assembled by ast (no preprocessor)
++AST=ast
++
++UCLIBC_CTOR_DTOR=n
++
++CRT0_OBJ = crt0.o
++CTOR_TARGETS=$(TOPDIR)lib/crti.o $(TOPDIR)lib/crtn.o
++
++SSRC=setjmp.ast vfork.ast
++SOBJS=$(patsubst %.ast,%.o, $(SSRC))
++
++CSRC=
++COBJS=$(patsubst %.c,%.o, $(CSRC))
++
++OBJS=$(SOBJS) $(COBJS)
++
++all: $(OBJS) $(LIBC)
++
++$(LIBC): ar-target
++
++ar-target: $(OBJS) $(CRT0_OBJ) $(CTOR_TARGETS)
++	$(AR) $(ARFLAGS) $(LIBC) $(OBJS)
++	$(INSTALL) -d $(TOPDIR)lib/
++	cp $(CRT0_OBJ) $(TOPDIR)lib/
++	cp $(TOPDIR)lib/crt0.o $(TOPDIR)lib/crt1.o
++
++$(CRT0_OBJ): crt0.ast
++	$(AST) -o $@ $<
++
++$(SOBJS): %.o : %.ast
++	$(AST) -o $@ $<
++
++$(COBJS): %.o : %.c
++	$(CC) $(CFLAGS) -c $< -o $@
++
++# no .init/.fini sections in lit: empty crti.o/crtn.o archives for the gcc driver
++$(TOPDIR)lib/crti.o:
++	$(INSTALL) -d $(TOPDIR)lib/
++	$(AR) $(ARFLAGS) $(TOPDIR)lib/crti.o
++$(TOPDIR)lib/crtn.o:
++	$(INSTALL) -d $(TOPDIR)lib/
++	$(AR) $(ARFLAGS) $(TOPDIR)lib/crtn.o
++
++headers:
++
++clean:
++	$(RM) *.[oa] *~ core

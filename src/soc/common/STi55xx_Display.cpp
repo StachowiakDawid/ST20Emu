@@ -54,7 +54,8 @@ Colour paletteColour(uint32_t entry, bool trueColour, bool antiAlias, uint32_t m
   Colour colour{};
   bool blend;
   if (trueColour) {
-    colour = {static_cast<uint8_t>(entry >> 16), static_cast<uint8_t>(entry), static_cast<uint8_t>(entry >> 8), 1.0};
+    /* STi5512 datasheet tables 92/93: Cr[7:0] bits 7:0, Cb[7:0] bits 15:8, Y bits 23:16 */
+    colour = {static_cast<uint8_t>(entry >> 16), static_cast<uint8_t>(entry >> 8), static_cast<uint8_t>(entry), 1.0};
     if (antiAlias) {
       colour.alpha = ((entry >> 24) & 0x3f) / 63.0;
       blend = false;
@@ -64,8 +65,10 @@ Colour paletteColour(uint32_t entry, bool trueColour, bool antiAlias, uint32_t m
   } else {
     uint8_t cb = (entry >> 4) & 0xf;
     uint8_t cr = entry & 0xf;
-    colour = {static_cast<uint8_t>(((entry >> 10) & 0x3f) << 2), static_cast<uint8_t>(cb << 4 | cb),
-              static_cast<uint8_t>(cr << 4 | cr), 1.0};
+    /* table 94: 4-bit chroma with 0x8 = neutral (table 95), so scale to 8 bits as c << 4
+       (0x8 -> 0x80); c << 4 | c would make 0x8 -> 0x88 and tint every grey */
+    colour = {static_cast<uint8_t>(((entry >> 10) & 0x3f) << 2), static_cast<uint8_t>(cb << 4),
+              static_cast<uint8_t>(cr << 4), 1.0};
     blend = (entry >> 8) & 1;
   }
   if (!antiAlias && blend && mixWeight < 15) colour.alpha = mixWeight / 16.0;

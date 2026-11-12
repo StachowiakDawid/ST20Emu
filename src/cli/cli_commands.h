@@ -38,6 +38,7 @@ CliError cmd_stop(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_ir(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_front_panel(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_led(CliEngine &engine, std::span<const std::string_view> args);
+CliError cmd_asc(CliEngine &engine, std::span<const std::string_view> args);
 CliError cmd_screen(CliEngine &engine, std::span<const std::string_view> args);
 
 // registers

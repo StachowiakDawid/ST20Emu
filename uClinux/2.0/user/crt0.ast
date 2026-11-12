@@ -1,0 +1,39 @@
+// user/crt0.ast - start of a uClinux/ST20 flat (bFLT) program
+//
+// Linked at 0 = the first byte after the 64-byte bFLT header; text, data, bss back to back
+// (created in that order).  The kernel enters @@hook with Wptr = sp:
+// sp[0] = argc, sp[1..] = argv[], 0, envp[], 0 (fs/binfmt_flat.c).
+.text
+.data
+.bss
+.text
+.globl text@@start;
+.globl text@@size;
+.globl data@@start;
+.globl data@@size;
+.globl bss@@start;
+.globl bss@@size;
+data@@start = text@@start + text@@size
+bss@@start = data@@start + data@@size
+
+// segment ends, read from the link map by tools/mkflat.py
+.globl __etext;
+__etext = text@@start + text@@size
+.globl __edata;
+__edata = data@@start + data@@size
+.globl __end;
+__end = bss@@start + bss@@size
+
+.globl _main;
+.globl __exit;
+.globl @@hook;
+@@hook:
+	.need __etext
+	.need __edata
+	.need __end
+	ldlp 1		// argv
+	ldl 0		// argc
+	call _main
+	call __exit	// exit(main(argc, argv))
+L1:
+	j L1

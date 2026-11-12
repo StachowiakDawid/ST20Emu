@@ -90,10 +90,44 @@ described in [src/soc/sti5512/README.md](src/soc/sti5512/README.md) and
 `--board dsr9500` (with `--soc sti5512`) adds the Samsung DSR9500's board devices and the
 `fp`, `ir` and `led` commands. See [src/board/README.md](src/board/README.md).
 
+### Typing into a UART from the CLI or a script
+
+`asc PORT TEXT...` queues TEXT (words joined by single spaces) and a newline on the receiver
+of ASC PORT (0-3), e.g. `asc 3 ls -l` for the uClinux shell on the DSR9500's ASC3. It works at
+the interactive prompt and in `--script` files.
+
 ### Serial Console
 
 Bytes the firmware sends through the ASC ports are printed line by line as `ASCn> text`
 (to the terminal, or to the batch log).
+
+`--console PORT` (0-3) turns the terminal into that port's serial terminal: the firmware runs
+freely, keys typed go straight into the port's receive queue, and its output is written to the
+terminal unchanged (other ports keep the `ASCn>` lines). Press `Ctrl-]` to quit; the run summary
+is printed and the emulator exits with `0`. For example, the uClinux shell on the DSR9500's ASC3:
+
+```bash
+./builddir-release/st20emu --soc sti5512 --board dsr9500 --firmware uClinux/2.0/dsr9500-uclinux.bin --console 3
+```
+
+The terminal is put into raw input mode (restored on exit, also when killed by a signal), so
+every key is sent as typed: Enter as CR (a Linux tty's `ICRNL` turns it into a newline),
+Backspace as DEL, `Ctrl-C` as `0x03` for the target. Typed input is read every 100,000
+instructions. Input may also be piped (`(sleep 7; echo 'echo hi') | st20emu ... --console 3`);
+after its end the firmware keeps running. Add `--run COUNT` to stop after COUNT instructions.
+
+`--serial-tcp PORT:TCP` serves ASC PORT's serial line on `127.0.0.1:TCP` (one client at a time;
+`0` picks a free port, printed at startup). While a client is connected the port's output goes to
+it unchanged instead of the `ASCn>` lines, and what it sends goes into the port's receive queue
+(polled every 16,000 instructions); without a client the port prints as usual. It combines with
+`--script`, `--run` and the prompt, and with `--console` on another port. For example SLIP between
+uClinux 2.4 and a host program (`uClinux/2.4/work/net/slip_host.py`):
+
+```bash
+./builddir-release/st20emu --soc sti5512 --board dsr9500 --firmware dsr9500-uclinux24-net.bin \
+    --serial-tcp 3:5555 --script slip.script &
+python3 slip_host.py --port 5555
+```
 
 ### Emulator commands
 

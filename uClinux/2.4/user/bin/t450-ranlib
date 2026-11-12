@@ -1,0 +1,3 @@
+#!/bin/sh
+# ranlib for uClibc (libc/Makefile runs $(CROSS)ranlib): lit needs no archive index
+exit 0
